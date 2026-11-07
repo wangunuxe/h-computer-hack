@@ -15,7 +15,8 @@ Scripted hero scenario (RER B → CDG 2E) runs entirely in the browser — no ke
 | `R` | restart |
 | `M` | mute voice + SFX |
 | `F` | fullscreen |
+| `P` | toggle the computer-use pipeline scene |
 | `H` | hide presenter HUD |
 | `Esc` | back to title |
 
-URL flags: `?autostart` `?nocold` (skip cold open) `?speed=1.5` `?mute` `?source=live&ws=ws://host:8787/ws/session/demo` (drive the stage from the real backend over the stage event protocol).
+URL flags: `?scene=pipeline` (static computer-use diagram, for slides) `?autostart` `?nocold` (skip cold open) `?speed=1.5` `?mute` `?source=live&ws=ws://host:8787/ws/session/demo` (drive the stage from the real backend over the stage event protocol).

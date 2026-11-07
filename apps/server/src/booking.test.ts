@@ -8,7 +8,8 @@ const answer = { ref: 'PAS-123', pickup_time: '2027-01-15T12:15:00+01:00', picku
 const stub = 'https://shuttle.example/stub-payment/order-123?mode=no-stripe-key';
 const stripe = 'https://checkout.stripe.com/c/pay/cs_test_123#long-fragment';
 const observation = (url?: string): HaiAgents.SessionEvent => ({ type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', metadata: url ? { url } : {} } });
-const imageObservation = (image: unknown, url?: string): HaiAgents.SessionEvent => ({ type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', metadata: { image, ...(url ? { url } : {}) } } });
+const imageObservation = (image: unknown, url?: string): HaiAgents.SessionEvent => ({ type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', image, metadata: url ? { url } : {} } });
+const metadataImageObservation = (image: unknown, url?: string): HaiAgents.SessionEvent => ({ type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', metadata: { image, ...(url ? { url } : {}) } } });
 const call = async (tools: readonly Tool[], name: string, args: Record<string, unknown>) => tools.find((item) => item.name === name)!.fn(args);
 const confirmationFields = { pickup_date: '2027-01-15', pickup_time: '12:15', total_price: 65, currency: 'EUR' };
 const confirm = (tools: readonly Tool[]) => call(tools, 'confirm_with_user', { summary: 'Karim to CDG, EUR 65, guide dog', ...confirmationFields });
@@ -54,6 +55,19 @@ describe('H booking runner', () => {
     mock.input.onFrame = vi.fn();
     await runBooking(mock.input, mock.client);
     expect(mock.input.onFrame).toHaveBeenCalledWith({ image: expected, url: 'https://shuttle.example/fr/reservation/draft/route', step: 0 });
+  });
+  it('falls back to a metadata image only when the top-level image is absent', async () => {
+    const mock = setup(async function* (tools) {
+      yield metadataImageObservation('metadata-frame', 'https://shuttle.example/fr/reservation/draft/route');
+      await confirm(tools); yield observation(stub); await handoff(tools);
+    });
+    mock.input.onFrame = vi.fn();
+    await runBooking(mock.input, mock.client);
+    expect(mock.input.onFrame).toHaveBeenCalledWith({
+      image: 'data:image/png;base64,metadata-frame',
+      url: 'https://shuttle.example/fr/reservation/draft/route',
+      step: 0,
+    });
   });
   it('ignores malformed and oversized image values without interrupting booking', async () => {
     const mock = setup(async function* (tools) {

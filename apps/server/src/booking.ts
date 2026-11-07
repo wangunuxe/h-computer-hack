@@ -158,10 +158,17 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
           if (event.type === 'AgentEvent') {
             const { kind } = z.object({ kind: z.string() }).parse(event.data);
             if (kind === 'observation_event') {
-              const observation = z.object({ metadata: z.record(z.string(), z.unknown()).optional() }).safeParse(event.data);
+              const observation = z.object({
+                image: z.unknown().optional(),
+                metadata: z.record(z.string(), z.unknown()).optional(),
+              }).passthrough().safeParse(event.data);
               const metadata = observation.success ? observation.data.metadata : undefined;
               observedUrl = typeof metadata?.url === 'string' ? metadata.url : undefined;
-              const image = normalizeImage(metadata?.image);
+              const hasTopLevelImage = observation.success && Object.hasOwn(event.data as object, 'image');
+              const imageContent = observation.success
+                ? hasTopLevelImage ? observation.data.image : metadata?.image
+                : undefined;
+              const image = normalizeImage(imageContent);
               if (image) {
                 const now = Date.now();
                 if (now - lastFrameAt >= 1000) {

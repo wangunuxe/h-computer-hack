@@ -346,7 +346,7 @@ let monitorClosed=false;
 let sessionActive=false,sessionStartedAt=0,lastServerStage='',liveTrip={},liveMetricsSteps=0,liveCostUsd=null;
 let liveAgentLines=0,liveLastAgentText='',liveAgentView='',livePayment=null,liveBooking=null;
 let liveFrameImage='',liveFrameUrl='',liveFrameVisible=false,liveError=false,liveStatusSignature='';
-let liveExecStarted=false,liveExecPhase='idle',liveExecElapsed=0,liveExecQueue=[];
+let liveExecStarted=false,liveExecPhase='idle',liveExecElapsed=0,liveExecLastAt=performance.now(),liveExecQueue=[];
 
 if(LIVE){
   $('play').disabled=true;$('prev').disabled=true;$('next').disabled=true;$('restart').disabled=true;$('speed').disabled=true;
@@ -438,24 +438,28 @@ function liveCaption(index){
 function clearLiveBooking(){
   liveTrip={};liveMetricsSteps=0;liveCostUsd=null;liveAgentLines=0;liveLastAgentText='';
   liveAgentView='';livePayment=null;liveBooking=null;liveFrameImage='';liveFrameUrl='';liveFrameVisible=false;
-  liveExecStarted=false;liveExecPhase='idle';liveExecElapsed=0;liveExecQueue=[];
+  liveExecStarted=false;liveExecPhase='idle';liveExecElapsed=0;liveExecLastAt=performance.now();liveExecQueue=[];
   execState={ph:null,pt:0,k:0,j:0,lastSay:-1,lastStep:-1};mazeA=0;focusExec=false;
   bwShot.style.display='none';bwShot.removeAttribute('src');$('bwUrl').textContent='about:blank';
   $('srBox').hidden=true;$('agBox').hidden=true;$('legend').hidden=true;
   liveStatusSignature='';
 }
 function setLiveExecPhase(phase){
-  liveExecPhase=phase;liveExecElapsed=0;execState.ph=phase;execState.pt=0;
+  liveExecPhase=phase;liveExecElapsed=0;liveExecLastAt=performance.now();execState.ph=phase;execState.pt=0;
   if(phase==='in'){execState.k=0;execState.j=0;$('srBox').hidden=true;$('agBox').hidden=true;$('legend').hidden=true}
   if(phase==='sr'){$('srBox').hidden=false;$('agBox').hidden=true}
   if(phase==='gap'){$('srBox').hidden=false;$('agBox').hidden=true}
   if(phase==='ag'){$('agBox').hidden=false;$('agCount').textContent=`${liveSteps()} / 60`}
-  if(phase==='out'){focusExec=false;camT={x:0,y:0,z:1}}
+  if(phase==='out'){
+    focusExec=false;liveExecQueue=[];$('srBox').hidden=true;$('agBox').hidden=true;$('legend').hidden=true;
+    camT={x:0,y:0,z:1};cam={...camT};
+  }
 }
-function updateLiveExec(dt){
+function updateLiveExec(now){
+  const phaseDelta=Math.max(0,now-liveExecLastAt);liveExecLastAt=now;
   if(si===4){
     if(['in','sr','gap'].includes(liveExecPhase)){
-      liveExecElapsed+=dt;
+      liveExecElapsed+=phaseDelta;
       const duration=liveExecPhase==='in'?1000:liveExecPhase==='sr'?5600:1500;
       if(liveExecElapsed>=duration){
         const next=liveExecQueue.shift();
@@ -467,11 +471,11 @@ function updateLiveExec(dt){
     if(liveExecPhase==='gap'){execState.k=SR_N;$('srCount').textContent=`${SR_N} / ${MAZE.length}`}
     if(liveExecPhase==='ag'){execState.j=Math.min(23,liveSteps());$('agCount').textContent=`${liveSteps()} / 60`}
     const active=['in','sr','gap','ag'].includes(liveExecPhase);
-    mazeA=Math.max(0,Math.min(1,mazeA+(active?1:-1)*dt/600));
+    mazeA=Math.max(0,Math.min(1,mazeA+(active?1:-1)*phaseDelta/600));
   }else if(liveExecPhase==='out'){
-    liveExecElapsed+=dt;mazeA=Math.max(0,mazeA-dt/600);
+    liveExecElapsed+=phaseDelta;mazeA=Math.max(0,mazeA-phaseDelta/600);
     if(liveExecElapsed>=1000){setLiveExecPhase('idle');mazeA=0;$('srBox').hidden=true;$('agBox').hidden=true;$('legend').hidden=true}
-  }else mazeA=Math.max(0,mazeA-dt/600);
+  }else mazeA=Math.max(0,mazeA-phaseDelta/600);
 }
 function setLiveStage(stage){
   const indices={LISTEN:0,UNDERSTAND:1,CLARIFY:1,RESEARCH:2,PRESENT:3,CHOOSE:3,EXECUTE:4,CONFIRM:5,HANDOFF:6,AWAIT_PAYMENT:6,DONE:7};
@@ -607,7 +611,7 @@ function connectMonitor(){
 
 function tick(now){
   const dt=Math.min(64,now-last);last=now;clock+=dt;
-  if(LIVE)updateLiveExec(dt);
+  if(LIVE)updateLiveExec(now);
   else if(playing&&si<STAGES.length){te+=dt*speed;const s=STAGES[si];
     if(s.exec){if(updExec(dt*speed))enter(si+1)}else if(te>=s.dur)enter(si+1)}
   if(!LIVE&&!(si>=0&&STAGES[si]&&STAGES[si].exec)){mazeA=Math.max(0,mazeA-dt/600)}

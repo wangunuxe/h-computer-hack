@@ -95,8 +95,8 @@ export class VoilaSession {
       return;
     }
     if (!this.profile) { this.error('Send hello first.'); return; }
-      if (event.type === 'final_transcript' && ['LISTEN', 'DONE'].includes(this.stage)) {
-        if (!event.text.trim()) { this.error('Transcript must not be empty.'); return; }
+    if (event.type === 'final_transcript' && ['LISTEN', 'DONE'].includes(this.stage)) {
+      if (!event.text.trim()) { this.error('Transcript must not be empty.'); return; }
       this.observeSafely({ type: 'transcript', text: event.text });
       const restarting = this.stage === 'DONE';
       this.resetTrip();

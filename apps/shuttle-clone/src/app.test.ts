@@ -40,6 +40,16 @@ async function complete(app: App, easy = false) {
 }
 
 describe('four-step booking', () => {
+  it('shows a manual payment retry without a countdown after cancellation', async () => {
+    const { app } = setup();
+    const { paymentPath } = await complete(app);
+    const body = await (await app.request(paymentPath + '?cancelled=1')).text();
+    expect(body).toContain('Payment cancelled.');
+    expect(body).toContain('Pay via Credit Card');
+    expect(body).toContain('id="checkout-form"');
+    expect(body).not.toContain('id="countdown"');
+    expect(body).toContain('UNPAID');
+  });
   it('rejects the lat/lng trap even when visible addresses are filled', async () => {
     const { app, store } = setup();
     const base = await start(app);
@@ -136,7 +146,7 @@ describe('payments', () => {
     });
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       success_url: `http://localhost:3456/fr/reservation/confirmation/${order.id}`,
-      cancel_url: `http://localhost:3456/fr/reservation/payment/${order.id}`,
+      cancel_url: `http://localhost:3456/fr/reservation/payment/${order.id}?cancelled=1`,
     }), expect.anything());
     expect(JSON.stringify(create.mock.calls)).not.toContain('attacker.example');
   });

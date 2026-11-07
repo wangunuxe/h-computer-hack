@@ -65,10 +65,12 @@ function summary(order: Order) {
     <dt>Operator phone</dt><dd>${operatorPhone}</dd><dt>Status</dt><dd>${order.paid ? 'PAID' : 'UNPAID'}</dd>
     <dt>Notes</dt><dd>${order.info.notes || 'None'}</dd></dl>`;
 }
-export function paymentPage(order: Order) {
+export function paymentPage(order: Order, cancelled = false) {
   return page('Step 4 — Payment', html`${summary(order)}
     <p>Your order has already been created. It remains unpaid until payment is confirmed.</p>
-    <p>Redirecting to payment in <span id="countdown">2</span> seconds.</p>
+    ${cancelled
+      ? html`<p class="error">Payment cancelled. Your order remains unpaid. Use the button below to try again.</p>`
+      : html`<p>Redirecting to payment in <span id="countdown">2</span> seconds.</p>`}
     <form id="checkout-form" method="post" action="/checkout/${order.id}">
     <button type="submit">Pay via Credit Card</button></form>
     <p><a href="/fr/reservation/confirmation/${order.id}">View booking confirmation</a></p>`);

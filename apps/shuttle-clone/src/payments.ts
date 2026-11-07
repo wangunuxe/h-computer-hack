@@ -23,7 +23,7 @@ export function createPayments(env: NodeJS.ProcessEnv = process.env, client?: St
         client_reference_id: order.id,
         metadata: { orderId: order.id },
         success_url: `${baseUrl}/fr/reservation/confirmation/${order.id}`,
-        cancel_url: `${baseUrl}/fr/reservation/payment/${order.id}`,
+        cancel_url: `${baseUrl}/fr/reservation/payment/${order.id}?cancelled=1`,
       }, { idempotencyKey: `checkout-${order.id}` });
       if (!session.url) throw new Error('Stripe did not return a Checkout URL');
       return session.url;

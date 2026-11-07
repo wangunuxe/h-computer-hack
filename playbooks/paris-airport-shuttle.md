@@ -199,6 +199,10 @@ button submits immediately. This redirects to `https://checkout.stripe.com/...`
 when configured, or `/stub-payment/<order-id>?mode=no-stripe-key` without a key.
 The stub says **FAKE PAYMENT — LOCAL STUB** and cannot take payment.
 
+Cancelling Stripe returns to the payment URL with `?cancelled=1`. It shows
+**Payment cancelled. Your order remains unpaid.** There is NO countdown or
+automatic redirect on this return; **Pay via Credit Card** remains a manual retry.
+
 Stop agent interaction at handoff; never enter card details or pay.
 Confirmation: `/fr/reservation/confirmation/<order-id>` shows reference, pickup,
 time, price, operator phone (+33 1 84 80 00 00), paid/unpaid status, notes.

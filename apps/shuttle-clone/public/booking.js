@@ -33,7 +33,7 @@ jQuery(function ($) {
     });
   });
   const form = document.getElementById('checkout-form');
-  if (form) {
+  if (form && document.getElementById('countdown')) {
     let seconds = 2;
     const timer = setInterval(function () {
       seconds -= 1;

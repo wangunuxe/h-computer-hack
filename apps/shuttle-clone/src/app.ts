@@ -97,7 +97,7 @@ export function createApp({
   });
   app.get('/fr/reservation/payment/:orderId', (c) => {
     const order = store.orders.get(c.req.param('orderId'));
-    return order ? c.html(paymentPage(order)) : c.text('Order not found', 404);
+    return order ? c.html(paymentPage(order, c.req.query('cancelled') === '1')) : c.text('Order not found', 404);
   });
   app.post('/checkout/:orderId', async (c) => {
     const order = store.orders.get(c.req.param('orderId'));

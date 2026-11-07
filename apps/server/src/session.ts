@@ -113,6 +113,7 @@ export class VoilaSession {
       this.send({ type: 'say', text: this.language.startsWith('fr') ? 'Vos informations sont effacées de cet appareil et de cette session.' : 'Your details are cleared from this device and session.' }); return;
     }
     if ((event.type === 'final_transcript' || event.type === 'user_reply') && /^(stop|arrete|arretez|annule|cancel)[.!? ]*$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim())) { this.stop(); return; }
+    if (event.type === 'user_reply' && ['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) && this.payment && /^\/stub-payment\/[^/]+$/.test(new URL(this.payment.url).pathname) && /^(j ai paye|jai paye|i ve paid|i have paid|i paid)$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim())) { this.handle({ type: 'paid' }); return; }
     if (event.type === 'user_reply' && this.profileCollector) {
       const response = this.profileCollector.reply(event.text);
       this.profile = this.profileCollector.profile;

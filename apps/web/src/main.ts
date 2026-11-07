@@ -7,6 +7,7 @@ import { labels, optionNames, stages } from './labels.js';
 import { bindMicControls } from './mic-controls.js';
 import { recordingDiagnostic, recordingErrorKeys } from './recording-error.js';
 import { ConnectionAttempt, replaceOnForeground } from './connection.js';
+import { SessionStorage } from './session-storage.js';
 import './style.css';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -17,6 +18,10 @@ try { profile = clientProfile(JSON.parse(localStorage.getItem('voila.profile') ?
 if (profile) language = profile.language.startsWith('fr') ? 'fr' : 'en';
 let state = initialState(); let credentials: Credentials | undefined; let socket: WebSocket | undefined;
 let helloSent = false; let connecting = false; let retry: ReturnType<typeof setTimeout> | undefined; let pendingStop = false; let connected = false;
+let queuedTranscript: string | undefined;
+const sessionStorage = new SessionStorage();
+const savedSession = sessionStorage.load();
+if (savedSession) { credentials = { id: savedSession.id, resume_token: savedSession.resume_token }; helloSent = savedSession.helloSent; }
 let attempt: ConnectionAttempt | undefined;
 let recorder: Recorder | undefined; let releasing = false; let audio: AudioContext | undefined;
 let lastSay = ''; let pendingFocus: Stage | undefined;
@@ -53,7 +58,14 @@ function send(event: WebEvent) {
 }
 function sendTranscript(text: string) {
   const event = transcriptEvent(state.stage, text);
-  if (event && send(event)) { $('last-transcript').textContent = text.trim(); $('user-bubble').hidden = false; }
+  if (event?.type === 'final_transcript' && state.stage === 'DONE') {
+    sessionStorage.clear(); queuedTranscript = text;
+    attempt?.cancel(); attempt = undefined; connecting = false;
+    const stale = socket; socket = undefined; stale?.close();
+    credentials = undefined; helloSent = false; state = initialState();
+    render(); void connect(); return;
+  }
+  if (event && send(event)) { if (credentials) sessionStorage.save(credentials, helloSent); $('last-transcript').textContent = text.trim(); $('user-bubble').hidden = false; }
 }
 function connection(ready: boolean) {
   connected = ready; document.body.dataset.connected = String(ready);
@@ -75,6 +87,7 @@ async function connect() {
       const issued: Credentials = await response.json();
       if (attempt !== current) return;
       credentials = issued; helloSent = false;
+      sessionStorage.save(credentials, false);
     }
     const ws = socket = new WebSocket((location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws/session/' + credentials!.id + '?token=' + encodeURIComponent(credentials!.resume_token));
     ws.onopen = () => {
@@ -82,6 +95,8 @@ async function connect() {
       current.clear();
       connection(true);
       if (!helloSent) { send({ type: 'hello', profile: ProfileSchema.parse(profile), gps: null, scenario: ScenarioSchema.safeParse(new URLSearchParams(location.search).get('scenario')).data }); helloSent = true; }
+      sessionStorage.save(credentials!, helloSent);
+      if (queuedTranscript) { const text = queuedTranscript; queuedTranscript = undefined; sendTranscript(text); }
       if (pendingStop) { send({ type: 'stop' }); pendingStop = false; recordingLabel(); }
     };
     ws.onmessage = (message) => {
@@ -101,7 +116,7 @@ async function connect() {
       if (ws !== socket) return;
       current.clear();
       recorder?.cancel(); connection(false); $('connection').textContent = t().disconnected;
-      if (event.code === 4401) { credentials = undefined; helloSent = false; }
+      if (event.code === 4401) { credentials = undefined; helloSent = false; sessionStorage.clear(); }
       clearTimeout(retry); retry = setTimeout(() => void connect(), 1500);
     };
     ws.onerror = () => { if (ws === socket) $('connection').textContent = t().disconnected; };
@@ -114,8 +129,10 @@ document.addEventListener('visibilitychange', () => {
     attempt?.cancel(); attempt = undefined; connecting = false;
     if (replaceOnForeground(socket?.readyState)) { const stale = socket; socket = undefined; stale?.close(); }
     void connect();
-  } else recorder?.cancel();
+  } else { if (credentials) sessionStorage.save(credentials, helloSent); recorder?.cancel(); }
 });
+window.addEventListener('pagehide', () => { if (credentials) sessionStorage.save(credentials, helloSent); });
+setInterval(() => { if (connected && credentials) sessionStorage.save(credentials, helloSent); }, 60_000);
 function recordingLabel() {
   const active = !!recorder && !releasing;
   const busy = releasing || ['UNDERSTAND', 'RESEARCH', 'EXECUTE'].includes(state.stage);
@@ -225,7 +242,7 @@ form.onsubmit = (event) => {
   if (!parsed) { announce(t().invalid, true); return; }
   profile = parsed; language = profile.language === 'fr' ? 'fr' : 'en'; voice.bargeIn(); voice = speech(); unlock();
   try { localStorage.setItem('voila.profile', JSON.stringify(profile)); } catch { announce(t().error, true); }
-  if (helloSent) { recorder?.cancel(); send({ type: 'stop' }); socket?.close(); socket = undefined; credentials = undefined; helloSent = false; state = initialState(); $('user-bubble').hidden = true; }
+  if (helloSent) { sessionStorage.clear(); recorder?.cancel(); send({ type: 'stop' }); socket?.close(); socket = undefined; credentials = undefined; helloSent = false; state = initialState(); $('user-bubble').hidden = true; }
   form.hidden = true; localize(); announce(t().saved); void connect();
 };
 localize(); connection(false); if (profile) void connect();

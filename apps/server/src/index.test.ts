@@ -57,8 +57,8 @@ describe('real WebSocket round-trip', () => {
     if (!running.server.listening) await once(running.server, 'listening');
     const address = running.server.address();
     if (!address || typeof address === 'string') throw new Error('Expected an ephemeral TCP port');
-    const connect = async () => {
-      const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws/session/demo`);
+    const connect = async (token?: string) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws/session/demo${token ? `?token=${encodeURIComponent(token)}` : ''}`);
       const messages: ServerEvent[] = [];
       ws.on('message', (data) => messages.push(ServerEventSchema.parse(JSON.parse(data.toString()))));
       await once(ws, 'open');
@@ -69,14 +69,23 @@ describe('real WebSocket round-trip', () => {
     };
     const first = await connect();
     await first.until(() => first.messages.length > 0);
-    expect(first.messages[0]).toEqual({ type: 'stage', stage: 'LISTEN' });
+    expect(first.messages[0]).toMatchObject({ type: 'stage', stage: 'LISTEN', resume_token: expect.stringMatching(/^[\w-]{43}$/) });
+    const initial = first.messages[0];
+    if (initial?.type !== 'stage' || !initial.resume_token) throw new Error('Expected resume token');
+    for (const token of [undefined, 'incorrect-token']) {
+      const attacker = await connect(token);
+      const [code] = await once(attacker.ws, 'close');
+      expect(code).toBe(4401);
+      expect(first.ws.readyState).toBe(WebSocket.OPEN);
+      expect(attacker.messages).toEqual([]);
+    }
     first.ws.send('{bad json');
     await first.until(() => first.messages.some((e) => e.type === 'error'));
     first.ws.send(JSON.stringify(hello));
     first.ws.send(JSON.stringify({ type: 'final_transcript', text: 'CDG' }));
     await first.until(() => first.messages.some((e) => e.type === 'stage' && e.stage === 'CHOOSE'));
     const session = running.sessions.get('demo');
-    const second = await connect();
+    const second = await connect(initial.resume_token);
     await second.until(() => second.messages.length > 0);
     expect(running.sessions.get('demo')).toBe(session);
     expect(second.messages[0]).toEqual({ type: 'stage', stage: 'CHOOSE' });

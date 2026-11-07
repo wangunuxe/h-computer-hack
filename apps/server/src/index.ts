@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { Hono } from 'hono';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { VoilaSession, type SessionPorts } from './session.js';
 
 const paymentSchema = z.object({ order_id: z.string().min(1), ref: z.string().min(1), status: z.literal('paid') });
+const secureEqual = (a: string, b: string) => timingSafeEqual(createHash('sha256').update(a).digest(), createHash('sha256').update(b).digest());
 
 export function createApp({ sessions = new Map<string, VoilaSession>(), token = process.env.INTERNAL_CALLBACK_TOKEN }: {
   sessions?: Map<string, VoilaSession>; token?: string;
@@ -17,7 +18,7 @@ export function createApp({ sessions = new Map<string, VoilaSession>(), token = 
   app.get('/ws/session/:id', (c) => c.text('WebSocket upgrade required', 426));
   app.post('/internal/payment-completed', async (c) => {
     const provided = c.req.header('authorization') ?? '';
-    if (!token || !timingSafeEqual(createHash('sha256').update(provided).digest(), createHash('sha256').update(`Bearer ${token}`).digest())) {
+    if (!token || !secureEqual(provided, `Bearer ${token}`)) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
     let body: unknown;
@@ -37,24 +38,37 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
 } = {}) {
   const sessions = new Map<string, VoilaSession>();
   const clients = new Map<string, WebSocket>();
+  const resumeTokens = new Map<string, string>();
   const app = createApp({ sessions, token });
   const server = serve({ fetch: app.fetch, port, hostname });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   server.on('upgrade', (request, socket, head) => {
-    const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
+    const url = new URL(request.url ?? '/', 'http://localhost');
+    const pathname = url.pathname;
     const match = /^\/ws\/session\/([^/]+)$/.exec(pathname);
     if (!match) { socket.destroy(); return; }
     const id = match[1]!;
     sockets.handleUpgrade(request, socket, head, (ws) => {
+      ws.on('error', () => (ports?.logger ?? console).error('Session WebSocket error.'));
+      const existing = sessions.get(id);
+      if (existing && !secureEqual(url.searchParams.get('token') ?? '', resumeTokens.get(id)!)) {
+        ws.close(4401, 'Invalid resume token');
+        return;
+      }
+      const resumeToken = resumeTokens.get(id) ?? randomBytes(32).toString('base64url');
+      resumeTokens.set(id, resumeToken);
+      let sendToken = !existing;
       clients.get(id)?.close(1000, 'Session reattached');
       clients.set(id, ws);
       const emit = (event: ServerEvent) => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(event.type === 'stage' && sendToken ? { ...event, resume_token: resumeToken } : event));
+          if (event.type === 'stage') sendToken = false;
+        }
       };
-      const session = sessions.get(id) ?? new VoilaSession(emit, ports);
+      const session = existing ?? new VoilaSession(emit, ports);
       sessions.set(id, session);
       const detach = session.attach(emit);
-      ws.on('error', () => (ports?.logger ?? console).error('Session WebSocket error.'));
       ws.on('close', () => { detach(); if (clients.get(id) === ws) clients.delete(id); });
       ws.on('message', (data, binary) => {
         if (clients.get(id) !== ws) return;

@@ -117,10 +117,16 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
             observedUrl = typeof metadata?.url === 'string' ? metadata.url : undefined;
           }
           if (kind === 'policy_event') {
-            const { content } = z.object({ content: z.string().nullish() }).parse(event.data);
+            const { content, toolReqs } = z.object({
+              content: z.string().nullish(),
+              toolReqs: z.array(z.object({ toolName: z.string(), args: z.record(z.string(), z.unknown()).optional() })).optional(),
+            }).parse(event.data);
             steps++;
             const line = content?.replace(/\s+/g, ' ').trim().slice(0, 240);
-            if (line) input.onProgress(line);
+            const actions = toolReqs?.map(({ toolName, args }) =>
+              typeof args?.element === 'string' ? `${toolName} — ${args.element}` : toolName,
+            ).join('; ');
+            input.onProgress(line || `Step ${steps}: ${actions || 'Working on booking'}`.replace(/\s+/g, ' ').trim().slice(0, 240));
           }
           if (kind === 'error_event') {
             const { error } = z.object({ error: z.string() }).parse(event.data);

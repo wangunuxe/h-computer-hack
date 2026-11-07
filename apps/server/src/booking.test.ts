@@ -175,6 +175,56 @@ describe('H booking runner', () => {
     expect(mock.input.onProgress).toHaveBeenCalledWith('Selecting vehicle');
   });
 
+  it('reports tool-only policy steps like the recorded real H stream', async () => {
+    const mock = setup(async function* (tools) {
+      yield observation('https://shuttle.example/fr/reservation/draft/route');
+      yield {
+        type: 'AgentEvent', timestamp: new Date('2026-11-07T18:00:01Z'),
+        data: {
+          kind: 'policy_event', reasoningContent: null, content: '', validationErrors: [],
+          toolReqs: [{ toolName: 'write', id: 'chatcmpl-tool-write', args: { x: 0.492, y: 0.485, text: 'Gare du Nord', enter: true, element: 'Pickup address input field', overwrite: true } }],
+        },
+      };
+      yield observation('https://shuttle.example/fr/reservation/draft/route');
+      yield {
+        type: 'AgentEvent', timestamp: new Date('2026-11-07T18:00:02Z'),
+        data: {
+          kind: 'policy_event', reasoningContent: null, content: '', validationErrors: [],
+          toolReqs: [{ toolName: 'click_web', id: 'chatcmpl-tool-click', args: { x: 0.492, y: 0.54, element: 'Gare du Nord dropdown suggestion' } }],
+        },
+      };
+      await confirm(tools);
+      yield observation(stub);
+      await handoff(tools);
+    });
+    await runBooking(mock.input, mock.client);
+    expect(vi.mocked(mock.input.onProgress).mock.calls).toEqual([
+      ['Step 1: write — Pickup address input field'],
+      ['Step 2: click_web — Gare du Nord dropdown suggestion'],
+    ]);
+  });
+
+  it.each([null, undefined, '   '])('emits bounded fallback progress with content %s and no tool descriptions', async (content) => {
+    const mock = setup(async function* (tools) {
+      yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'policy_event', content } };
+      yield { type: 'AgentEvent', timestamp: new Date(), data: {
+        kind: 'policy_event', content, toolReqs: [{ toolName: 'write', args: { text: 'private user input' } }],
+      } };
+      yield { type: 'AgentEvent', timestamp: new Date(), data: {
+        kind: 'policy_event', content, toolReqs: [{ toolName: 'click_web', args: { element: 'X'.repeat(300) } }],
+      } };
+      await confirm(tools);
+      yield observation(stub);
+      await handoff(tools);
+    });
+    await runBooking(mock.input, mock.client);
+    const lines = vi.mocked(mock.input.onProgress).mock.calls.map(([text]) => text);
+    expect(lines[0]).toBe('Step 1: Working on booking');
+    expect(lines[1]).toBe('Step 2: write');
+    expect(lines[2]).toHaveLength(240);
+    expect(lines.join(' ')).not.toContain('private user input');
+  });
+
   it('cancels on a stream error', async () => {
     const mock = setup(async function* () { throw new Error('stream broke'); });
     await expect(runBooking(mock.input, mock.client)).rejects.toThrow('stream broke');

@@ -7,17 +7,27 @@ import { captureFailure, recordingDiagnostic, recordingErrorKeys, SpeechInitiali
 describe('tap-only mobile microphone controls', () => {
   it.each(['fr', 'en'] as const)('keeps connection retries focusable and labelled in %s, restoring normal controls on recovery', (language) => {
     const t = labels[language];
-    for (const failed of [false, true]) expect(micControlState({ connected: false, failed, active: false, releasing: true }, t)).toEqual({ caption: failed ? t.connectionRetry : t.connecting, label: failed ? t.connectionRetry : t.connecting, disabled: false, pressed: false });
+    for (const failed of [false, true]) expect(micControlState({ connected: false, failed, active: false, releasing: true }, t)).toEqual({ caption: failed ? t.connectionRetry : t.connecting, label: failed ? t.connectionRetry : t.tap, disabled: false, pressed: false });
     expect(micControlState({ connected: true, failed: false, active: false, releasing: false }, t)).toEqual({ caption: t.tap, label: t.tap, disabled: false, pressed: false });
     expect(micControlState({ connected: true, failed: false, active: true, releasing: false }, t).label).toBe(t.stopListening);
     expect(micControlState({ connected: true, failed: false, active: false, releasing: true }, t).disabled).toBe(true);
+    expect(micControlState({ connected: true, failed: false, active: false, releasing: true }, t).label).toBe(t.tap);
   });
-  it('exposes status and errors to screen readers but not the spoken caption', () => {
+  it('exposes real errors but hides transient states and captions from screen readers', () => {
     const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-    expect(html).toMatch(/id="connection" role="status" aria-live="polite"/);
+    expect(html).toMatch(/id="connection" aria-hidden="true"/);
+    expect(html).toMatch(/id="stage"[^>]*aria-hidden="true"/);
+    expect(html).not.toMatch(/aria-labelledby="stage"|id="repeat"/);
     expect(html).toMatch(/id="errors" role="alert" aria-live="assertive"/);
     expect(html).toMatch(/id="caption" aria-hidden="true"/);
     expect(html).not.toMatch(/id="talk"[^>]*disabled/);
+  });
+  it('keeps first-mic gesture unlocking and content narration without speaking status words', () => {
+    const source = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/\$\('repeat'\)|lastConnection|voice\.enqueue\(stages|voice\.enqueue\(text, 'connection'|announce\(t\(\)\.(?:listening|processing|stop)\)|\$\('stage'\)\.focus/);
+    expect(source).toContain('if (speechNeedsGesture) voice.enqueue(lastSay || t().welcome);');
+    expect(source).toContain('unlock(); voice.hold(); cue();');
+    for (const content of ['announce(event.text)', 'announce(event.summary)', 'announce(event.message, true)', 'announce(event.question)', "voice.enqueue(cards, 'cards')", 'voice.idle && Date.now() - lastNarrated >= 15_000']) expect(source).toContain(content);
   });
   it.each([0, 1])('starts and stops for synthetic or ordinary clicks, detail %s', (detail) => {
     const button = {} as HTMLButtonElement, dock = {} as HTMLElement; let active = false;

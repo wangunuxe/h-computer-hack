@@ -32,6 +32,36 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); });
 
 describe('VoilaSession', () => {
+  it('replays choices after the current stage without repeating speech', async () => {
+    const s = setup(); await s.start();
+    const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toEqual([{ type: 'stage', stage: 'CHOOSE' }, s.events.find((e) => e.type === 'options')]);
+  });
+  it('replays the pending raw confirmation after CONFIRM', async () => {
+    const s = setup({ runBooking: async (input) => { await input.confirm('Original agent summary'); return completed; } });
+    await s.start(); await s.choose();
+    const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toEqual([{ type: 'stage', stage: 'CONFIRM' }, { type: 'confirm', summary: 'Original agent summary' }]);
+  });
+  it('replays payment in HANDOFF and AWAIT_PAYMENT, then the booking card in DONE', async () => {
+    const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();
+    let input!: BookingInput;
+    const s = setup({ runBooking: async (value) => { input = value; return pending.promise; } });
+    await s.start(); await s.choose();
+    await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: '' });
+    const payment = { type: 'payment_handoff', url: booking.payment_url, amount: 65, merchant: 'Shuttle' };
+    let replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toEqual([{ type: 'stage', stage: 'HANDOFF' }, payment]);
+    pending.resolve(completed); await flush();
+    replay = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toEqual([{ type: 'stage', stage: 'AWAIT_PAYMENT' }, payment]);
+    s.session.markPaid(booking.ref);
+    replay = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toEqual([{ type: 'stage', stage: 'DONE' }, { type: 'booking_card', booking }]);
+    s.session.handle({ type: 'stop' });
+    replay = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toEqual([{ type: 'stage', stage: 'LISTEN' }]);
+  });
   it.each(['EXECUTE', 'HANDOFF'])('remembers payment during %s and finishes only when the matching booking arrives', async (stage) => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();
     let input!: BookingInput;

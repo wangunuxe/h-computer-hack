@@ -29,6 +29,7 @@ export class VoilaSession {
   private trip: Partial<Trip> = {};
   private options: Option[] = [];
   private booking?: Booking;
+  private payment?: Extract<ServerEvent, { type: 'payment_handoff' }>;
   private paidRefs = new Set<string>();
   private generation = 0;
   private flow = new AbortController();
@@ -57,6 +58,10 @@ export class VoilaSession {
   attach(emit: (event: ServerEvent) => void) {
     this.emit = emit;
     this.send({ type: 'stage', stage: this.stage });
+    if (this.stage === 'CONFIRM' && this.confirmation) this.send({ type: 'confirm', summary: this.confirmation.summary });
+    if (['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) && this.payment) this.send(this.payment);
+    if (this.stage === 'CHOOSE') this.send({ type: 'options', items: this.options });
+    if (this.stage === 'DONE' && this.booking) this.send({ type: 'booking_card', booking: this.booking });
     return () => { if (this.emit === emit) this.emit = () => {}; };
   }
 
@@ -148,7 +153,7 @@ export class VoilaSession {
   }
   private stop() {
     this.cancel();
-    this.research = undefined; this.booking = undefined; this.options = []; this.trip = {};
+    this.research = undefined; this.booking = undefined; this.payment = undefined; this.options = []; this.trip = {};
     this.speak('stopped', {});
     this.transition('LISTEN');
   }
@@ -220,6 +225,7 @@ export class VoilaSession {
   }
   private async execute(id: string, generation: number) {
     this.paidRefs.clear();
+    this.payment = undefined;
     this.transition('EXECUTE');
     const controller = new AbortController();
     this.bookingController = controller;
@@ -246,8 +252,9 @@ export class VoilaSession {
         },
         onPaymentHandoff: (payment) => {
           if (!current()) return;
+          this.payment = { type: 'payment_handoff', url: payment.url, amount: payment.amount, merchant: payment.merchant };
           this.transition('HANDOFF');
-          this.send({ type: 'payment_handoff', url: payment.url, amount: payment.amount, merchant: payment.merchant });
+          this.send(this.payment);
           this.speak('payment-handoff', payment);
         },
       });

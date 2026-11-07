@@ -124,6 +124,39 @@ describe('VoilaSession', () => {
     expect(s.events).toContainEqual({ type: 'booking_card', booking });
     expect(s.events).not.toContainEqual({ type: 'stage', stage: 'AWAIT_PAYMENT' });
   });
+  it('accepts a user paid event during HANDOFF and completes when the booking resolves', async () => {
+    const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();
+    let input!: BookingInput;
+    const s = setup({ runBooking: async (value) => { input = value; return pending.promise; } });
+    await s.start(); await s.choose();
+    await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: '' });
+    s.session.handle({ type: 'paid' }); s.session.handle({ type: 'paid' });
+    expect(s.session.stage).toBe('HANDOFF');
+    expect(s.events.filter((event) => event.type === 'booking_card' || event.type === 'error')).toEqual([]);
+    pending.resolve(completed); await flush();
+    expect(s.session.stage).toBe('DONE');
+    expect(s.events.filter((event) => event.type === 'booking_card')).toEqual([{ type: 'booking_card', booking }]);
+    expect(s.events).not.toContainEqual({ type: 'stage', stage: 'AWAIT_PAYMENT' });
+  });
+  it('rejects user paid before a handoff and does not remember it', async () => {
+    const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();
+    const s = setup({ runBooking: () => pending.promise }); await s.start(); await s.choose();
+    s.session.handle({ type: 'paid' });
+    expect(s.events).toContainEqual({ type: 'error', message: 'Event paid is not allowed in EXECUTE.' });
+    pending.resolve(completed); await flush();
+    expect(s.session.stage).toBe('AWAIT_PAYMENT'); expect(s.events.some((event) => event.type === 'booking_card')).toBe(false);
+  });
+  it('clears early user payment on stop so it cannot complete another booking', async () => {
+    const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();
+    let input!: BookingInput;
+    const runner = vi.fn<SessionPorts['runBooking']>().mockImplementationOnce(async (value) => { input = value; return pending.promise; }).mockResolvedValue(completed);
+    const s = setup({ runBooking: runner }); await s.start(); await s.choose();
+    await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: '' });
+    s.session.handle({ type: 'paid' }); s.session.handle({ type: 'stop' }); pending.resolve(completed); await flush();
+    expect(s.session.stage).toBe('LISTEN'); expect(s.events.some((event) => event.type === 'booking_card')).toBe(false);
+    await s.start(); await s.choose(); expect(s.session.stage).toBe('AWAIT_PAYMENT');
+    expect(s.events.some((event) => event.type === 'booking_card')).toBe(false);
+  });
   it('does not apply an early receipt for a different booking reference', async () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();
     const s = setup({ runBooking: () => pending.promise }); await s.start(); await s.choose();

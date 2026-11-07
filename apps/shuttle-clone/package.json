@@ -10,8 +10,12 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.9",
     "@voila/shared": "workspace:*",
     "hono": "^4.11.7",
-    "@hono/node-server": "^1.19.9"
+    "jquery": "^3.7.1",
+    "jquery-ui-dist": "^1.13.3",
+    "stripe": "^20.4.1",
+    "zod": "^4.6.7"
   }
 }

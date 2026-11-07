@@ -68,7 +68,7 @@ export function mountPipeline(root: HTMLElement, bus: Bus) {
 
   const field = (k: string, v: string, cls = "") => {
     const val = h("span", { class: `pp-v ${cls}` }, v);
-    return { row: h("div", { class: "pp-kv" }, h("span", { class: "pp-k" }, `${k}: `), val), val };
+    return { row: h("div", { class: "pp-kv" }, h("span", { class: "pp-k" }, `${k}: `), val), val, initial: v };
   };
   const fRef = field("ref", "\"PAS-48213\"");
   const fTime = field("pickup_time", "\"14:20+01:00\"");
@@ -156,6 +156,7 @@ export function mountPipeline(root: HTMLElement, bus: Bus) {
     setGate(g1, "idle");
     setGate(g2, "idle");
     stepN = 0;
+    for (const f of [fRef, fTime, fPoint, fPrice, fDog]) f.val.textContent = f.initial;
     clearInterval(tick);
     steps.textContent = "00";
     clock.textContent = "00:00";

@@ -24,6 +24,7 @@ export interface SessionPorts {
 }
 
 export class VoilaSession {
+  get language() { return this.profile?.language ?? 'fr'; }
   stage: Stage = 'LISTEN';
   private profile?: Profile;
   private scenario: Scenario = 'demo';

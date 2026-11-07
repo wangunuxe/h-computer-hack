@@ -29,6 +29,11 @@ export class SessionRegistry {
     return true;
   }
 
+  authenticate(id: string, token: string): boolean {
+    const entry = this.entries.get(id);
+    return !!entry && secureEqual(token, entry.token);
+  }
+
   disconnect(id: string) { this.expireAfter(id, 30 * 60_000); }
 
   dispose() {

@@ -1,6 +1,7 @@
-import { TripSchema, WebEventSchema, type Booking, type Option, type Profile, type ServerEvent, type Trip } from '@voila/shared';
+import { ScenarioSchema, TripSchema, WebEventSchema, type Booking, type Option, type Profile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
 import { understand } from './understand.js';
-import { getRerBDisruption, type Disruption } from './adapters/prim.js';
+import { getDemoDisruption, type Disruption } from './adapters/disruption.js';
+import { readRerBTraffic, rerBTrafficPage } from './adapters/traffic-h.js';
 import { searchDisruptionAndAlternatives } from './adapters/linkup.js';
 import { runBooking } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
@@ -13,7 +14,7 @@ type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 type Research = { disruption: Disruption; extraOptions: Option[] };
 export interface SessionPorts {
   understand: typeof understand;
-  prim: typeof getRerBDisruption;
+  trafficH: typeof readRerBTraffic;
   linkup: typeof searchDisruptionAndAlternatives;
   runBooking: typeof runBooking;
   clock: () => Date;
@@ -25,6 +26,7 @@ export interface SessionPorts {
 export class VoilaSession {
   stage: Stage = 'LISTEN';
   private profile?: Profile;
+  private scenario: Scenario = 'demo';
   private gpsOrigin?: string;
   private trip: Partial<Trip> = {};
   private options: Option[] = [];
@@ -42,7 +44,7 @@ export class VoilaSession {
   private readonly ports: SessionPorts;
 
   constructor(private emit: (event: ServerEvent) => void, ports: Partial<SessionPorts> = {}) {
-    this.ports = { understand, prim: (input) => getRerBDisruption({ apiKey: process.env.PRIM_API_KEY, ...input }), linkup: searchDisruptionAndAlternatives, runBooking,
+    this.ports = { understand, trafficH: readRerBTraffic, linkup: searchDisruptionAndAlternatives, runBooking,
       clock: () => new Date(), timers: globalThis, logger: console, shuttlePublicUrl: () => process.env.SHUTTLE_PUBLIC_URL, ...ports };
     this.lastSay = this.ports.clock().getTime();
     this.heartbeat = this.ports.timers.setInterval(() => {
@@ -73,6 +75,7 @@ export class VoilaSession {
     if (event.type === 'hello') {
       if (this.profile) { this.error('Profile already set; reconnect without restarting the trip.'); return; }
       this.profile = event.profile;
+      this.scenario = event.scenario ?? (ScenarioSchema.safeParse(process.env.VOILA_SCENARIO).data ?? 'demo');
       this.gpsOrigin = event.gps ? `${event.gps.latitude}, ${event.gps.longitude}` : undefined;
       this.transition('LISTEN');
       return;
@@ -88,6 +91,7 @@ export class VoilaSession {
       this.speak('acknowledgement', {});
       this.speak('research-started', {});
       this.research = this.startResearch(event.text, generation);
+      void this.research.catch(() => {});
       void this.interpret(event.text, generation);
     } else if (event.type === 'user_reply' && this.stage === 'CLARIFY') {
       if (!event.text.trim()) { this.error('Reply must not be empty.'); return; }
@@ -137,7 +141,7 @@ export class VoilaSession {
   dispose() { this.cancel(); this.ports.timers.clearInterval(this.heartbeat); this.emit = () => {}; }
   private send(event: ServerEvent) { try { this.emit(event); } catch { this.ports.logger.error('Session event delivery failed.'); } }
   private error(message: string) { this.send({ type: 'error', message }); }
-  private transition(stage: Stage) { this.stage = stage; this.send({ type: 'stage', stage }); }
+  private transition(stage: Stage) { this.lastHeartbeat = -Infinity; this.stage = stage; this.send({ type: 'stage', stage }); }
   private speak<K extends keyof NarrationParams>(key: K, params: NarrationParams[K]) {
     this.lastSay = this.ports.clock().getTime();
     this.send({ type: 'say', text: say(key, params, this.profile?.language ?? 'en') });
@@ -171,21 +175,28 @@ export class VoilaSession {
     finally { this.ports.timers.clearTimeout(timer); parent.removeEventListener('abort', abort); controller.abort(); }
   }
   private async startResearch(transcript: string, generation: number): Promise<Research> {
-    const prim = this.limited((signal) => this.ports.prim({ signal }), 6000, this.flow.signal).catch((): Disruption => ({
-      summary: 'Traffic information unavailable.', cause: 'Traffic information unavailable.', source: 'https://www.rerb-leblog.fr/', recorded: true,
-    })).then((disruption) => {
-      if (this.active(generation)) this.send({ type: 'feed', kind: 'prim', text: `${disruption.recorded ? 'recorded data — ' : ''}${disruption.summary}`, source: disruption.source });
+    const parent = this.flow.signal;
+    const traffic = async (): Promise<Disruption> => {
+      if (this.scenario === 'demo') return getDemoDisruption();
+      try { return await this.limited((signal) => this.ports.trafficH({ signal, now: this.ports.clock() }), 46_000, parent); }
+      catch {
+        parent.throwIfAborted();
+        return { status: 'unknown', mode: 'live', summary: 'RER B status unknown: H lookup unavailable.', cause: '', source: rerBTrafficPage, recorded: false };
+      }
+    };
+    const trafficResult = traffic().then((disruption) => {
+      if (this.active(generation)) this.send({ type: 'feed', kind: 'traffic', text: `${disruption.mode}${disruption.recorded ? ' — recorded data' : ''} — ${disruption.summary}`, source: disruption.source, mode: disruption.mode, status: disruption.status });
       return disruption;
     });
-    const linkup = this.limited((signal) => this.ports.linkup({
+    const linkup = this.scenario === 'demo' ? Promise.resolve([] as Option[]) : this.limited((signal) => this.ports.linkup({
       query: `Transport disruption and alternatives for this request today ${this.ports.clock().toISOString()}. ${transcript}`, signal,
-    }), 9000, this.flow.signal).then((result) => {
+    }), 9000, parent).then((result) => {
       if (this.active(generation)) for (const item of result.corroboration) {
         for (const source of item.sources) this.send({ type: 'feed', kind: 'research', text: item.text, source });
       }
       return result.extraOptions;
     }).catch(() => { if (this.active(generation)) this.ports.logger.error('Linkup research unavailable; retaining preset options.'); return []; });
-    const [disruption, extraOptions] = await Promise.all([prim, linkup]);
+    const [disruption, extraOptions] = await Promise.all([trafficResult, linkup]);
     return { disruption, extraOptions };
   }
   private async interpret(transcript: string, generation: number) {
@@ -243,11 +254,11 @@ export class VoilaSession {
           this.send({ type: 'feed', kind: 'agent', text });
         },
         onPage: (page) => { if (current() && this.stage === 'EXECUTE') this.speak('booking-page', { page }); },
-        confirm: (summary) => {
+        confirm: (summary, details) => {
           if (!current()) return Promise.resolve({ approved: false, reply: 'Stopped' });
           if (this.confirmation) throw new Error('A confirmation is already pending.');
           const decision = new Promise<{ approved: boolean; reply: string }>((resolve) => { this.confirmation = { summary, resolve }; });
-          this.transition('CONFIRM'); this.send({ type: 'confirm', summary }); this.speak('confirm', { trip, option, summary, now: this.ports.clock() });
+          this.transition('CONFIRM'); this.send({ type: 'confirm', summary }); this.speak('confirm', { trip, option, details, now: this.ports.clock() });
           return decision;
         },
         onPaymentHandoff: (payment) => {

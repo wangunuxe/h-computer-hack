@@ -56,7 +56,7 @@ LISTEN → UNDERSTAND → (CLARIFY?) → RESEARCH → PRESENT → CHOOSE
 | - | - | - |
 | `session.ts` | 状态机、会话存储、事件推送、心跳播报（静默超过约 4 s 自动补一句进度） | FR-3 |
 | `understand.ts` | LLM 结构化输出 → `Trip`；只追问缺失的关键字段；追问期间并行启动调研 | FR-10 |
-| `adapters/prim.ts` | IDFM PRIM 查询 RER B 中断信息；失败时回退到 `scripts/fixtures/prim-rer-b.json`，并在 feed 中标明"录制数据" | FR-11 |
+| `adapters/traffic-h.ts` / `adapters/disruption.ts` | live 用 H text 只读浏览 RATP RER B 页面；demo 固定读取 `scripts/fixtures/prim-rer-b.json` 并标明"录制数据" | FR-11 |
 | `adapters/linkup.ts` | 交叉验证中断信息 + 搜索替代方案，保留来源 URL | FR-11, FR-12 |
 | `options.ts` | 预置清单（北站出租车站、G7、Paris Airport Shuttle、替代巴士）+ Linkup 结果合并 | FR-12 |
 | `feasibility.ts` | 纯函数：`now + 接车等待 + 路程 + 缓冲 ≤ 托运截止`；导盲犬 `accepted / unknown / refused`；输出剔除原因。**要有单元测试** | FR-13 |
@@ -132,7 +132,7 @@ LISTEN → UNDERSTAND → (CLARIFY?) → RESEARCH → PRESENT → CHOOSE
 
 ```
 H_API_KEY=            GLADIA_API_KEY=        LINKUP_API_KEY=
-PRIM_API_KEY=         LLM_PROVIDER=  LLM_API_KEY=
+VOILA_SCENARIO=demo   LLM_PROVIDER=  LLM_API_KEY=
 STRIPE_SECRET_KEY=    STRIPE_WEBHOOK_SECRET=
 SHUTTLE_PUBLIC_URL=   SERVER_PUBLIC_URL=     INTERNAL_CALLBACK_TOKEN=
 ```

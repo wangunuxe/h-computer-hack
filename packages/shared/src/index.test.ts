@@ -39,6 +39,10 @@ describe('web events', () => {
   it('allows unavailable GPS', () => {
     expect(WebEventSchema.safeParse({ type: 'hello', profile, gps: null }).success).toBe(true);
   });
+  it('accepts an optional demo/live scenario and rejects unknown values', () => {
+    for (const scenario of ['demo', 'live']) expect(WebEventSchema.parse({ type: 'hello', profile, gps: null, scenario })).toMatchObject({ scenario });
+    expect(WebEventSchema.safeParse({ type: 'hello', profile, gps: null, scenario: 'staging' }).success).toBe(false);
+  });
 });
 
 describe('domain validation', () => {

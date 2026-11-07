@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { say } from './narrate.js';
 import { presetOptions } from './options.js';
+import type { ConfirmationFields } from './confirmation.js';
 
 const confirmation = { trip: { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T22:00:00+01:00', passengers: 1, luggage: 1, guide_dog: true }, option: presetOptions[2]!, now: new Date('2027-01-15T10:00:00Z') };
+const details: ConfirmationFields = { pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR' };
 
 describe('say', () => {
+  it.each(['fr', 'en'])('clearly announces normal and unknown live status in %s', (language) => {
+    const normal = say('disruption', { mode: 'live', status: 'normal', cause: '', recorded: false }, language);
+    expect(normal).toContain('H'); expect(normal).toContain(language === 'fr' ? 'circule normalement' : 'running normally');
+    const unknown = say('disruption', { mode: 'live', status: 'unknown', cause: '', recorded: false }, language);
+    expect(unknown).toContain(language === 'fr' ? 'Statut inconnu' : 'status is unknown');
+    expect(unknown).not.toContain('Recorded');
+  });
   it.each(['route', 'vehicle', 'info', 'payment'] as const)('localizes the %s milestone without raw tool text', (page) => {
     const fr = say('booking-page', { page }, 'fr');
     const en = say('booking-page', { page }, 'en');
@@ -16,7 +25,7 @@ describe('say', () => {
     const lines = [
       say('acknowledgement', {}, language), say('clarify-deadline', {}, language),
       say('research-started', {}, language), say('disruption', { cause: 'Incident.', recorded: false }, language),
-      say('still-working', {}, language), say('confirm', { ...confirmation, summary: 'Taxi, 56 EUR.' }, language),
+      say('still-working', {}, language), say('confirm', { ...confirmation, details }, language),
       say('payment-handoff', { merchant: 'Shuttle', amount: 65 }, language),
       say('booking-done', { ref: 'PAS-123' }, language), say('stopped', {}, language),
       say('booking-failed', { reason: 'Timeout.' }, language),
@@ -42,20 +51,29 @@ describe('say', () => {
     expect(say('present-options', { options: [], now: new Date() }, 'fr')).toContain('Aucune option');
     expect(say('booking-failed', {}, 'en')).toBe('Booking failed.');
   });
-  it('summarizes the booking in French without reading English markdown or contact details', () => {
-    const summary = '**Booking summary:**\n- Date: Saturday 2027-01-15, Time: 20:00 (Paris)\n- Vehicle: Sedan, 63 EUR\n- Total: 65 EUR\n- Contact: karim@example.com\n- Notes: PAY NOW';
-    expect(say('confirm', { ...confirmation, summary }, 'fr')).toBe('Navette Paris Airport Shuttle, vers CDG, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?');
+  it('summarizes structured pickup facts in French', () => {
+    expect(say('confirm', { ...confirmation, details }, 'fr')).toBe('Navette Paris Airport Shuttle, vers CDG, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?');
   });
-  it('supports English, tomorrow and an ISO pickup instant across Paris DST', () => {
-    expect(say('confirm', { ...confirmation, summary: 'Pickup time: 20h30, Date: 2027-01-16. Total: EUR 65.50' }, 'en')).toContain('tomorrow at 20:30, €65.5');
-    const text = say('confirm', { ...confirmation, now: new Date('2027-03-27T23:00:00Z'), summary: 'Pickup: 2027-03-28T01:30:00Z, total 65 €' }, 'fr');
+  it('supports tomorrow and uses the Paris date across midnight and DST', () => {
+    expect(say('confirm', { ...confirmation, details: { ...details, pickup_date: '2027-01-16', pickup_time: '20:30', total_price: 65.5 } }, 'en')).toContain('tomorrow at 20:30, €65.5');
+    const text = say('confirm', { ...confirmation, now: new Date('2027-03-27T23:00:00Z'), details: { ...details, pickup_date: '2027-03-28', pickup_time: '03:30' } }, 'fr');
     expect(text).toContain('aujourd’hui à 3 h 30');
   });
-  it('omits missing or invalid time/price instead of using deadline, catalogue price or raw text', () => {
-    for (const summary of ['', 'Time: 29:99, total: many EUR', 'Flight departs at 23:00, 60 EUR or 90 EUR']) {
-      const text = say('confirm', { ...confirmation, trip: { ...confirmation.trip, guide_dog: false }, summary }, 'en');
+  it('omits missing or invalid fields instead of using the deadline or catalogue price', () => {
+    for (const value of [undefined, {}, { pickup_date: '2027-02-30', pickup_time: '29:99', total_price: -1, currency: 'USD' }]) {
+      const text = say('confirm', { ...confirmation, trip: { ...confirmation.trip, guide_dog: false }, details: value as ConfirmationFields }, 'en');
       expect(text).toBe('Paris Airport Shuttle, to CDG. Shall I confirm?');
     }
+  });
+  it('says a later pickup date explicitly', () => {
+    expect(say('confirm', { ...confirmation, details: { ...details, pickup_date: '2027-01-18' } }, 'fr')).toContain('le 18 janvier 2027 à 20 h');
+  });
+  it.each([undefined, 'USD'])('does not assume EUR if currency is %s', (currency) => {
+    expect(say('confirm', { ...confirmation, details: { total_price: 65, currency } as ConfirmationFields }, 'en')).not.toContain('€');
+  });
+  it('preserves valid fields when other fields are invalid and accepts a zero price', () => {
+    expect(say('confirm', { ...confirmation, details: { ...details, pickup_time: '24:00', total_price: 0 } }, 'fr')).toContain('aujourd’hui, 0 €');
+    expect(say('confirm', { ...confirmation, details: { pickup_time: '20:30' } }, 'fr')).toContain('à 20 h 30');
   });
   it.each([
     ['gare-du-nord-taxi', 'Taxi de la gare du Nord'], ['g7-phone', 'Taxi G7 par téléphone'],
@@ -69,6 +87,6 @@ describe('say', () => {
   it('falls back to the supplied name for an unknown option id', () => {
     const option = { ...presetOptions[0]!, id: 'custom', name: 'Transfert solidaire' };
     expect(say('present-options', { options: [option], now: confirmation.now }, 'fr')).toContain(option.name);
-    expect(say('confirm', { ...confirmation, option, summary: '' }, 'fr').startsWith(option.name)).toBe(true);
+    expect(say('confirm', { ...confirmation, option }, 'fr').startsWith(option.name)).toBe(true);
   });
 });

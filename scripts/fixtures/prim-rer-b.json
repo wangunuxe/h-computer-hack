@@ -1,5 +1,6 @@
 {
-  "fixture_note": "Illustrative recorded-mode demo fixture, not a captured live PRIM response. Never present as current traffic information.",
+  "fixture_note": "Illustrative recorded-mode demo fixture, not captured live traffic. Never present as current traffic information.",
+  "source": "https://www.ratp.fr/infos-trafic/rer/b",
   "Siri": {
     "ServiceDelivery": {
       "ResponseTimestamp": "2026-11-07T17:00:00Z",

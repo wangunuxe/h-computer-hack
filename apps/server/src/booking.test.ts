@@ -9,7 +9,8 @@ const stub = 'https://shuttle.example/stub-payment/order-123?mode=no-stripe-key'
 const stripe = 'https://checkout.stripe.com/c/pay/cs_test_123#long-fragment';
 const observation = (url?: string): HaiAgents.SessionEvent => ({ type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', metadata: url ? { url } : {} } });
 const call = async (tools: readonly Tool[], name: string, args: Record<string, unknown>) => tools.find((item) => item.name === name)!.fn(args);
-const confirm = (tools: readonly Tool[]) => call(tools, 'confirm_with_user', { summary: 'Karim to CDG, EUR 65, guide dog' });
+const confirmationFields = { pickup_date: '2027-01-15', pickup_time: '12:15', total_price: 65, currency: 'EUR' };
+const confirm = (tools: readonly Tool[]) => call(tools, 'confirm_with_user', { summary: 'Karim to CDG, EUR 65, guide dog', ...confirmationFields });
 const handoff = (tools: readonly Tool[]) => call(tools, 'handoff_payment', { amount: 65, merchant: 'Paris Airport Shuttle', summary: 'PAS-123' });
 
 function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.SessionEvent> = async function* (tools) {
@@ -37,6 +38,17 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it.each([{}, { pickup_date: '2027-02-30', pickup_time: '24:00', total_price: '65', currency: 'USD' }])('omits missing or invalid structured confirmation fields without reading the summary: %j', async (fields) => {
+    const mock = setup(async function* (tools) {
+      await call(tools, 'confirm_with_user', { summary: 'Flight Price: 400 EUR. Time: 23:00', ...fields });
+      yield observation(stub); await handoff(tools);
+    });
+    await runBooking(mock.input, mock.client);
+    expect(mock.input.confirm).toHaveBeenCalledWith('Flight Price: 400 EUR. Time: 23:00', { pickup_date: undefined, pickup_time: undefined, total_price: undefined, currency: undefined });
+    const params = mock.startSession.mock.calls[0] as unknown as [{ tools: Tool[] }];
+    const schema = params[0].tools.find((item) => item.name === 'confirm_with_user')!.inputSchema;
+    expect(schema).toMatchObject({ properties: { pickup_date: expect.any(Object), pickup_time: expect.any(Object), total_price: expect.any(Object), currency: expect.any(Object) } });
+  });
   it('reports observed booking page changes once, without trusting policy text or unrelated URLs', async () => {
     const mock = setup(async function* (tools) {
       yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'policy_event', content: 'Now on the payment page' } };
@@ -177,7 +189,7 @@ describe('H booking runner', () => {
     mock.input.confirm = vi.fn(async () => ({ approved, reply: 'user words' }));
     if (approved) await runBooking(mock.input, mock.client);
     else await expect(runBooking(mock.input, mock.client)).rejects.toThrow('without payment handoff');
-    expect(mock.input.confirm).toHaveBeenCalledWith('Karim to CDG, EUR 65, guide dog');
+    expect(mock.input.confirm).toHaveBeenCalledWith('Karim to CDG, EUR 65, guide dog', confirmationFields);
   });
 
   it('fails if the agent finishes without handing off', async () => {

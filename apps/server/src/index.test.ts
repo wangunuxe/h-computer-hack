@@ -1,16 +1,17 @@
 import { once } from 'node:events';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { ServerEventSchema, type ServerEvent } from '@voila/shared';
 import { createApp, createSessionServer } from './index.js';
 import { VoilaSession, type SessionPorts } from './session.js';
+import { SessionRegistry } from './session-registry.js';
 
-const hello = { type: 'hello', profile: { name: 'Karim', email: 'karim@example.com', phone: '+33612345678', language: 'fr', guide_dog: true }, gps: null };
+const hello = { type: 'hello', scenario: 'live', profile: { name: 'Karim', email: 'karim@example.com', phone: '+33612345678', language: 'fr', guide_dog: true }, gps: null };
 const booking = { ref: 'PAS-123', pickup_time: '2027-01-15T11:00:00+01:00', pickup_point: 'Gare du Nord', price: 65, operator_phone: '+33123456789', guide_dog_status: 'accepted' as const, payment_url: 'https://checkout.stripe.com/test' };
 const ports: Partial<SessionPorts> = {
   clock: () => new Date('2027-01-15T10:00:00+01:00'),
   understand: async () => ({ trip: { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T16:00:00+01:00', passengers: 1, luggage: 0, guide_dog: true }, missing: [] }),
-  prim: async () => ({ summary: 'Signal failure', cause: 'Incident.', source: 'https://example.com/traffic', recorded: true }),
+  trafficH: async () => ({ status: 'disrupted', mode: 'live', summary: 'Signal failure', cause: 'Incident.', source: 'https://example.com/traffic', recorded: false }),
   linkup: async () => ({ corroboration: [], extraOptions: [] }),
   runBooking: async (input) => {
     await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: 'Shuttle' });
@@ -20,14 +21,15 @@ const ports: Partial<SessionPorts> = {
 };
 async function flush() { for (let i = 0; i < 60; i++) await Promise.resolve(); }
 const cleanup: (() => void | Promise<void>)[] = [];
-afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
+afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.unstubAllEnvs(); });
 
 describe('payment callback', () => {
-  it('matches the clone bearer token and {order_id, ref, status} payload, then marks paid idempotently', async () => {
+  it('finds registry-only sessions for authenticated callbacks and marks paid idempotently', async () => {
     const events: ServerEvent[] = [];
     const session = new VoilaSession((event) => events.push(event), ports);
     cleanup.push(() => session.dispose());
-    const app = createApp({ sessions: new Map([['demo', session]]), token: 'test-token' });
+    const registry = new SessionRegistry(new Map([['demo', session]]));
+    const app = createApp({ registry, token: 'test-token' });
     session.handle(hello); session.handle({ type: 'final_transcript', text: 'CDG' }); await flush();
     session.handle({ type: 'user_reply', text: 'shuttle' }); await flush();
     expect(session.stage).toBe('AWAIT_PAYMENT');
@@ -51,14 +53,41 @@ describe('payment callback', () => {
 });
 
 describe('real WebSocket round-trip', () => {
+  it.each([undefined, '1'])('uses the socket address without a forwarded header with TRUST_PROXY=%s', async (trustProxy) => {
+    vi.stubEnv('TRUST_PROXY', trustProxy);
+    const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports }); cleanup.push(running.close);
+    if (!running.server.listening) await once(running.server, 'listening');
+    const address = running.server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP port');
+    const request = () => fetch(`http://127.0.0.1:${address.port}/session`, { method: 'POST' });
+    for (let i = 0; i < 3; i++) expect((await request()).status).toBe(201);
+    expect((await request()).status).toBe(429);
+  });
+  it.each([undefined, '0', 'true', '1'])('trusts the first forwarded IP only with TRUST_PROXY=1, configured %s', async (trustProxy) => {
+    vi.stubEnv('TRUST_PROXY', trustProxy);
+    const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports }); cleanup.push(running.close);
+    if (!running.server.listening) await once(running.server, 'listening');
+    const address = running.server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP port');
+    const request = (forwarded: string) => fetch(`http://127.0.0.1:${address.port}/session`, { method: 'POST', headers: { 'x-forwarded-for': forwarded } });
+    for (let i = 0; i < 3; i++) expect((await request('203.0.113.7, 10.0.0.1')).status).toBe(201);
+    expect((await request('203.0.113.8, 10.0.0.1')).status).toBe(trustProxy === '1' ? 201 : 429);
+    expect((await request('203.0.113.7, 10.0.0.9')).status).toBe(429);
+  });
   it('validates JSON, streams events, and reattaches an existing session with its stage replayed', async () => {
     const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports, token: 'test' });
     cleanup.push(running.close);
     if (!running.server.listening) await once(running.server, 'listening');
     const address = running.server.address();
     if (!address || typeof address === 'string') throw new Error('Expected an ephemeral TCP port');
-    const connect = async (token?: string) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws/session/demo${token ? `?token=${encodeURIComponent(token)}` : ''}`);
+    const response = await fetch(`http://127.0.0.1:${address.port}/session`, { method: 'POST' });
+    expect(response.status).toBe(201); expect(response.headers.get('cache-control')).toBe('no-store');
+    const issued = await response.json() as { id: string; resume_token: string };
+    expect(issued.id).toMatch(/^[\w-]{32}$/); expect(issued.resume_token).toMatch(/^[\w-]{43}$/);
+    const another = await (await running.app.request('/session', { method: 'POST' })).json();
+    expect(another.id).not.toBe(issued.id); expect(another.resume_token).not.toBe(issued.resume_token);
+    const connect = async (token?: string, id = issued.id) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws/session/${id}${token ? `?token=${encodeURIComponent(token)}` : ''}`);
       const messages: ServerEvent[] = [];
       ws.on('message', (data) => messages.push(ServerEventSchema.parse(JSON.parse(data.toString()))));
       await once(ws, 'open');
@@ -67,11 +96,15 @@ describe('real WebSocket round-trip', () => {
       };
       return { ws, messages, until };
     };
-    const first = await connect();
+    for (const [token, id] of [[undefined, issued.id], ['wrong', issued.id], [issued.resume_token, 'unissued-session']]) {
+      const attacker = await connect(token, id);
+      const [code] = await once(attacker.ws, 'close');
+      expect(code).toBe(4401); expect(attacker.messages).toEqual([]);
+      expect(running.sessions.size).toBe(0);
+    }
+    const first = await connect(issued.resume_token);
     await first.until(() => first.messages.length > 0);
-    expect(first.messages[0]).toMatchObject({ type: 'stage', stage: 'LISTEN', resume_token: expect.stringMatching(/^[\w-]{43}$/) });
-    const initial = first.messages[0];
-    if (initial?.type !== 'stage' || !initial.resume_token) throw new Error('Expected resume token');
+    expect(first.messages[0]).toEqual({ type: 'stage', stage: 'LISTEN' });
     for (const token of [undefined, 'incorrect-token']) {
       const attacker = await connect(token);
       const [code] = await once(attacker.ws, 'close');
@@ -84,10 +117,10 @@ describe('real WebSocket round-trip', () => {
     first.ws.send(JSON.stringify(hello));
     first.ws.send(JSON.stringify({ type: 'final_transcript', text: 'CDG' }));
     await first.until(() => first.messages.some((e) => e.type === 'stage' && e.stage === 'CHOOSE'));
-    const session = running.sessions.get('demo');
-    const second = await connect(initial.resume_token);
+    const session = running.sessions.get(issued.id);
+    const second = await connect(issued.resume_token);
     await second.until(() => second.messages.length > 0);
-    expect(running.sessions.get('demo')).toBe(session);
+    expect(running.sessions.get(issued.id)).toBe(session);
     expect(second.messages[0]).toEqual({ type: 'stage', stage: 'CHOOSE' });
     second.ws.send(JSON.stringify({ type: 'user_reply', text: 'G7' }));
     await second.until(() => second.messages.some((e) => e.type === 'stage' && e.stage === 'DONE'));

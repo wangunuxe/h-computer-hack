@@ -59,16 +59,10 @@ and prices are illustrative estimates, not live availability or quotations. The
 replacement bus must be confirmed with station staff. Taxi guide-dog acceptance
 reflects the legal requirement, not a reservation confirmation from a driver.
 
-`adapters/prim.ts` accepts an explicit API key and injectable fetch; it never needs
-a key for recorded mode. The configured URL is
-`https://prim.iledefrance-mobilites.fr/marketplace/general-message?LineRef=STIF:Line::C01743:`
-with an `apikey` header. Attempts to read PRIM's public general-message page and
-FAQ returned HTTP 403. The endpoint, line identifier, header, and SIRI-Lite response
-shape therefore remain assumptions to verify with official API access; tests
-verify our request contract against a fake only.
-
-On missing keys, network/HTTP/parse errors, empty messages, timeout or caller abort,
-the adapter loads `scripts/fixtures/prim-rer-b.json` and sets `recorded: true`.
+`adapters/disruption.ts` exposes the key-free `getDemoDisruption` fixture loader.
+It reads `scripts/fixtures/prim-rer-b.json` and sets `recorded: true`.
+The fixture source is the official RATP RER B traffic page,
+`https://www.ratp.fr/infos-trafic/rer/b`, not a live-data claim.
 That fixture is explicitly synthetic demo data, not an actual captured service
 response. Keep this file available alongside the repo when running built code.
 `narrate.ts` exports typed `say(key, params, language)` templates; option arrival
@@ -123,36 +117,74 @@ HTTP routes, or live H browser sessions are added by these adapters.
 
 ## M4 session orchestration
 
+### Demo and live traffic scenarios
+
+`hello.scenario` optionally selects `demo` or `live`; otherwise `VOILA_SCENARIO`
+is used, defaulting to `demo` (invalid environment values also fall back to demo).
+Demo always loads `scripts/fixtures/prim-rer-b.json`, labels it recorded data,
+and never calls the H traffic reader or Linkup. Its alternatives catalogue
+is fixed; trip understanding and an explicitly chosen booking still use their
+usual adapters.
+
+Live directly starts a read-only H text session on the official RATP RER B traffic page.
+The reader uses `mode: { type: 'text' }`, a structured `answerSchema`, a 45-second
+budget and no custom tools. Configuration was checked against `hai-agents`
+`BrowserMode.Text` and `/home/ubuntu/hdocs/agents-api_browser_configuration.md`
+and `agents-api_optimize-for-speed.md`; text mode cannot click or type.
+Stopping cancels the H session, including sessions created after cancellation.
+
+Traffic feed entries carry `mode: demo | live` and
+`status: normal | disrupted | unknown`; both feed and localized speech identify
+the source. A normal RER B still leads to alternatives. If the H reader fails,
+status is explicitly unknown, never replaced with the recorded signalling failure.
+`live/unknown` identifies a failed lookup, not a successful observation.
+
 `VoilaSession(emit, ports?)` accepts validated web events through `handle`, emits
 shared server events, and exposes `stage`, `attach(emit)`, `markPaid(ref)` and
 `dispose()`. All service ports, the clock, timers and logger can be replaced in
 tests. Research begins with the first transcript, alongside understanding, and
 continues during clarification; presentation waits for a complete trip. GPS is
-used as a coordinate origin when no spoken origin is available. PRIM and Linkup
+used as a coordinate origin when no spoken origin is available. H traffic research and Linkup
 have independent deadlines. Preset options are used only for Gare du Nord to
 CDG/Roissy/Charles de Gaulle trips; other routes use researched extra options.
 With no known options, speech advises asking station staff or calling a taxi.
-PRIM recorded-mode feed entries explicitly say “recorded data”.
+Demo feed entries explicitly say “recorded data”.
 
 `stop` aborts understanding, research and the H runner, resolves pending confirmation negatively,
 and invalidates callbacks from older operations. Heartbeats run after four silent
-seconds in UNDERSTAND, RESEARCH and EXECUTE, then at most every fifteen seconds.
+seconds in UNDERSTAND, RESEARCH and EXECUTE, then at most every fifteen seconds
+within that stage. Every stage transition resets the back-off.
 Raw agent progress stays in the feed;
 only observed route/vehicle/info/payment page changes produce localized spoken
 milestones through the runner's optional `onPage(page)` callback. Confirmation
-speech uses a short localized template, omitting unparseable pickup time and
-price; the `confirm` event keeps the full agent summary. Confirmation replies accept
+speech uses a short localized template built only from the structured tool fields
+`pickup_date`, `pickup_time`, `total_price` and `currency`. Pickup date/time are
+Europe/Paris local values; missing or invalid fields are omitted, never parsed
+from the free-text summary. Prices are spoken only with a valid EUR currency.
+The `confirm` event keeps the full agent summary. Confirmation replies accept
 French/English yes/no phrases; unclear replies do not approve a booking.
 
-Run `pnpm --filter @voila/server dev` (PORT defaults to 3000). `/ws/session/:id`
-creates an in-memory session. Its first `stage` event includes a cryptographically
-random `resume_token`; keep it private and pass it as `?token=<resume_token>`
-when reconnecting to the same id. Missing or incorrect tokens close with 4401
+Run `pnpm --filter @voila/server dev` (PORT defaults to 3000). First call
+`POST /session` to obtain `{ id, resume_token }` (HTTP 201, not cacheable).
+The server generates a random 192-bit id and a separate 256-bit token. Keep both
+private. Connect to `/ws/session/:id?token=<resume_token>` on every connection,
+including the first; clients cannot choose or claim a session id. Unissued ids
+and missing or incorrect tokens close with 4401
 without replacing the existing socket. Authorized reconnects replay the current
 stage plus pending confirmation, payment handoff, choices or completed booking
 card, without restarting work or repeating speech. Send `hello` once
 with the shared profile/GPS shape; subsequent messages use `WebEventSchema`.
-Sessions are retained until process shutdown, with no persistence or expiry yet.
+Unclaimed session credentials expire after two minutes. Disconnected sessions
+expire after thirty minutes idle and are disposed, cancelling pending H work.
+Reconnecting resets the idle deadline. At most 100 issued sessions (including
+unclaimed reservations) are held; `POST /session` returns 503 at capacity.
+Each client IP may hold at most three unclaimed reservations; further requests
+return 429 until a reservation is claimed or expires. By default the socket
+address is always used and `x-forwarded-for` is ignored. Only with `TRUST_PROXY=1`
+is the first forwarded hop used when present, falling back to the socket address
+when absent. Enable this only behind a trusted proxy that overwrites untrusted
+forwarded headers rather than blindly preserving them.
+Session timers are injectable for offline tests. There is no persistence.
 Payment callbacks arriving before the runner finishes are remembered; a matching
 booking reference completes directly in DONE, without waiting for another callback.
 Embedding code can use `createSessionServer({ port: 0, ports })` and `close()`.
@@ -160,7 +192,7 @@ Embedding code can use `createSessionServer({ port: 0, ports })` and `close()`.
 Set `SHUTTLE_PUBLIC_URL` to a public clone URL for H bookings (private/local URLs
 are rejected). A bare origin starts at `/fr/reservation/`, letting the clone
 initialize the browser's draft; a configured route URL is preserved. Set
-`HAI_API_KEY` for H, optional `PRIM_API_KEY` for live traffic, and the Gemini/Linkup
+`HAI_API_KEY` for H live traffic and bookings, and the Gemini/Linkup
 keys described above. Tests inject fakes and never start H sessions.
 
 `POST /internal/payment-completed` matches the clone's callback:

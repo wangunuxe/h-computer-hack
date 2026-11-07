@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { parsePhone, parseEmail, VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 describe('local spoken contact parsers', () => {
-  it.each(['06:12 34 56 78', '06:12:34 56 78', '2027-01-15 12 34'])('does not protect a temporal prefix of a phone-length sequence: %s', (phone) => {
+  it.each(['06:12 34 56 78', '06:12:34 56 78'])('does not protect a temporal prefix of a phone-shaped sequence: %s', (phone) => {
     expect(redactContactText(phone)).toBe('[phone]');
     expect(redactContactText(`Call me on ${phone}, from Gare du Nord to CDG 2E`)).toBe('Call me on [phone], from Gare du Nord to CDG 2E');
   });
-  it.each(['20:45', 'à 20:45 depuis gare du Nord', '2027-01-15 20:45', '20:45 2E', '2027-01-15 2E', '2027-01-15 à 20:45 pour 2 personnes'])('keeps a real temporal value intact: %s', (text) => expect(redactContactText(text)).toBe(text));
+  it.each(['20:45', 'à 20:45 depuis gare du Nord', '2027-01-15 20:45', '20:45 2E', '2027-01-15 2E', '2027-01-15 à 20:45 pour 2 personnes', '2027-01-15 2 personnes', '2027-01-15 12 34', '06.12.2027 12 personnes'])('keeps a real temporal value intact: %s', (text) => expect(redactContactText(text)).toBe(text));
+  it.each(['06 12 34 56 78', '06.12.34.56.78', '06-12-34-56-78', '06:12 34 56 78', '+33 6 12 34 56 78', '+33 (6) 12 34 56 78', '0033 6 12 34 56 78', '0033612345678', '1234567890', 'zero six twelve thirty four fifty six seventy eight', 'one two three four five six seven eight nine'])('redacts only the phone span and respects clause boundaries: %s', (phone) => {
+    for (const punctuation of [',', '.']) expect(redactContactText(`${phone}${punctuation} 2 personnes à CDG`)).toBe(`[phone]${punctuation} 2 personnes à CDG`);
+    expect(redactContactText(`à 20:45 ${phone}`)).toBe('à 20:45 [phone]');
+    expect(redactContactText(`à 06:12 ${phone}`)).toBe('à 06:12 [phone]');
+    expect(redactContactText(`2027-01-15 ${phone}`)).toBe('2027-01-15 [phone]');
+  });
   it.each(["c'est pour demain", "c'est pour aller à CDG", "c'est urgent", "c'est demain", "c'est aujourd'hui", "c'est ce soir", "c'est à la gare", "c'est la gare du Nord", "c'est le train", "c'est un taxi", "c'est Marie"])("does not infer a name from ambiguous trip speech: %s", (text) => expect(redactContactText(text)).toBe(text));
   it('still removes explicit name introductions and known saved names', () => {
     for (const text of ["mon nom c'est Marie, pour aller à CDG", "je m'appelle Marie, pour aller à CDG", 'my name is Marie, to CDG']) {

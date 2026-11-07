@@ -12,6 +12,7 @@ describe('server events', () => {
     expect(new TextEncoder().encode(JSON.stringify(event)).byteLength).toBeLessThan(64 * 1024);
   });
   const events = [
+    { type: 'activity', cancellable: true },
     { type: 'stage', stage: 'LISTEN' },
     { type: 'say', text: 'Bonjour' },
     { type: 'feed', kind: 'research', text: 'Checking trains', source: 'https://example.com' },

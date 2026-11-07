@@ -8,3 +8,4 @@ export class ConnectionAttempt {
   cancel() { this.clear(); this.controller.abort(); }
 }
 export const replaceOnForeground = (readyState: number | undefined) => readyState === 0 || readyState === 1;
+export const requiresFreshSession = (closeCode: number) => closeCode === 4401 || closeCode === 4409;

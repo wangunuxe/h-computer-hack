@@ -94,7 +94,7 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
         ws.close(4401, 'Invalid resume token');
         return;
       }
-      clients.get(id)?.close(1000, 'Session reattached');
+      clients.get(id)?.close(4409, 'Session active in another connection');
       clients.set(id, ws);
       const emit = (event: ServerEvent) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));

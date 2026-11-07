@@ -4,6 +4,7 @@ import { VoilaSession, type SessionPorts } from './session.js';
 import type { TurnResult } from './converse.js';
 import type { BookingInput } from './booking.js';
 import { presetOptions } from './options.js';
+const fare = { total_price: 65, currency: 'EUR' as const };
 import { say } from './narrate.js';
 
 const trip: Trip = { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T21:00:00+01:00', guide_dog: true, passengers: 1, luggage: 0 };
@@ -20,7 +21,7 @@ function setup(overrides: Partial<SessionPorts> = {}) {
     linkup: vi.fn<SessionPorts['linkup']>().mockResolvedValue({ corroboration: [], extraOptions: [] }),
     runBooking: vi.fn<SessionPorts['runBooking']>().mockImplementation(() => new Promise(() => {})), logger: { error: vi.fn() }, shuttlePublicUrl: () => 'https://shuttle.example', ...overrides,
   };
-  const session = new VoilaSession((event) => events.push(event), ports); sessions.push(session);
+  const session = new VoilaSession((event) => { if (event.type !== 'activity') events.push(event); }, ports); sessions.push(session);
   const start = async (language = 'fr') => { session.handle({ type: 'hello', profile: { ...profile, language }, gps: null, scenario: 'live' }); session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); };
   const reply = async (text: string) => { session.handle({ type: 'user_reply', text }); await flush(); };
   return { session, ports, events, start, reply };
@@ -98,11 +99,11 @@ describe('contextual conversation routing', () => {
     expect(s.ports.converse).toHaveBeenCalledWith(expect.objectContaining({ confirmation: expect.objectContaining({ pickup_date: '2027-01-15', total_price: 65 }) }));
   });
   it.each(['oui', 'non'])('keeps exact confirmation %s instant', async (text) => {
-    const decision = vi.fn(); const s = setup({ runBooking: async (input) => { decision(await input.confirm('Shuttle')); return new Promise(() => {}); } }); await s.start(); await s.reply('shuttle'); await s.reply(text);
+    const decision = vi.fn(); const s = setup({ runBooking: async (input) => { decision(await input.confirm('Shuttle', fare)); return new Promise(() => {}); } }); await s.start(); await s.reply('shuttle'); await s.reply(text);
     expect(s.ports.converse).not.toHaveBeenCalled(); expect(decision).toHaveBeenCalledWith({ approved: text === 'oui', reply: text });
   });
   it('speaks the model acknowledgement when approving an interpreted confirmation', async () => {
-    const decision = vi.fn(); const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'confirm', reply: 'Je transmets votre accord.' })), runBooking: async (input) => { decision(await input.confirm('Shuttle')); return new Promise(() => {}); } });
+    const decision = vi.fn(); const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'confirm', reply: 'Je transmets votre accord.' })), runBooking: async (input) => { decision(await input.confirm('Shuttle', fare)); return new Promise(() => {}); } });
     await s.start(); await s.reply('shuttle'); await s.reply('oui vas-y c’est bon');
     expect(s.events).toContainEqual({ type: 'say', text: 'Je transmets votre accord.' });
     expect(decision).toHaveBeenCalledWith({ approved: true, reply: 'oui vas-y c’est bon' });
@@ -121,13 +122,13 @@ describe('contextual conversation routing', () => {
     await s.start(); await s.reply('shuttle'); await s.reply('je voudrais tout arrêter'); expect(s.session.stage).toBe('LISTEN'); expect(booking.signal?.aborted).toBe(true);
   });
   it('times out an unresponsive model without approving or altering the booking flow', async () => {
-    const decision = vi.fn(); const s = setup({ converse: vi.fn(() => new Promise(() => {})), runBooking: async (input) => { decision(await input.confirm('Shuttle')); return new Promise(() => {}); } });
+    const decision = vi.fn(); const s = setup({ converse: vi.fn(() => new Promise(() => {})), runBooking: async (input) => { decision(await input.confirm('Shuttle', fare)); return new Promise(() => {}); } });
     await s.start(); await s.reply('shuttle'); await s.reply('euh'); await vi.advanceTimersByTimeAsync(20_500);
     expect(s.session.stage).toBe('CONFIRM'); expect(decision).not.toHaveBeenCalled(); expect(s.events.at(-1)?.type).toBe('say');
   });
   it('ignores a late model confirmation after stop', async () => {
     let resolve!: (value: TurnResult) => void; const decision = vi.fn();
-    const s = setup({ converse: () => new Promise((r) => { resolve = r; }), runBooking: async (input) => { decision(await input.confirm('Shuttle')); return new Promise(() => {}); } });
+    const s = setup({ converse: () => new Promise((r) => { resolve = r; }), runBooking: async (input) => { decision(await input.confirm('Shuttle', fare)); return new Promise(() => {}); } });
     await s.start(); await s.reply('shuttle'); await s.reply('vas-y alors'); s.session.handle({ type: 'stop' }); resolve(result({ intent: 'confirm' })); await flush();
     expect(s.session.stage).toBe('LISTEN'); expect(decision).toHaveBeenCalledExactlyOnceWith({ approved: false, reply: 'Stopped' });
   });
@@ -154,7 +155,7 @@ describe('contextual conversation routing', () => {
     expect(questions[2]).toContain('CDG'); expect(s.session.stage).toBe('CLARIFY');
   });
   it('points to confirmation buttons after two failures without ever approving', async () => {
-    const decision = vi.fn(); const s = setup({ runBooking: async (input) => { decision(await input.confirm('Shuttle')); return new Promise(() => {}); } });
+    const decision = vi.fn(); const s = setup({ runBooking: async (input) => { decision(await input.confirm('Shuttle', fare)); return new Promise(() => {}); } });
     await s.start(); await s.reply('shuttle'); await s.reply('euh'); await s.reply('euh');
     expect(s.events.at(-1)).toEqual({ type: 'say', text: expect.stringContaining('boutons') }); expect(decision).not.toHaveBeenCalled();
   });

@@ -6,7 +6,7 @@ import { clientProfile, type ClientProfile } from './preferences.js';
 import { labels, optionNames, stages } from './labels.js';
 import { bindMicControls } from './mic-controls.js';
 import { recordingDiagnostic, recordingErrorKeys } from './recording-error.js';
-import { ConnectionAttempt, replaceOnForeground } from './connection.js';
+import { ConnectionAttempt, replaceOnForeground, requiresFreshSession } from './connection.js';
 import { SessionStorage } from './session-storage.js';
 import './style.css';
 
@@ -116,7 +116,7 @@ async function connect() {
       if (ws !== socket) return;
       current.clear();
       recorder?.cancel(); connection(false); $('connection').textContent = t().disconnected;
-      if (event.code === 4401) { credentials = undefined; helloSent = false; sessionStorage.clear(); }
+      if (requiresFreshSession(event.code)) { credentials = undefined; helloSent = false; sessionStorage.clear(); queuedTranscript = undefined; pendingStop = false; state = initialState(); render(); }
       clearTimeout(retry); retry = setTimeout(() => void connect(), 1500);
     };
     ws.onerror = () => { if (ws === socket) $('connection').textContent = t().disconnected; };
@@ -144,7 +144,7 @@ function recordingLabel() {
   talk.setAttribute('aria-label', active ? t().stopListening : releasing ? t().processing : profile?.mic_mode === 'hold' ? t().hold : t().tap);
   talk.disabled = !connected || releasing;
   $('talk-help').textContent = profile?.mic_mode === 'hold' ? t().holdHelp : t().toggleHelp;
-  $('stop').hidden = !!recorder || !canStop(state.stage);
+  $('stop').hidden = !!recorder || !canStop(state);
 }
 function start() {
   if (recorder || !credentials || socket?.readyState !== WebSocket.OPEN) return;

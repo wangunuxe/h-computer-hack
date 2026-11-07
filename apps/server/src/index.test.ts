@@ -182,7 +182,10 @@ describe('real WebSocket round-trip', () => {
     first.ws.send(JSON.stringify({ type: 'final_transcript', text: 'CDG' }));
     await first.until(() => first.messages.some((e) => e.type === 'stage' && e.stage === 'CHOOSE'));
     const session = running.sessions.get(issued.id);
+    const evicted = once(first.ws, 'close');
     const second = await connect(issued.resume_token);
+    const [code, reason] = await evicted;
+    expect(code).toBe(4409); expect(reason.toString()).toBe('Session active in another connection');
     await second.until(() => second.messages.length > 0);
     expect(running.sessions.get(issued.id)).toBe(session);
     expect(second.messages[0]).toEqual({ type: 'stage', stage: 'CHOOSE' });
@@ -190,5 +193,9 @@ describe('real WebSocket round-trip', () => {
     await second.until(() => second.messages.some((e) => e.type === 'stage' && e.stage === 'DONE'));
     expect(second.messages).toContainEqual({ type: 'say', text: expect.stringContaining('Appelez G7') });
     expect(running.sessions.size).toBe(1);
+    const fresh = await connect(another.resume_token, another.id);
+    await fresh.until(() => fresh.messages.length > 0);
+    expect(fresh.messages[0]).toEqual({ type: 'stage', stage: 'LISTEN' });
+    expect(second.ws.readyState).toBe(WebSocket.OPEN); expect(running.sessions.size).toBe(2);
   });
 });

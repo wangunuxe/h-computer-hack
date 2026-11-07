@@ -44,7 +44,7 @@ describe('say', () => {
   });
   it('summarizes the booking in French without reading English markdown or contact details', () => {
     const summary = '**Booking summary:**\n- Date: Saturday 2027-01-15, Time: 20:00 (Paris)\n- Vehicle: Sedan, 63 EUR\n- Total: 65 EUR\n- Contact: karim@example.com\n- Notes: PAY NOW';
-    expect(say('confirm', { ...confirmation, summary }, 'fr')).toBe('Paris Airport Shuttle, vers CDG, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?');
+    expect(say('confirm', { ...confirmation, summary }, 'fr')).toBe('Navette Paris Airport Shuttle, vers CDG, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?');
   });
   it('supports English, tomorrow and an ISO pickup instant across Paris DST', () => {
     expect(say('confirm', { ...confirmation, summary: 'Pickup time: 20h30, Date: 2027-01-16. Total: EUR 65.50' }, 'en')).toContain('tomorrow at 20:30, €65.5');
@@ -56,5 +56,19 @@ describe('say', () => {
       const text = say('confirm', { ...confirmation, trip: { ...confirmation.trip, guide_dog: false }, summary }, 'en');
       expect(text).toBe('Paris Airport Shuttle, to CDG. Shall I confirm?');
     }
+  });
+  it.each([
+    ['gare-du-nord-taxi', 'Taxi de la gare du Nord'], ['g7-phone', 'Taxi G7 par téléphone'],
+    ['paris-airport-shuttle', 'Navette Paris Airport Shuttle'], ['rer-b-replacement-bus', 'Bus de remplacement du RER B'],
+  ])('uses a French spoken name for %s without changing the option data', (id, name) => {
+    const option = presetOptions.find((o) => o.id === id)!;
+    expect(say('present-options', { options: [option], now: confirmation.now }, 'fr')).toContain(`1. ${name},`);
+    expect(say('no-feasible-options', { rejected: [{ ...option, reason: 'too_late' }] }, 'fr')).toContain(`${name}: arrivée trop tardive`);
+    expect(say('present-options', { options: [option], now: confirmation.now }, 'en')).toContain(option.name);
+  });
+  it('falls back to the supplied name for an unknown option id', () => {
+    const option = { ...presetOptions[0]!, id: 'custom', name: 'Transfert solidaire' };
+    expect(say('present-options', { options: [option], now: confirmation.now }, 'fr')).toContain(option.name);
+    expect(say('confirm', { ...confirmation, option, summary: '' }, 'fr')).toStartWith(option.name);
   });
 });

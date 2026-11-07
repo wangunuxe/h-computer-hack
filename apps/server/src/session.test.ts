@@ -138,7 +138,7 @@ describe('VoilaSession', () => {
     const s = setup({ runBooking: async (input) => { await input.confirm(summary); return completed; } });
     s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
     expect(s.events).toContainEqual({ type: 'confirm', summary });
-    expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Paris Airport Shuttle, vers CDG 2E, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?' });
+    expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Navette Paris Airport Shuttle, vers CDG 2E, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?' });
     expect(s.events.filter((e) => e.type === 'say').map((e) => e.text).join(' ')).not.toMatch(/Booking summary|karim@example|\*\*/);
   });
   it('stop aborts booking and suppresses late callbacks and results', async () => {

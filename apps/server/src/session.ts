@@ -197,7 +197,7 @@ export class VoilaSession {
       this.send({ type: 'options', items: this.options });
       this.speak('disruption', research.disruption);
       if (this.options.length) this.speak('present-options', { options: this.options, now: this.ports.clock() });
-      else this.speak('no-feasible-options', { rejected: assessed.rejected.map(({ option, reason }) => ({ name: option.name, reason })) });
+      else this.speak('no-feasible-options', { rejected: assessed.rejected.map(({ option, reason }) => ({ id: option.id, name: option.name, reason })) });
       this.transition('CHOOSE');
     } catch {
       if (!this.active(generation)) return;

@@ -2,6 +2,12 @@ import type { Option, Trip } from '@voila/shared';
 import type { BookingPage } from './booking.js';
 
 type Empty = Record<string, never>;
+const optionNames: Record<string, { fr: string; en: string }> = {
+  'gare-du-nord-taxi': { fr: 'Taxi de la gare du Nord', en: 'Gare du Nord taxi rank' },
+  'g7-phone': { fr: 'Taxi G7 par téléphone', en: 'G7 by phone' },
+  'paris-airport-shuttle': { fr: 'Navette Paris Airport Shuttle', en: 'Paris Airport Shuttle' },
+  'rer-b-replacement-bus': { fr: 'Bus de remplacement du RER B', en: 'RER B replacement bus' },
+};
 export interface NarrationParams {
   acknowledgement: Empty;
   'clarify-deadline': Empty;
@@ -20,7 +26,7 @@ export interface NarrationParams {
   'confirm-again': Empty;
   'booking-page': { page: BookingPage };
   'manual-instructions': { id: string; instructions: string };
-  'no-feasible-options': { rejected: { name: string; reason: 'too_late' | 'guide_dog_refused' }[] };
+  'no-feasible-options': { rejected: { id?: string; name: string; reason: 'too_late' | 'guide_dog_refused' }[] };
 }
 
 function confirmationDetails(summary: string) {
@@ -52,6 +58,7 @@ function confirmationDetails(summary: string) {
 export function say<K extends keyof NarrationParams>(key: K, params: NarrationParams[K], language: string): string {
   const fr = language.toLowerCase().split('-')[0] === 'fr';
   const locale = fr ? 'fr-FR' : 'en-GB';
+  const optionName = (option: { id?: string; name: string }) => (option.id ? optionNames[option.id]?.[fr ? 'fr' : 'en'] : undefined) ?? option.name;
   const money = (amount: number) => new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR' }).format(amount);
   const templates: { [P in keyof NarrationParams]: (p: NarrationParams[P]) => string } = {
     acknowledgement: () => fr ? 'Je vous aide à rejoindre l’aéroport.' : 'I’ll help you reach the airport.',
@@ -63,13 +70,13 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
       return options.slice(0, 3).map((option, index) => {
         const arrival = new Date(now.getTime() + (option.pickup_wait_minutes + option.journey_minutes) * 60_000);
         const time = new Intl.DateTimeFormat(locale, { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(arrival);
-        return `${index + 1}. ${option.name}, ${fr ? 'arrivée estimée' : 'estimated arrival'} ${time}, ${money(option.price)}.`;
+        return `${index + 1}. ${optionName(option)}, ${fr ? 'arrivée estimée' : 'estimated arrival'} ${time}, ${money(option.price)}.`;
       }).join(' ');
     },
     'still-working': () => fr ? 'Je continue, un instant.' : 'Still working. One moment.',
     confirm: ({ trip, option, summary, now }) => {
       const { date, hour, minute, price } = confirmationDetails(summary);
-      const parts = [`${option.name}, ${fr ? 'vers' : 'to'} ${trip.destination}`];
+      const parts = [`${optionName(option)}, ${fr ? 'vers' : 'to'} ${trip.destination}`];
       if (hour !== undefined && minute !== undefined) {
         const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
         const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
@@ -100,7 +107,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
       'g7-phone': 'Appelez G7 au 3607. Indiquez le point de départ, le terminal, les passagers et le chien guide. Confirmez la disponibilité et le tarif.',
       'rer-b-replacement-bus': 'Demandez aux agents si un bus de remplacement dessert CDG et où monter. Confirmez le terminal, l’accessibilité et le départ.',
     } as Record<string, string>)[id] ?? instructions) : instructions,
-    'no-feasible-options': ({ rejected }) => [fr ? 'Aucune option réalisable.' : 'No feasible options.', ...rejected.map(({ name, reason }) => `${name}: ${reason === 'too_late' ? (fr ? 'arrivée trop tardive' : 'arrival too late') : (fr ? 'chien guide refusé' : 'guide dog refused')}.`)].join(' '),
+    'no-feasible-options': ({ rejected }) => [fr ? 'Aucune option réalisable.' : 'No feasible options.', ...rejected.map((option) => `${optionName(option)}: ${option.reason === 'too_late' ? (fr ? 'arrivée trop tardive' : 'arrival too late') : (fr ? 'chien guide refusé' : 'guide dog refused')}.`)].join(' '),
   };
   return templates[key](params);
 }

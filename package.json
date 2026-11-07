@@ -1,0 +1,11 @@
+{
+  "name": "h-computer-hack",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Voilà — voice assistant that books transport for blind travellers when the city breaks down",
+  "scripts": {
+    "dev": "pnpm --filter @voila/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

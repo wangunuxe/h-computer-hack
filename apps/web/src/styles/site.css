@@ -1,0 +1,124 @@
+/* Mock "Chauffeur Booking System" WordPress site — deliberately dated and hostile. */
+.ws {
+  position: relative;
+  width: 1280px;
+  height: 800px;
+  overflow: hidden;
+  background: #f4f4f2;
+  color: #444;
+  font: 15px/1.4 "Helvetica Neue", Arial, sans-serif;
+  opacity: 0.15;
+  filter: grayscale(1);
+  transition: opacity 0.5s, filter 0.5s;
+}
+.ws.is-loaded { opacity: 1; filter: none; }
+.ws-top { display: flex; align-items: center; justify-content: space-between; padding: 18px 40px; background: #1d2731; color: #dfe3e6; }
+.ws-logo { font: 700 22px/1 Georgia, serif; letter-spacing: 1px; }
+.ws-logo b { color: #f0a30a; }
+.ws-logo i { font-weight: 400; }
+.ws-top nav { display: flex; gap: 26px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+.ws-top nav .on { color: #f0a30a; border-bottom: 2px solid #f0a30a; }
+.ws-tel { color: #f0a30a; }
+.ws-hero { padding: 26px 40px 18px; background: linear-gradient(90deg, #2c3a47, #4a5b6a); color: #fff; }
+.ws-hero h1 { margin: 0; font: 400 34px Georgia, serif; }
+.ws-hero p { margin: 4px 0 0; opacity: 0.7; font-size: 14px; }
+.ws-tabs { display: flex; margin: 0 40px; border-bottom: 1px solid #ccc; }
+.ws-tabs span { padding: 14px 22px; font-size: 13px; text-transform: uppercase; color: #999; border-bottom: 3px solid transparent; }
+.ws-tabs span.on { color: #222; border-bottom-color: #f0a30a; font-weight: 700; }
+.ws-page { display: none; padding: 26px 40px; }
+.ws-page.is-on { display: block; animation: wsIn 0.35s ease; }
+@keyframes wsIn { from { opacity: 0; transform: translateY(8px); } }
+.ws-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px 22px; }
+.ws-f { grid-column: span 3; position: relative; }
+.ws-f-half { grid-column: span 2; }
+.ws-f-full { grid-column: span 6; }
+.ws-lbl { font-size: 12px; color: #888; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.4px; }
+.ws-in {
+  width: 100%;
+  box-sizing: border-box;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #cfcfcf;
+  border-radius: 0;
+  background: #fff;
+  font: inherit;
+  color: #222;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.ws-in.is-focus { border-color: #f0a30a; box-shadow: 0 0 0 3px rgba(240, 163, 10, 0.25); }
+.ws-in.is-flash { animation: wsFlash 0.6s; }
+@keyframes wsFlash { 50% { background: #fff4d6; } }
+.ws-ac, .ws-cal {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  top: 70px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #ccc;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+  display: none;
+}
+.ws-ac.is-open, .ws-cal.is-open { display: block; animation: wsIn 0.2s; }
+.ws-ac li { padding: 10px 12px; font-size: 14px; border-bottom: 1px solid #eee; }
+.ws-ac li:first-child { background: #fff8e6; }
+.ws-ac li.is-clicked { background: #f0a30a; color: #fff; }
+.ws-cal { width: 300px; padding: 10px; }
+.ws-cal-h { text-align: center; font-weight: 700; padding-bottom: 8px; color: #222; }
+.ws-cal-g { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; text-align: center; font-size: 13px; }
+.ws-cal-g b { color: #999; font-weight: 400; }
+.ws-cal-g span { padding: 6px 0; }
+.ws-cal-g span.off { color: #ccc; }
+.ws-cal-g span.is-clicked { background: #f0a30a; color: #fff; }
+.ws-recap { display: flex; justify-content: flex-end; align-items: center; gap: 20px; margin-top: 30px; }
+.ws-g-recaptcha { width: 70px; height: 60px; background: repeating-linear-gradient(45deg, #e9e9e9 0 6px, #f6f6f6 6px 12px); border: 1px solid #ddd; }
+.ws-btn { padding: 14px 30px; border: 0; background: #f0a30a; color: #fff; font: 700 14px Arial, sans-serif; letter-spacing: 1px; }
+.ws-btn.is-clicked { background: #c98500; }
+.ws-btn-s { padding: 9px 18px; font-size: 12px; }
+.ws-btn-pp { background: #253b80; }
+.ws-cars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+.ws-car { background: #fff; border: 1px solid #ddd; padding: 22px; display: grid; gap: 6px; justify-items: start; }
+.ws-car.is-sel { outline: 3px solid #f0a30a; }
+.ws-car-img { width: 100%; background: #eef0f2; display: grid; place-items: center; padding: 16px 0; }
+.ws-car-img svg { width: 70%; }
+.ws-car b { font-size: 20px; color: #222; }
+.ws-car small { color: #888; }
+.ws-price { font: 700 22px Georgia, serif; color: #f0a30a; margin: 6px 0; }
+.ws-link { color: #2a7ab0; font-size: 14px; cursor: pointer; }
+.ws-ta { display: none; height: 70px; margin-top: 8px; padding: 10px 12px; resize: none; }
+.ws-ta.is-open { display: block; }
+.ws-cgv { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.ws-box { width: 18px; height: 18px; border: 1px solid #aaa; background: #fff; display: inline-grid; place-items: center; }
+.ws-box.is-checked::after { content: "✔"; color: #f0a30a; font-size: 14px; }
+.ws-pay { display: grid; gap: 22px; max-width: 760px; }
+.ws-ok { padding: 14px 18px; background: #e7f6e7; border-left: 4px solid #3c9a3c; color: #2c6e2c; }
+.ws-sum { display: grid; gap: 4px; padding: 18px; background: #fff; border: 1px solid #ddd; }
+.ws-sum b { font-size: 20px; color: #222; }
+.ws-pay-btns { display: flex; gap: 16px; }
+.ws-countdown { display: none; padding: 14px; background: #fff8e6; border: 1px dashed #f0a30a; }
+.ws-countdown.is-open { display: block; }
+.ws-cookie {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 18px 40px;
+  background: rgba(20, 20, 20, 0.92);
+  color: #ddd;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  transition: transform 0.4s;
+}
+.ws-cookie.is-gone { transform: translateY(110%); }
+
+/* Screen-reader X-ray */
+.is-audit [data-audit] { outline: 3px dashed #ff3b5c !important; outline-offset: 2px; position: relative; }
+.is-audit .ws-f:has([data-audit])::after,
+.is-audit .ws-recap::after {
+  content: "";
+}

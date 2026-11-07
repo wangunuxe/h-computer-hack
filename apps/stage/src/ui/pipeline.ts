@@ -123,14 +123,14 @@ export function mountPipeline(root: HTMLElement, bus: Bus) {
     timers.forEach(clearTimeout);
     timers = [];
   };
-  const show = (intro: boolean) => {
+  const show = (intro: boolean, speed = 1) => {
     clearTimers();
     scene.classList.add("is-on");
     if (!intro) return;
     setPhase(0);
     setGate(g1, "idle");
     setGate(g2, "idle");
-    const at = (ms: number, fn: () => void) => timers.push(window.setTimeout(fn, ms));
+    const at = (ms: number, fn: () => void) => timers.push(window.setTimeout(fn, ms / speed));
     at(400, () => setPhase(1));
     at(2200, () => setPhase(2));
     [2600, 3400, 4200, 5000, 5800, 6600].forEach((ms, i) => at(ms, () => pulse([nObserve, nThink, nAct][i % 3])));
@@ -164,7 +164,7 @@ export function mountPipeline(root: HTMLElement, bus: Bus) {
 
   bus.on((e) => {
     if (e.type === "cue") {
-      if (e.name === "pipeline") (e.show ? show(true) : hide());
+      if (e.name === "pipeline") (e.show ? show(true, e.speed) : hide());
       if (e.name === "reset") reset();
       return;
     }

@@ -1,5 +1,6 @@
 import { GoogleGenAI, ThinkingLevel, type GenerateContentParameters } from '@google/genai';
-import { ProfileSchema, TripSchema, type Profile, type Trip } from '@voila/shared';
+import { TravelerProfileSchema, TripSchema, type TravelerProfile, type Trip } from '@voila/shared';
+import { redactContactText } from './voice-profile.js';
 import { z } from 'zod';
 
 export class UnderstandError extends Error {
@@ -27,14 +28,14 @@ export function parisIso(date: Date): string {
 }
 
 export async function understand({ transcript, profile, now, previous = {}, signal }: {
-  transcript: string; profile: Profile; now: Date; previous?: Partial<Trip>; signal?: AbortSignal;
+  transcript: string; profile: TravelerProfile; now: Date; previous?: Partial<Trip>; signal?: AbortSignal;
 }, client?: UnderstandingClient): Promise<{ trip: Partial<Trip>; missing: (keyof Trip)[]; notes?: string }> {
   if (signal?.aborted) throw new UnderstandError('aborted', 'Gemini trip understanding was cancelled.');
   if (!transcript.trim() || !Number.isFinite(now.getTime())) throw new UnderstandError('invalid_input', 'A transcript and valid current time are required.');
   const model = process.env.GEMINI_MODEL ?? 'gemini-3.6-flash';
   if (Number(/^gemini-(\d+)/.exec(model)?.[1] ?? 0) < 3) throw new UnderstandError('invalid_input', 'GEMINI_MODEL must be Gemini 3.x or newer.');
   const parsedPrevious = TripSchema.partial().safeParse(previous);
-  const parsedProfile = ProfileSchema.safeParse(profile);
+  const parsedProfile = TravelerProfileSchema.safeParse(profile);
   if (!parsedPrevious.success || !parsedProfile.success) throw new UnderstandError('invalid_input', 'Invalid previous trip or profile.');
   const sdk = client ?? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const controller = new AbortController();
@@ -54,7 +55,7 @@ export async function understand({ transcript, profile, now, previous = {}, sign
     });
     const response = await Promise.race([sdk.models.generateContent({
       model,
-      contents: JSON.stringify({ transcript, previous: parsedPrevious.data, guide_dog_default: parsedProfile.data.guide_dog, now: parisIso(now) }),
+      contents: JSON.stringify({ transcript: redactContactText(transcript, profile), previous: parsedPrevious.data, guide_dog_default: parsedProfile.data.guide_dog ?? false, now: parisIso(now) }),
       config: {
         abortSignal: controller.signal,
         thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
@@ -76,7 +77,7 @@ Do not copy defaults or previous facts into the output. Missing facts must be om
       facts.deadline = parisIso(new Date(Date.parse(extracted.departure) - 60 * 60_000));
       notes = 'Check-in cutoff derived as flight departure minus 60 minutes.';
     } else if (facts.deadline) facts.deadline = parisIso(new Date(facts.deadline));
-    const trip = TripSchema.partial().parse({ passengers: 1, luggage: 0, guide_dog: profile.guide_dog, ...parsedPrevious.data, ...facts });
+    const trip = TripSchema.partial().parse({ passengers: 1, luggage: 0, guide_dog: profile.guide_dog ?? false, ...parsedPrevious.data, ...facts });
     if (trip.deadline) trip.deadline = parisIso(new Date(trip.deadline));
     const missing = (['origin', 'destination', 'deadline'] as const).filter((key) => trip[key] === undefined);
     return { trip, missing, ...(notes ? { notes } : {}) };

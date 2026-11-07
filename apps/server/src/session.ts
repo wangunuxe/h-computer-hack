@@ -1,4 +1,4 @@
-import { ScenarioSchema, TripSchema, WebEventSchema, type Booking, type Option, type Profile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
+import { ProfileSchema, ScenarioSchema, TripSchema, WebEventSchema, type Booking, type Option, type TravelerProfile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
 import { understand } from './understand.js';
 import { getDemoDisruption, type Disruption } from './adapters/disruption.js';
 import { readRerBTraffic, rerBTrafficPage } from './adapters/traffic-h.js';
@@ -12,6 +12,7 @@ import { say, type NarrationParams } from './narrate.js';
 import { converse, type ConfirmationContext, type Turn, type TurnResult } from './converse.js';
 import { sanitizeConfirmationFields } from './confirmation.js';
 import { fallbackQuestion } from './questions.js';
+import { VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 type Research = { disruption: Disruption; extraOptions: Option[] };
@@ -31,7 +32,9 @@ export interface SessionPorts {
 export class VoilaSession {
   get language() { return this.profile?.language ?? 'fr'; }
   stage: Stage = 'LISTEN';
-  private profile?: Profile;
+  private profile?: TravelerProfile;
+  private profileCollector?: VoiceProfile;
+  private pendingProfileOption?: string;
   private scenario: Scenario = 'demo';
   private gpsOrigin?: string;
   private trip: Partial<Trip> = {};
@@ -79,6 +82,8 @@ export class VoilaSession {
     if (['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) && this.payment) this.send(this.payment);
     if (this.stage === 'CHOOSE') this.send({ type: 'options', items: this.options });
     if (this.stage === 'DONE' && this.booking) this.send({ type: 'booking_card', booking: this.booking });
+    if (this.profile) this.send({ type: 'profile', profile: this.profile });
+    if (this.profileCollector) this.profilePrompt(this.profileCollector.question);
     this.reportActivity(true);
     return () => { if (this.emit === emit) this.emit = () => {}; };
   }
@@ -88,6 +93,11 @@ export class VoilaSession {
     if (!parsed.success) { this.error('Invalid web event.'); return; }
     const event = parsed.data;
     if (event.type === 'stop') { this.stop(); return; }
+    if (event.type === 'language') {
+      if (this.profile) this.profile.language = event.language;
+      if (this.profileCollector) this.profileCollector.profile.language = event.language;
+      return;
+    }
     if (event.type === 'hello') {
       if (this.profile) { this.error('Profile already set; reconnect without restarting the trip.'); return; }
       this.profile = event.profile;
@@ -97,6 +107,23 @@ export class VoilaSession {
       return;
     }
     if (!this.profile) { this.error('Send hello first.'); return; }
+    if ((event.type === 'final_transcript' || event.type === 'user_reply') && forgetDetails(event.text)) {
+      this.resetTrip(); this.profile = { language: this.language };
+      this.send({ type: 'profile', profile: this.profile }); this.transition('LISTEN');
+      this.send({ type: 'say', text: this.language.startsWith('fr') ? 'Vos informations sont effacées de cet appareil et de cette session.' : 'Your details are cleared from this device and session.' }); return;
+    }
+    if ((event.type === 'final_transcript' || event.type === 'user_reply') && /^(stop|arrete|arretez|annule|cancel)[.!? ]*$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim())) { this.stop(); return; }
+    if (event.type === 'user_reply' && this.profileCollector) {
+      const response = this.profileCollector.reply(event.text);
+      this.profile = this.profileCollector.profile;
+      if (response.changed) this.send({ type: 'profile', profile: this.profile });
+      if (response.complete) {
+        const id = this.pendingProfileOption!; this.profileCollector = undefined; this.pendingProfileOption = undefined;
+        this.send({ type: 'say', text: this.language.startsWith('fr') ? 'Vos informations sont enregistrées sur cet appareil. Pour les effacer, dites « efface mes informations ».' : 'Your details are saved on this device. To clear them, say “forget my details”.' });
+        this.trip.guide_dog = this.profile.guide_dog ?? false; this.select(id);
+      } else this.profilePrompt(response.text);
+      return;
+    }
     if (event.type === 'final_transcript' && ['LISTEN', 'DONE'].includes(this.stage)) {
       if (!event.text.trim()) { this.error('Transcript must not be empty.'); return; }
       const restarting = this.stage === 'DONE';
@@ -118,7 +145,6 @@ export class VoilaSession {
       this.turnController?.abort(); ++this.turnVersion;
       this.remember('user', event.text);
       const normalized = event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
-      if (/^(stop|arrete|arretez|annule|cancel)$/.test(normalized)) { this.stop(); return; }
       if (this.stage === 'CHOOSE') {
         const id = chooseOption(event.text, this.options);
         if (id) { this.select(id); return; }
@@ -176,6 +202,7 @@ export class VoilaSession {
   }
   private active(generation: number) { return generation === this.generation && !this.flow.signal.aborted; }
   private cancel() {
+    this.profileCollector = undefined; this.pendingProfileOption = undefined;
     this.operations.clear();
     this.turnController?.abort(); ++this.turnVersion;
     ++this.generation;
@@ -225,7 +252,7 @@ export class VoilaSession {
       return disruption;
     });
     const linkup = this.scenario === 'demo' ? Promise.resolve([] as Option[]) : this.limited((signal) => this.ports.linkup({
-      query: `Transport disruption and alternatives for this request today ${this.ports.clock().toISOString()}. ${transcript}`, signal,
+      query: `Transport disruption and alternatives for this request today ${this.ports.clock().toISOString()}. ${redactContactText(transcript, this.profile)}`, signal,
     }), 9000, parent).then((result) => {
       if (this.active(generation)) for (const item of result.corroboration) {
         for (const source of item.sources) this.send({ type: 'feed', kind: 'research', text: item.text, source });
@@ -239,9 +266,9 @@ export class VoilaSession {
   private async interpret(transcript: string, generation: number) {
     const finish = this.beginOperation();
     try {
-      const result = await this.limited((signal) => this.ports.understand({ transcript, profile: this.profile!, now: this.ports.clock(), previous: this.trip, signal }), 20_500, this.flow.signal);
+      const result = await this.limited((signal) => this.ports.understand({ transcript: redactContactText(transcript, this.profile), profile: this.profile!, now: this.ports.clock(), previous: this.trip, signal }), 20_500, this.flow.signal);
       if (!this.active(generation)) return;
-      this.trip = { passengers: 1, luggage: 0, guide_dog: this.profile!.guide_dog, ...this.trip, ...result.trip };
+      this.trip = { passengers: 1, luggage: 0, guide_dog: this.profile!.guide_dog ?? false, ...this.trip, ...result.trip };
       await this.plan(transcript, generation);
     } catch {
       if (!this.active(generation)) return;
@@ -252,10 +279,18 @@ export class VoilaSession {
     } finally { finish(); }
   }
   private missing() { return (['origin', 'destination', 'deadline'] as const).filter((key) => !this.trip[key]); }
-  private remember(role: Turn['role'], text: string) { this.history = [...this.history, { role, text }].slice(-10); }
+  private remember(role: Turn['role'], text: string) { this.history = [...this.history, { role, text: redactContactText(text, this.profile) }].slice(-10); }
+  private profilePrompt(question: string) {
+    this.lastSay = this.ports.clock().getTime();
+    this.send({ type: 'profile_request', question }); this.send({ type: 'say', text: question });
+  }
   private select(id: string) {
     const method = bookingMethods[id];
     if (!method || !this.options.some((option) => option.id === id)) { this.error('No supported booking method for this option.'); return; }
+    const collector = new VoiceProfile(this.profile!, method.kind === 'h_agent' ? ['name', 'phone', 'email', 'guide_dog'] : ['guide_dog']);
+    if (collector.field) { this.profileCollector = collector; this.pendingProfileOption = id; this.profilePrompt(collector.question); return; }
+    const option = this.options.find((item) => item.id === id)!;
+    if (this.trip.guide_dog && option.guide_dog_status === 'refused') { this.speak('choose-again', {}); return; }
     this.attempt = 0;
     if (method.kind === 'manual') { this.speak('manual-instructions', { id, instructions: method.instructions }); this.transition('DONE'); }
     else void this.execute(id, this.generation);
@@ -287,7 +322,7 @@ export class VoilaSession {
     let result: TurnResult;
     const finish = this.beginOperation();
     try {
-      result = await this.limited((signal) => this.ports.converse({ transcript, stage, language: this.language, trip: { ...this.trip }, missing: this.missing(), options: this.options, confirmation: this.confirmation ? { ...this.confirmation.details } : undefined, history: [...this.history], attempt: this.attempt, now: this.ports.clock(), signal }), 20_500, controller.signal);
+      result = await this.limited((signal) => this.ports.converse({ transcript: redactContactText(transcript, this.profile), stage, language: this.language, trip: { ...this.trip }, missing: this.missing(), options: this.options, confirmation: this.confirmation ? { ...this.confirmation.details } : undefined, history: [...this.history], attempt: this.attempt, now: this.ports.clock(), signal }), 20_500, controller.signal);
     } catch { result = { intent: 'unclear', confidence: 0, reply: this.fallback() }; }
     finally { finish(); if (this.turnController === controller) this.turnController = undefined; }
     if (!this.active(generation) || this.stage !== stage || this.turnVersion !== version || controller.signal.aborted) return;
@@ -359,7 +394,7 @@ export class VoilaSession {
       const startUrl = base.pathname === '/' ? new URL('/fr/reservation/', base) : base;
       if (base.searchParams.get('difficulty') === 'easy') startUrl.searchParams.set('difficulty', 'easy');
       const result = await this.ports.runBooking({
-        trip, journeyMinutes: option.journey_minutes, profile: this.profile!, startUrl: startUrl.href, signal: controller.signal,
+        trip, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
         onProgress: (text) => {
           if (!current()) return;
           this.send({ type: 'feed', kind: 'agent', text });

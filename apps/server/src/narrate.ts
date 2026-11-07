@@ -1,5 +1,6 @@
 import type { Option, Trip } from '@voila/shared';
 import type { BookingPage } from './booking.js';
+import { sanitizeConfirmationFields, type ConfirmationFields } from './confirmation.js';
 
 type Empty = Record<string, never>;
 const optionNames: Record<string, { fr: string; en: string }> = {
@@ -15,7 +16,7 @@ export interface NarrationParams {
   disruption: { cause: string; recorded: boolean; mode?: 'demo' | 'live'; status?: 'normal' | 'disrupted' | 'unknown' };
   'present-options': { options: readonly Option[]; now: Date };
   'still-working': Empty;
-  confirm: { trip: Trip; option: Option; summary: string; now: Date };
+  confirm: { trip: Trip; option: Option; details?: ConfirmationFields; now: Date };
   'payment-handoff': { merchant: string; amount: number };
   'booking-done': { ref: string };
   stopped: Empty;
@@ -28,36 +29,6 @@ export interface NarrationParams {
   'manual-instructions': { id: string; instructions: string };
   'no-feasible-options': { rejected: { id?: string; name: string; reason: 'too_late' | 'guide_dog_refused' }[] };
   'no-known-options': Empty;
-}
-
-function confirmationDetails(summary: string) {
-  const text = summary.replace(/[*_`#]/g, '');
-  const lines = text.split(/\r?\n/).map((line) => line.replace(/^\s*[-•]\s*/, '').trim());
-  const pickupLines = lines.filter((line) => /^(?:pickup\b|pick-up\b|prise en charge\b|time\s*:|heure\b|date\s*:.*\b(?:time|heure)\s*:)/i.test(line));
-  const pickup = pickupLines.map((line) => line.split(/\b(?:flight|vol)\b/i)[0]).join('\n');
-  const iso = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})\b/.exec(pickup)?.[0];
-  const instant = iso ? new Date(iso) : undefined;
-  let date = /\b\d{4}-\d{2}-\d{2}\b/.exec(pickup)?.[0];
-  const labelledTime = /\b(\d{1,2})\s*(?::(\d{2})|h(?:\s*(\d{2}))?)(?!\d)/i.exec(pickup.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})\b/g, ''));
-  let hour = labelledTime ? Number(labelledTime[1]) : undefined;
-  let minute = labelledTime ? Number(labelledTime[2] ?? labelledTime[3] ?? 0) : undefined;
-  if (!labelledTime && instant && Number.isFinite(instant.getTime())) {
-    date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(instant);
-    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(instant);
-    hour = Number(parts.find((p) => p.type === 'hour')!.value);
-    minute = Number(parts.find((p) => p.type === 'minute')!.value);
-  }
-  if (date) {
-    const value = new Date(`${date}T00:00:00Z`);
-    if (!Number.isFinite(value.getTime()) || value.toISOString().slice(0, 10) !== date) date = undefined;
-  }
-  if (hour === undefined || hour > 23 || minute === undefined || minute > 59) { hour = undefined; minute = undefined; }
-  const currency = /(?:EUR\b|€)\s*(\d+(?:[.,]\d{1,2})?)(?![\d.,])|(?<![\d.,+-])(\d+(?:[.,]\d{1,2})?)\s*(?:EUR\b|€)/gi;
-  const priceLines = lines.filter((line) => /^(?:total|prix|price|montant)\b/i.test(line) || pickupLines.includes(line)).join('\n');
-  const total = /\b(?:total|prix|price|montant)\s*:?\s*((?:EUR\b|€)\s*\d+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?\s*(?:EUR\b|€))/i.exec(priceLines)?.[1];
-  const amounts = [...new Set([...(total ?? '').matchAll(currency)].map((match) => Number((match[1] ?? match[2])!.replace(',', '.'))))];
-  const price = amounts.length === 1 && Number.isFinite(amounts[0]) ? amounts[0] : undefined;
-  return { date, hour, minute, price };
 }
 
 export function say<K extends keyof NarrationParams>(key: K, params: NarrationParams[K], language: string): string {
@@ -83,17 +54,22 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
       }).join(' ');
     },
     'still-working': () => fr ? 'Je continue, un instant.' : 'Still working. One moment.',
-    confirm: ({ trip, option, summary, now }) => {
-      const { date, hour, minute, price } = confirmationDetails(summary);
+    confirm: ({ trip, option, details, now }) => {
+      const { pickup_date: date, pickup_time: time, total_price: price, currency } = sanitizeConfirmationFields(details);
       const parts = [`${optionName(option)}, ${fr ? 'vers' : 'to'} ${trip.destination}`];
-      if (hour !== undefined && minute !== undefined) {
+      let when = '';
+      if (date) {
         const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
         const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
-        const day = !date ? '' : date === today ? (fr ? 'aujourd’hui ' : 'today ') : date === tomorrow ? (fr ? 'demain ' : 'tomorrow ') :
-          `${fr ? 'le ' : 'on '}${new Intl.DateTimeFormat(locale, { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${date}T00:00:00Z`))} `;
-        parts.push(fr ? `${day}à ${hour} h${minute ? ` ${minute.toString().padStart(2, '0')}` : ''}` : `${day}at ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`);
+        when = date === today ? (fr ? 'aujourd’hui' : 'today') : date === tomorrow ? (fr ? 'demain' : 'tomorrow') :
+          `${fr ? 'le ' : 'on '}${new Intl.DateTimeFormat(locale, { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${date}T00:00:00Z`))}`;
       }
-      if (price !== undefined) parts.push(new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(price));
+      if (time) {
+        const [hour, minute] = time.split(':').map(Number);
+        when += `${when ? ' ' : ''}${fr ? `à ${hour} h${minute ? ` ${minute.toString().padStart(2, '0')}` : ''}` : `at ${time}`}`;
+      }
+      if (when) parts.push(when);
+      if (price !== undefined && currency === 'EUR') parts.push(new Intl.NumberFormat(locale, { style: 'currency', currency, minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(price));
       if (trip.guide_dog) parts.push(fr ? 'avec votre chien guide' : 'with your guide dog');
       return `${parts.join(', ')}. ${fr ? 'Je confirme ?' : 'Shall I confirm?'}`;
     },

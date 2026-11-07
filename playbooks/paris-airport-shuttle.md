@@ -16,6 +16,10 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
    **Notes for the driver** textarea; **Create booking and continue to payment**.
    URL: `/fr/reservation/<draft-id>/info`. Obtain user confirmation of route,
    date, time, price and dog note BEFORE clicking the final button.
+   Call `confirm_with_user` with `summary` and the observed `pickup_date`
+   (YYYY-MM-DD), `pickup_time` (HH:MM), `total_price` (number), and `currency`
+   (`EUR`). Use the transfer pickup date/time in Europe/Paris and the transfer
+   total, never flight details or airfare. Omit any field you cannot read reliably.
 4. **Step 4 — Payment**: summary (reference, pickup, dropoff, pickup date/time,
    vehicle, price, passenger contacts, passenger/luggage counts, operator phone,
    status, notes), countdown, **Pay via Credit Card**, **View booking confirmation**.

@@ -254,11 +254,11 @@ export class VoilaSession {
           this.send({ type: 'feed', kind: 'agent', text });
         },
         onPage: (page) => { if (current() && this.stage === 'EXECUTE') this.speak('booking-page', { page }); },
-        confirm: (summary) => {
+        confirm: (summary, details) => {
           if (!current()) return Promise.resolve({ approved: false, reply: 'Stopped' });
           if (this.confirmation) throw new Error('A confirmation is already pending.');
           const decision = new Promise<{ approved: boolean; reply: string }>((resolve) => { this.confirmation = { summary, resolve }; });
-          this.transition('CONFIRM'); this.send({ type: 'confirm', summary }); this.speak('confirm', { trip, option, summary, now: this.ports.clock() });
+          this.transition('CONFIRM'); this.send({ type: 'confirm', summary }); this.speak('confirm', { trip, option, details, now: this.ports.clock() });
           return decision;
         },
         onPaymentHandoff: (payment) => {

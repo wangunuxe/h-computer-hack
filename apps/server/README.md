@@ -157,8 +157,11 @@ within that stage. Every stage transition resets the back-off.
 Raw agent progress stays in the feed;
 only observed route/vehicle/info/payment page changes produce localized spoken
 milestones through the runner's optional `onPage(page)` callback. Confirmation
-speech uses a short localized template, omitting unparseable pickup time and
-price; the `confirm` event keeps the full agent summary. Confirmation replies accept
+speech uses a short localized template built only from the structured tool fields
+`pickup_date`, `pickup_time`, `total_price` and `currency`. Pickup date/time are
+Europe/Paris local values; missing or invalid fields are omitted, never parsed
+from the free-text summary. Prices are spoken only with a valid EUR currency.
+The `confirm` event keeps the full agent summary. Confirmation replies accept
 French/English yes/no phrases; unclear replies do not approve a booking.
 
 Run `pnpm --filter @voila/server dev` (PORT defaults to 3000). First call

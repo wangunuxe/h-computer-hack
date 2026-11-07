@@ -127,12 +127,12 @@ describe('contextual conversation routing', () => {
     expect(s.session.stage).toBe('CHOOSE'); expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Les deux taxis acceptent les chiens guides.' });
   });
   it('merges clarification patches, asks all remaining fields, and resumes planning', async () => {
-    const converse = vi.fn<SessionPorts['converse']>().mockResolvedValueOnce(result({ reply: 'D’où partez-vous et à quelle heure devez-vous arriver ?' }))
-      .mockResolvedValueOnce(result({ intent: 'provide_info', trip_patch: { origin: trip.origin }, reply: 'À quelle heure devez-vous arriver ?' }))
+    const converse = vi.fn<SessionPorts['converse']>().mockResolvedValueOnce(result({ reply: 'D’où partez-vous ?' }))
+      .mockResolvedValueOnce(result({ intent: 'provide_info', trip_patch: { origin: trip.origin }, reply: 'Merci.' }))
       .mockResolvedValueOnce(result({ intent: 'provide_info', trip_patch: { deadline: trip.deadline }, reply: 'Merci.' }));
     const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { destination: 'CDG' }, missing: ['origin', 'deadline'] }), converse }); await s.start();
-    expect(converse.mock.calls[0]![0].missing).toEqual(['origin', 'deadline']); expect(s.session.stage).toBe('CLARIFY');
-    await s.reply('Je suis gare du Nord'); expect(s.events.at(-1)).toEqual({ type: 'say', text: 'À quelle heure devez-vous arriver ?' });
+    expect(converse.mock.calls[0]![0].missing).toEqual(['origin']); expect(s.session.stage).toBe('CLARIFY');
+    await s.reply('Je suis gare du Nord'); expect(s.session.stage).toBe('CHOOSE');
     await s.reply('à 21h'); expect(s.session.stage).toBe('CHOOSE'); expect(converse.mock.calls[2]![0].history.some((turn) => turn.text === 'Je suis gare du Nord')).toBe(true);
   });
   it.each([
@@ -158,8 +158,7 @@ describe('contextual conversation routing', () => {
   });
   it('re-runs research and feasibility after a route correction', async () => {
     const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'correct', trip_patch: { destination: 'Orly' } })) }); await s.start(); await s.reply('plutôt Orly');
-    expect(s.ports.trafficH).toHaveBeenCalledTimes(2); expect(s.session.stage).toBe('CHOOSE'); expect(s.events.filter((e) => e.type === 'options').at(-1)).toEqual({ type: 'options', items: [] });
-    expect(s.events).toContainEqual({ type: 'say', text: 'Quel trajet choisissez-vous ?' });
+    expect(s.ports.trafficH).toHaveBeenCalledTimes(4); expect(s.session.stage).toBe('CHOOSE'); expect(s.events.filter((e) => e.type === 'options').at(-1)).toMatchObject({ type: 'options', items: [{ id: 'paris-airport-shuttle', name: 'Airport taxi — Gare du Nord' }] });
   });
   it.each(['RESEARCH', 'EXECUTE', 'HANDOFF', 'AWAIT_PAYMENT'] as const)('answers status in %s without changing flow', async (stage) => {
     const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply: 'Votre demande est en cours.' })) }); await s.start(); s.session.stage = stage; await s.reply('où en est-on ?');
@@ -199,8 +198,8 @@ describe('contextual conversation routing', () => {
     await s.start(); await s.reply('euh'); await s.reply('euh');
     const questions = s.events.filter((event) => event.type === 'clarify').map((event) => event.question);
     expect(new Set(questions).size).toBe(3);
-    for (const question of questions) expect(question).toMatch(/départ.*destination.*heure/);
-    expect(questions[2]).toContain('CDG'); expect(s.session.stage).toBe('CLARIFY');
+    for (const question of questions) { expect(question).toMatch(/départ.*destination/); expect(question).not.toMatch(/heure limite/); }
+    expect(questions[2]).toContain('Bercy'); expect(s.session.stage).toBe('CLARIFY');
   });
   it('points to confirmation buttons after two failures without ever approving', async () => {
     const decision = vi.fn(); const s = setup({ runBooking: async (input) => { decision(await input.confirm('Shuttle', fare)); return new Promise(() => {}); } });

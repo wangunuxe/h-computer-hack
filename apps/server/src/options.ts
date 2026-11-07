@@ -1,9 +1,13 @@
 import type { Option, Trip } from '@voila/shared';
+import { distanceMeters, stationForPlace } from './stations.js';
 
 const normalize = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ');
 export function matchesPresetRoute(trip: Pick<Trip, 'origin' | 'destination'>): boolean {
-  const destination = normalize(trip.destination);
-  return Boolean(trip.origin.trim()) && (/\b(cdg|roissy)\b/.test(destination) || /\bcharles de gaulle\b/.test(destination) && !/\betoile\b/.test(destination));
+  return Boolean(trip.origin.trim() && trip.destination.trim());
+}
+export function isAirport(destination: string): boolean {
+  const text = normalize(destination);
+  return /\b(cdg|roissy|orly|airport|aeroport)\b/.test(text) || /\bcharles de gaulle\b/.test(text) && !/\betoile\b/.test(text);
 }
 export function isRerBOrigin(origin: string): boolean {
   return /\b(gare du nord|chatelet|les halles|saint michel|luxembourg|port royal|denfert rochereau|cite universitaire)\b/.test(normalize(origin));
@@ -24,9 +28,12 @@ export function optionsForTrip(trip: Pick<Trip, 'origin' | 'destination'>, disru
     [/\b(chatelet|les halles|louvre|rivoli|hotel de ville|75001|75002|75003|75004)\b/, 45],
     [/\b(montparnasse|denfert|75013|75014|75015)\b/, 55],
   ];
-  const journey_minutes = zones.find(([zone]) => zone.test(origin))?.[1] ?? 50;
-  const taxi = { ...presetOptions[0]!, name: `Airport taxi — ${trip.origin}`, journey_minutes };
-  return [taxi, ...(disrupted && isRerBOrigin(trip.origin) ? [{ ...presetOptions[1]! }] : [])];
+  const from = stationForPlace(trip.origin), to = stationForPlace(trip.destination);
+  const airport = isAirport(trip.destination);
+  const journey_minutes = airport && /\b(cdg|roissy|charles de gaulle)\b/.test(normalize(trip.destination)) ? zones.find(([zone]) => zone.test(origin))?.[1] ?? 50
+    : from && to ? Math.max(15, Math.ceil((10 + distanceMeters(from, to) / 1000 * 2.5) / 5) * 5) : airport || isAirport(trip.origin) ? 50 : 35;
+  const taxi = { ...presetOptions[0]!, name: `${airport ? 'Airport taxi' : `Taxi to ${trip.destination}`} — ${trip.origin}`, journey_minutes };
+  return [taxi, ...(airport && /\b(cdg|roissy|charles de gaulle)\b/.test(normalize(trip.destination)) && disrupted && isRerBOrigin(trip.origin) ? [{ ...presetOptions[1]! }] : [])];
 }
 
 export type BookingMethod = { kind: 'h_agent'; playbook: 'paris-airport-shuttle' } | { kind: 'manual'; instructions: string };

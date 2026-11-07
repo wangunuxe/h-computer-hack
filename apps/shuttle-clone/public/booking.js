@@ -7,6 +7,8 @@ function addressSuggestions(query, pickup) {
     ['Gare de l’Est, Place du 11 Novembre 1918, Paris', 48.8769, 2.3591],
     ['Charles de Gaulle–Étoile, Place Charles de Gaulle, Paris', 48.8738, 2.2950],
     ['Châtelet–Les Halles, Paris', 48.8619, 2.3470],
+    ['La Défense, Paris', 48.8919, 2.2387],
+    ['Bercy, Paris', 48.8404, 2.3795],
     ['CDG Airport Terminal 1, Roissy-en-France', 49.0097, 2.5479],
     ['CDG Airport Terminal 2E, Roissy-en-France', 49.0038, 2.5795],
     ['CDG Airport Terminal 2F, Roissy-en-France', 49.0033, 2.6006],
@@ -20,8 +22,8 @@ function addressSuggestions(query, pickup) {
   const text = query.trim();
   if (!text) return [];
   const matches = addresses.filter(([address]) => normalize(address).includes(normalize(text)));
-  // Custom pickup coordinates are a Paris-centre simulation, not geocoding.
-  return matches.length ? matches : pickup && text.length >= 3 ? [[text, 48.8566, 2.3522]] : [];
+  // Custom address coordinates are a Paris-centre simulation, not geocoding.
+  return matches.length ? matches : text.length >= 3 ? [[text, 48.8566, 2.3522]] : [];
 }
 jQuery(function ($) {
   $('#pickup-date').each(function () {

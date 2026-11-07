@@ -38,6 +38,15 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it('briefs H with a non-airport dropoff and ASAP window without inventing a flight deadline', async () => {
+    const mock = setup(async function* () {});
+    mock.input.trip = { ...mock.input.trip, origin: 'La Défense', destination: 'Bercy', deadline: undefined };
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow('without payment handoff');
+    const params = mock.startSession.mock.calls[0] as unknown as [{ agent: { instructions: string } }];
+    expect(params[0].agent.instructions).toContain('Dropoff address: "Bercy". Enter this exact trip destination');
+    expect(params[0].agent.instructions).toContain('No arrival deadline was supplied: this is an ASAP trip.');
+    expect(params[0].agent.instructions).toContain('Do not ask for an arrival deadline or flight.');
+  });
   it('briefs H with the stated pickup instead of a station example', async () => {
     const mock = setup(); mock.input.trip.origin = 'Étoile'; await runBooking(mock.input, mock.client);
     const params = mock.startSession.mock.calls[0] as unknown as [{ agent: { instructions: string } }];

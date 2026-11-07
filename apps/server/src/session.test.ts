@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ServerEventSchema, type ServerEvent, type Trip } from '@voila/shared';
 import { VoilaSession, type SessionPorts } from './session.js';
 import type { BookingInput } from './booking.js';
-import { presetOptions } from './options.js';
+import { optionsForTrip, presetOptions } from './options.js';
 import { readRerBTraffic, type TrafficClient } from './adapters/traffic-h.js';
 import { understand } from './understand.js';
 
@@ -155,10 +155,10 @@ describe('VoilaSession', () => {
     const s = setup(); s.hello(); s.session.handle({ type: 'final_transcript', text: 'Stop.' });
     expect(s.session.stage).toBe('LISTEN'); expect(s.ports.understand).not.toHaveBeenCalled(); expect(s.ports.trafficH).not.toHaveBeenCalled();
   });
-  it('keeps cancellation available in CLARIFY while research runs, replays it, and aborts on Stop', async () => {
+  it('keeps cancellation available during route-specific research, replays it, and aborts on Stop', async () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['trafficH']>>>();
     const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { origin: 'Gare du Nord', destination: 'CDG' }, missing: ['deadline'] }), trafficH: vi.fn(() => pending.promise) });
-    await s.start(); expect(s.session.stage).toBe('CLARIFY');
+    await s.start(); expect(s.session.stage).toBe('RESEARCH');
     expect(s.activity.at(-1)).toEqual({ type: 'activity', cancellable: true });
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
     expect(replay).toContainEqual({ type: 'activity', cancellable: true });
@@ -249,7 +249,7 @@ describe('VoilaSession', () => {
     expect(s.events).toContainEqual(expect.objectContaining({ type: 'feed', mode: 'live', status: 'disrupted' }));
   });
   it('still offers options when H reports normal traffic', async () => {
-    const s = setup({ trafficH: vi.fn().mockResolvedValue({ ...disruption, status: 'normal', mode: 'live', cause: '' }) });
+    const s = setup({ trafficH: vi.fn().mockResolvedValue({ ...disruption, status: 'normal', mode: 'live', summary: 'The RER B is running normally.', cause: '' }) });
     await s.start();
     expect(s.session.stage).toBe('CHOOSE'); expect(s.ports.trafficH).toHaveBeenCalledOnce();
     expect(s.events).toContainEqual(expect.objectContaining({ type: 'feed', mode: 'live', status: 'normal' }));
@@ -390,19 +390,19 @@ describe('VoilaSession', () => {
     expect(s.session.markPaid('PAS-123')).toBe(true);
     expect(s.events.filter((e) => e.type === 'booking_card')).toHaveLength(1);
   });
-  it('runs research while clarifying and merges the reply without restarting research', async () => {
+  it('waits for both endpoints before starting route-aware research', async () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['trafficH']>>>();
-    const understanding = vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip: { origin: trip.origin, destination: trip.destination }, missing: ['deadline'] });
-    const converse = vi.fn<SessionPorts['converse']>().mockResolvedValueOnce({ intent: 'unclear', confidence: .1, reply: 'What time is your flight?' }).mockResolvedValueOnce({ intent: 'provide_info', confidence: .95, trip_patch: { deadline: trip.deadline }, reply: 'Thank you.' });
+    const understanding = vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip: { destination: trip.destination }, missing: ['origin'] });
+    const converse = vi.fn<SessionPorts['converse']>().mockResolvedValueOnce({ intent: 'unclear', confidence: .1, reply: 'Where are you starting?' }).mockResolvedValueOnce({ intent: 'provide_info', confidence: .95, trip_patch: { origin: trip.origin }, reply: 'Thank you.' });
     const s = setup({ understand: understanding, converse, trafficH: vi.fn(() => pending.promise) });
     await s.start();
     expect(s.session.stage).toBe('CLARIFY');
-    expect(s.ports.trafficH).toHaveBeenCalled(); expect(s.ports.linkup).toHaveBeenCalled();
+    expect(s.ports.trafficH).not.toHaveBeenCalled(); expect(s.ports.linkup).not.toHaveBeenCalled();
     pending.resolve(disruption); await flush();
     expect(s.session.stage).toBe('CLARIFY');
     expect(s.events.some((e) => e.type === 'options')).toBe(false);
-    await s.choose('My flight is at 21h');
-    expect(converse.mock.calls[1]![0].trip).toMatchObject({ origin: trip.origin, destination: trip.destination, luggage: 0 });
+    await s.choose('Gare du Nord');
+    expect(converse.mock.calls[1]![0].trip).toMatchObject({ destination: trip.destination, luggage: 0 });
     expect(s.session.stage).toBe('CHOOSE');
     expect(s.ports.trafficH).toHaveBeenCalledTimes(1);
   });
@@ -420,18 +420,18 @@ describe('VoilaSession', () => {
     expect(s.events.find((e) => e.type === 'options')).toMatchObject({ items: expect.any(Array) });
     expect(s.events.some((e) => e.type === 'error')).toBe(false);
   });
-  it('does not offer Gare du Nord–CDG presets for another route and speaks a safe fallback', async () => {
+  it('offers the taxi for another airport without a station-specific fallback', async () => {
     const s = setup({ understand: async () => ({ trip: { ...trip, origin: 'Gare de Lyon', destination: 'Orly' }, missing: [] }) });
     s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'Gare de Lyon vers Orly' }); await flush();
-    expect(s.events).toContainEqual({ type: 'options', items: [] });
-    expect(s.events).toContainEqual({ type: 'say', text: 'Je peux réserver un taxi vers l’aéroport. Pour vérifier ce trajet, quel aéroport souhaitez-vous rejoindre et d’où partez-vous ?' });
+    expect(s.events).toContainEqual({ type: 'options', items: [expect.objectContaining({ id: 'paris-airport-shuttle', name: 'Airport taxi — Gare de Lyon' })] });
+    expect(JSON.stringify(s.events.filter((event) => event.type === 'say'))).not.toContain('Gare du Nord');
     expect(s.ports.linkup.mock.calls[0]?.[0].query).not.toContain('Gare du Nord to CDG');
   });
-  it('uses only researched extra options for an unsupported preset route', async () => {
+  it('keeps researched sources while contextualizing the taxi to the current route', async () => {
     const extra = { ...presetOptions[0]!, name: 'Airport taxi to Orly', source: 'https://paris-airport-shuttle.com/fr/reservation/' };
     const s = setup({ understand: async () => ({ trip: { ...trip, destination: 'Orly' }, missing: [] }), linkup: async () => ({ corroboration: [], extraOptions: [extra] }) });
     await s.start();
-    expect(s.events).toContainEqual({ type: 'options', items: [extra] });
+    expect(s.events).toContainEqual({ type: 'options', items: [{ ...optionsForTrip({ origin: trip.origin, destination: 'Orly' }, false)[0]!, source: extra.source }] });
   });
   it('times out research ports that ignore their signals', async () => {
     const s = setup({ trafficH: () => new Promise(() => {}), linkup: () => new Promise(() => {}) });
@@ -508,7 +508,7 @@ describe('VoilaSession', () => {
     let understandingSignal: AbortSignal | undefined;
     const s = setup({ understand: (input) => { understandingSignal = input.signal; return pending.promise; }, trafficH: async (input) => { signal = input?.signal; return new Promise(() => {}); } });
     await s.start(); s.session.handle({ type: 'stop' });
-    expect(signal?.aborted).toBe(true);
+    expect(signal).toBeUndefined();
     expect(understandingSignal?.aborted).toBe(true);
     pending.resolve({ trip, missing: [] }); await flush();
     expect(s.session.stage).toBe('LISTEN');
@@ -541,7 +541,7 @@ describe('VoilaSession', () => {
     expect(s.session.stage).toBe('CHOOSE');
     const lastOptions = s.events.filter((e) => e.type === 'options').at(-1);
     expect(lastOptions?.items.some((o) => o.id === 'paris-airport-shuttle')).toBe(true);
-    expect(s.events).toContainEqual({ type: 'say', text: 'This booking attempt failed. Would you like to retry the airport taxi?' });
+    expect(s.events).toContainEqual({ type: 'say', text: 'This booking attempt failed. Would you like to retry the taxi?' });
   });
   it('emits a heartbeat after four silent seconds in UNDERSTAND', async () => {
     const s = setup({ understand: () => new Promise(() => {}) }); await s.start();

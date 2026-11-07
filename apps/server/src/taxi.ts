@@ -24,10 +24,10 @@ export function taxiTurn(input: TaxiContext, result: TurnResult): TurnResult {
   const mentioned = mentionsTaxiRequest(input.transcript);
   if (!requested && !refusesTaxi(result.reply) && !(mentioned && result.intent === 'unclear')) return result;
   const fr = input.language.startsWith('fr');
-  const capability = fr ? 'Je peux réserver un taxi vers l’aéroport, avec votre confirmation puis votre paiement.' : 'I can book an airport taxi, with your confirmation and then your own payment.';
+  const capability = fr ? 'Je peux réserver un taxi, avec votre confirmation puis votre paiement.' : 'I can book a taxi, with your confirmation and then your own payment.';
   const patch = ['provide_info', 'correct'].includes(result.intent) && result.confidence >= .65 ? result.trip_patch : undefined;
   const trip = { ...input.trip, ...patch };
-  const missing = (['origin', 'destination', 'deadline'] as const).filter((key) => !trip[key]);
+  const missing = (['origin', 'destination'] as const).filter((key) => !trip[key]);
   let reply = capability;
   if (missing.length) reply += ' ' + fallbackQuestion({ ...input, stage: 'CLARIFY', missing });
   else if (patch && Object.keys(patch).length) reply += fr ? ' Je vérifie les options pour ce trajet.' : ' I will check the options for this trip.';

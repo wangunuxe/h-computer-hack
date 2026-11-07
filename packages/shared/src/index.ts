@@ -6,7 +6,7 @@ export const GuideDogStatusSchema = z.enum(['accepted', 'unknown', 'refused']);
 export const TripSchema = z.object({
   origin: text,
   destination: text,
-  deadline: z.iso.datetime({ offset: true }),
+  deadline: z.iso.datetime({ offset: true }).optional(),
   passengers: z.number().int().positive(),
   guide_dog: z.boolean(),
   luggage: z.number().int().nonnegative(),

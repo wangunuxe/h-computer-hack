@@ -1,12 +1,12 @@
 import { ProfileSchema, ScenarioSchema, TripSchema, WebEventSchema, type Booking, type Option, type TravelerProfile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
 import { understand } from './understand.js';
 import { getDemoDisruption, type Disruption } from './adapters/disruption.js';
-import { readRerBTraffic, rerBTrafficPage } from './adapters/traffic-h.js';
+import { readRerBTraffic } from './adapters/traffic-h.js';
 import { searchDisruptionAndAlternatives } from './adapters/linkup.js';
 import { runBooking } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
 import { assessOptions } from './feasibility.js';
-import { bookingMethods, isRerBOrigin, mergeOptions, optionsForTrip } from './options.js';
+import { bookingMethods, mergeOptions, optionsForTrip } from './options.js';
 import { chooseOption } from './choose.js';
 import { say, type NarrationParams } from './narrate.js';
 import { converse, type ConfirmationContext, type Turn, type TurnResult } from './converse.js';
@@ -14,9 +14,10 @@ import { sanitizeConfirmationFields } from './confirmation.js';
 import { fallbackQuestion } from './questions.js';
 import { VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 import { mentionsTaxiRequest, requestsTaxi, taxiTurn } from './taxi.js';
+import { relevantLines, trafficPage } from './stations.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
-type Research = { disruption: Disruption; extraOptions: Option[] };
+type Research = { traffic: Disruption[]; extraOptions: Option[] };
 const userPayment = Symbol('user-payment');
 export interface SessionPorts {
   understand: typeof understand;
@@ -142,8 +143,6 @@ export class VoilaSession {
       this.transition('UNDERSTAND');
       this.speak('acknowledgement', {});
       this.speak('research-started', {});
-      this.research = this.startResearch(event.text, generation);
-      void this.research.catch(() => {});
       void this.interpret(event.text, generation);
     } else if (event.type === 'user_reply') {
       if (!event.text.trim()) { this.error('Reply must not be empty.'); return; }
@@ -246,18 +245,19 @@ export class VoilaSession {
     const finish = this.beginOperation();
     try {
     const parent = this.flow.signal;
-    const traffic = async (): Promise<Disruption> => {
-      if (this.scenario === 'demo') return getDemoDisruption();
-      try { return await this.limited((signal) => this.ports.trafficH({ signal, now: this.ports.clock() }), 46_000, parent); }
+    const lines = relevantLines(this.trip.origin ?? '', this.trip.destination ?? '');
+    const traffic = async (line: string): Promise<Disruption> => {
+      if (this.scenario === 'demo') return { ...await getDemoDisruption(line), line };
+      try { return { ...await this.limited((signal) => this.ports.trafficH({ signal, now: this.ports.clock(), line }), 46_000, parent), line }; }
       catch {
         parent.throwIfAborted();
-        return { status: 'unknown', mode: 'live', summary: 'RER B status unknown: H lookup unavailable.', cause: '', source: rerBTrafficPage, recorded: false };
+        return { line, status: 'unknown', mode: 'live', summary: `${line}: current traffic unknown.`, cause: '', source: trafficPage(line), recorded: false };
       }
     };
-    const trafficResult = traffic().then((disruption) => {
+    const trafficResult = Promise.all(lines.map((line) => traffic(line).then((disruption) => {
       if (this.active(generation)) this.send({ type: 'feed', kind: 'traffic', text: `${disruption.mode}${disruption.recorded ? ' — recorded data' : ''} — ${disruption.summary}`, source: disruption.source, mode: disruption.mode, status: disruption.status });
       return disruption;
-    });
+    })));
     const linkup = this.scenario === 'demo' ? Promise.resolve([] as Option[]) : this.limited((signal) => this.ports.linkup({
       query: `Transport disruption and alternatives for this request today ${this.ports.clock().toISOString()}. ${redactContactText(transcript, this.profile)}`, signal,
     }), 9000, parent).then((result) => {
@@ -266,8 +266,8 @@ export class VoilaSession {
       }
       return result.extraOptions;
     }).catch(() => { if (this.active(generation)) this.ports.logger.error('Linkup research unavailable; retaining preset options.'); return []; });
-    const [disruption, extraOptions] = await Promise.all([trafficResult, linkup]);
-    return { disruption, extraOptions };
+    const [reports, extraOptions] = await Promise.all([trafficResult, linkup]);
+    return { traffic: reports, extraOptions };
     } finally { finish(); }
   }
   private async interpret(transcript: string, generation: number) {
@@ -286,7 +286,7 @@ export class VoilaSession {
       this.cancel(); this.transition('LISTEN');
     } finally { finish(); }
   }
-  private missing() { return (['origin', 'destination', 'deadline'] as const).filter((key) => !this.trip[key]); }
+  private missing() { return (['origin', 'destination'] as const).filter((key) => !this.trip[key]); }
   private remember(role: Turn['role'], text: string) { this.history = [...this.history, { role, text: redactContactText(text, this.profile) }].slice(-10); }
   private profilePrompt(question: string) {
     this.lastSay = this.ports.clock().getTime();
@@ -348,7 +348,7 @@ export class VoilaSession {
       this.trip = TripSchema.partial().parse({ ...this.trip, ...result.trip_patch }); this.attempt = 0;
       const changedRoute = ['origin', 'destination', 'deadline'].some((key) => before[key as keyof Trip] !== undefined && before[key as keyof Trip] !== this.trip[key as keyof Trip]);
       const next = ++this.generation;
-      if (changedRoute || !this.research) { this.flow.abort(); this.flow = new AbortController(); this.research = this.startResearch(transcript, next); void this.research.catch(() => {}); }
+      if (changedRoute || !this.research) { this.flow.abort(); this.flow = new AbortController(); this.research = undefined; }
       this.options = [];
       if (!this.missing().length) this.answer(result.reply);
       await this.plan(transcript, next, result.reply);
@@ -371,11 +371,13 @@ export class VoilaSession {
       }
       const trip = TripSchema.parse(this.trip);
       this.transition('RESEARCH');
-      const research = await this.research!;
+      this.research ??= this.startResearch(transcript, generation);
+      const research = await this.research;
       if (!this.active(generation)) return;
-      const local = optionsForTrip(trip, research.disruption.status === 'disrupted');
+      const rerBDisrupted = research.traffic.some((report) => report.line === 'RER B' && report.status === 'disrupted');
+      const local = optionsForTrip(trip, rerBDisrupted);
       const catalogue = mergeOptions(local, research.extraOptions).filter((option) => bookingMethods[option.id] &&
-        (option.id !== 'rer-b-replacement-bus' || research.disruption.status === 'disrupted' && isRerBOrigin(trip.origin))).map((option) => {
+        (option.id !== 'rer-b-replacement-bus' || local.some((item) => item.id === 'rer-b-replacement-bus'))).map((option) => {
         const contextual = local.find((item) => item.id === option.id);
         return contextual ? { ...option, name: contextual.name, journey_minutes: contextual.journey_minutes, pickup_wait_minutes: contextual.pickup_wait_minutes } : option;
       });
@@ -383,7 +385,11 @@ export class VoilaSession {
       this.options = assessed.feasible;
       this.transition('PRESENT');
       this.send({ type: 'options', items: this.options });
-      this.speak('disruption', { ...research.disruption, origin: !/gare du nord/i.test(trip.origin) && local.length ? trip.origin : undefined });
+      for (const report of research.traffic) {
+        if (report.line === 'RER B' && report.recorded) this.speak('disruption', { ...report, origin: !/gare du nord/i.test(trip.origin) ? trip.origin : undefined });
+        else this.speak('traffic-line', report);
+      }
+      if (!research.traffic.length) this.speak('traffic-line', { mode: this.scenario, status: 'unknown', summary: '' });
       if (this.options.length) this.speak('present-options', { options: this.options, now: this.ports.clock() });
       else if (!catalogue.length) this.speak('no-known-options', {});
       else this.speak('no-feasible-options', { rejected: assessed.rejected.map(({ option, reason }) => ({ id: option.id, name: option.name, reason })) });

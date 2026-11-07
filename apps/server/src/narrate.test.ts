@@ -57,7 +57,7 @@ describe('say', () => {
   });
   it('handles no options and no failure reason without empty or undefined speech', () => {
     expect(say('present-options', { options: [], now: new Date() }, 'fr')).toContain('Aucune option');
-    expect(say('booking-failed', {}, 'en')).toBe('This booking attempt failed. Would you like to retry the airport taxi?');
+    expect(say('booking-failed', {}, 'en')).toBe('This booking attempt failed. Would you like to retry the taxi?');
   });
   it.each(['fr', 'en'])('offers taxi clarification and honest retries rather than refusing or deflecting in %s', (language) => {
     const unknown = say('no-known-options', {}, language), failed = say('booking-failed', {}, language);

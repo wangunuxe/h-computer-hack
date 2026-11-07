@@ -13,7 +13,7 @@ describe('bilingual fallback questions', () => {
       expect(new Set(replies).size).toBe(3);
       if (stage === 'CHOOSE') expect(replies[2]).toContain('1.');
       if (stage === 'CONFIRM') expect(replies[2]).toMatch(/boutons|buttons/);
-      if (stage === 'CLARIFY') expect(replies[2]).toContain('CDG');
+      if (stage === 'CLARIFY') { expect(replies[2]).toContain('Bercy'); expect(replies[2]).not.toMatch(/cutoff|heure limite/); }
     }
   });
 });

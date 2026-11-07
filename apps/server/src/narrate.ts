@@ -10,7 +10,8 @@ const optionNames: Record<string, { fr: string; en: string }> = {
 export function spokenOptionName(option: { id?: string; name: string }, language: string): string {
   const locale = language.toLowerCase().split('-')[0] === 'fr' ? 'fr' : 'en';
   const separator = option.name.indexOf(' — ');
-  const name = (option.id ? optionNames[option.id]?.[locale] : undefined) ?? (separator < 0 ? option.name : option.name.slice(0, separator));
+  const base = separator < 0 ? option.name : option.name.slice(0, separator);
+  const name = option.id === 'paris-airport-shuttle' && base.startsWith('Taxi to ') ? `${locale === 'fr' ? 'Taxi vers' : 'Taxi to'} ${base.slice(8)}` : (option.id ? optionNames[option.id]?.[locale] : undefined) ?? base;
   return separator < 0 ? name : `${name}, ${locale === 'fr' ? 'prise en charge à' : 'pickup at'} ${option.name.slice(separator + 3)}`;
 }
 export interface NarrationParams {
@@ -18,6 +19,7 @@ export interface NarrationParams {
   'clarify-deadline': Empty;
   'research-started': Empty;
   disruption: { cause: string; recorded: boolean; mode?: 'demo' | 'live'; status?: 'normal' | 'disrupted' | 'unknown'; origin?: string };
+  'traffic-line': { line?: string; mode: 'demo' | 'live'; status: 'normal' | 'disrupted' | 'unknown'; summary: string };
   'present-options': { options: readonly Option[]; now: Date };
   'still-working': Empty;
   confirm: { trip: Trip; option: Option; details?: ConfirmationFields; now: Date };
@@ -41,9 +43,15 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
   const optionName = (option: { id?: string; name: string }) => spokenOptionName(option, language);
   const money = (amount: number) => new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR' }).format(amount);
   const templates: { [P in keyof NarrationParams]: (p: NarrationParams[P]) => string } = {
-    acknowledgement: () => fr ? 'Je vous aide à rejoindre l’aéroport.' : 'I’ll help you reach the airport.',
+    acknowledgement: () => fr ? 'Je vous aide à organiser votre trajet.' : 'I’ll help you plan your journey.',
     'clarify-deadline': () => fr ? 'À quelle heure ferme l’enregistrement ?' : 'What time does check-in close?',
     'research-started': () => fr ? 'Je vérifie le trafic et les alternatives.' : 'I’m checking traffic and alternatives.',
+    'traffic-line': ({ line, mode, status, summary }) => {
+      const label = line ? `${line} : ` : '';
+      if (mode === 'demo') return fr ? `Mode démonstration. ${label}Aucune donnée enregistrée pour ${line ? 'cette ligne' : 'les lignes de ce trajet'}. Le trafic est inconnu.` : `Demo mode. ${label}No recorded data for ${line ? 'this line' : 'the lines on this route'}. Traffic is unknown.`;
+      if (status === 'unknown') return fr ? `${label}Je n’ai pas pu lire le trafic actuel. Son état est inconnu.` : `${label}I could not read current traffic. Its status is unknown.`;
+      return `${label}${summary}`;
+    },
     disruption: ({ cause, recorded, mode, status, origin: pickup }) => {
       const origin = mode === 'demo' ? (fr ? 'Mode démonstration. ' : 'Demo mode. ') : mode === 'live' ? (status === 'unknown' ? (fr ? 'Mode direct. Vérification par H indisponible. ' : 'Live mode. H traffic check unavailable. ') : (fr ? 'Trafic en direct, pages officielles lues par H. ' : 'Live traffic, official pages read by H. ')) : '';
       const body = status === 'normal' ? (fr ? 'Le RER B circule normalement. Je vous propose aussi des alternatives.' : 'The RER B is running normally. I’ll still offer alternatives.') : status === 'unknown' ? (fr ? 'Je ne peux pas vérifier l’état du RER B. Statut inconnu. Voici les alternatives.' : 'I can’t verify the RER B status. Its status is unknown. Here are the alternatives.') : cause;
@@ -81,7 +89,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
     'payment-handoff': ({ merchant, amount }) => fr ? `${money(amount)} chez ${merchant}. Ouvrez le paiement sur votre téléphone.` : `${money(amount)} with ${merchant}. Open payment on your phone.`,
     'booking-done': ({ ref }) => fr ? `Réservation ${ref}. Voici votre fiche.` : `Booking ${ref}. Here are your details.`,
     stopped: () => fr ? 'J’arrête. Aucune autre action.' : 'Stopped. No further actions.',
-    'booking-failed': ({ reason }) => `${fr ? 'Cette tentative de réservation a échoué. Voulez-vous réessayer le taxi vers l’aéroport ?' : 'This booking attempt failed. Would you like to retry the airport taxi?'}${reason ? ` ${reason}` : ''}`,
+    'booking-failed': ({ reason }) => `${fr ? 'Cette tentative de réservation a échoué. Voulez-vous réessayer le taxi ?' : 'This booking attempt failed. Would you like to retry the taxi?'}${reason ? ` ${reason}` : ''}`,
     'clarify-origin': () => fr ? 'Où êtes-vous actuellement ?' : 'Where are you now?',
     'clarify-destination': () => fr ? 'Quel aéroport et quel terminal ?' : 'Which airport and terminal?',
     'choose-again': () => fr ? 'Quelle option choisissez-vous ? Dites son numéro ou son nom.' : 'Which option? Say its number or name.',
@@ -96,7 +104,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
       'rer-b-replacement-bus': 'Demandez aux agents si un bus de remplacement dessert CDG et où monter. Confirmez le terminal, l’accessibilité et le départ.',
     } as Record<string, string>)[id] ?? instructions) : instructions,
     'no-feasible-options': ({ rejected }) => [fr ? 'Aucune option réalisable.' : 'No feasible options.', ...rejected.map((option) => `${optionName(option)}: ${option.reason === 'too_late' ? (fr ? 'arrivée trop tardive' : 'arrival too late') : (fr ? 'chien guide refusé' : 'guide dog refused')}.`)].join(' '),
-    'no-known-options': () => fr ? 'Je peux réserver un taxi vers l’aéroport. Pour vérifier ce trajet, quel aéroport souhaitez-vous rejoindre et d’où partez-vous ?' : 'I can book an airport taxi. To check this route, which airport are you going to and where should the taxi pick you up?',
+    'no-known-options': () => fr ? 'Je peux réserver un taxi. Quelle est votre destination et d’où partez-vous ?' : 'I can book a taxi. What is your destination and where should the taxi pick you up?',
   };
   return templates[key](params);
 }

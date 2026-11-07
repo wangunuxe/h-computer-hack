@@ -77,7 +77,7 @@ explicitly labelled. Unsupported languages fall back to English.
 
 ## M4 real understanding and search adapters
 
-`understand({ transcript, profile, now, previous? }, client?)` uses the official
+`understand({ transcript, profile, now, previous?, signal? }, client?)` uses the official
 `@google/genai` SDK and `GEMINI_API_KEY`. `previous` is the earlier `result.trip`.
 It returns `{ trip, missing, notes? }`; passengers default to 1, luggage to 0 and
 guide-dog status to the profile. Only unknown origin, destination and deadline
@@ -86,7 +86,8 @@ Flight departure is extracted separately; code subtracts 60 elapsed minutes to
 derive check-in cutoff and labels that assumption in `notes`. Times are serialized
 with Europe/Paris's seasonal offset. The profile's contact details are not sent
 to Gemini. Timeout (8 seconds), invalid output and provider errors have typed
-`UnderstandError.code` values. Inject `UnderstandingClient` for offline tests.
+`UnderstandError.code` values. Caller cancellation aborts the SDK request and
+returns code `aborted`. Inject `UnderstandingClient` for offline tests.
 
 The default model `gemini-3.6-flash` was verified against the authenticated model
 list. `GEMINI_MODEL` can override it, but must select Gemini 3.x or newer.
@@ -128,21 +129,32 @@ shared server events, and exposes `stage`, `attach(emit)`, `markPaid(ref)` and
 tests. Research begins with the first transcript, alongside understanding, and
 continues during clarification; presentation waits for a complete trip. GPS is
 used as a coordinate origin when no spoken origin is available. PRIM and Linkup
-have independent deadlines; failures retain preset options rather than blocking
-the trip. PRIM recorded-mode feed entries explicitly say “recorded data”.
+have independent deadlines. Preset options are used only for Gare du Nord to
+CDG/Roissy/Charles de Gaulle trips; other routes use researched extra options.
+With no known options, speech advises asking station staff or calling a taxi.
+PRIM recorded-mode feed entries explicitly say “recorded data”.
 
-`stop` aborts research and the H runner, resolves pending confirmation negatively,
+`stop` aborts understanding, research and the H runner, resolves pending confirmation negatively,
 and invalidates callbacks from older operations. Heartbeats run after four silent
-seconds in UNDERSTAND, RESEARCH and EXECUTE. Raw agent progress stays in the feed;
+seconds in UNDERSTAND, RESEARCH and EXECUTE, then at most every fifteen seconds.
+Raw agent progress stays in the feed;
 only observed route/vehicle/info/payment page changes produce localized spoken
-milestones through the runner's optional `onPage(page)` callback. Confirmation replies accept
+milestones through the runner's optional `onPage(page)` callback. Confirmation
+speech uses a short localized template, omitting unparseable pickup time and
+price; the `confirm` event keeps the full agent summary. Confirmation replies accept
 French/English yes/no phrases; unclear replies do not approve a booking.
 
 Run `pnpm --filter @voila/server dev` (PORT defaults to 3000). `/ws/session/:id`
-creates an in-memory session. Reconnecting to the same id replaces its active
-socket and replays the current stage without restarting work. Send `hello` once
+creates an in-memory session. Its first `stage` event includes a cryptographically
+random `resume_token`; keep it private and pass it as `?token=<resume_token>`
+when reconnecting to the same id. Missing or incorrect tokens close with 4401
+without replacing the existing socket. Authorized reconnects replay the current
+stage plus pending confirmation, payment handoff, choices or completed booking
+card, without restarting work or repeating speech. Send `hello` once
 with the shared profile/GPS shape; subsequent messages use `WebEventSchema`.
 Sessions are retained until process shutdown, with no persistence or expiry yet.
+Payment callbacks arriving before the runner finishes are remembered; a matching
+booking reference completes directly in DONE, without waiting for another callback.
 Embedding code can use `createSessionServer({ port: 0, ports })` and `close()`.
 
 Set `SHUTTLE_PUBLIC_URL` to a public clone URL for H bookings (private/local URLs

@@ -1,0 +1,17 @@
+{
+  "name": "voila",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "tsx": "^4.21.0",
+    "vitest": "^4.0.18",
+    "@types/node": "^25.2.0"
+  }
+}

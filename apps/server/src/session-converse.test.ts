@@ -61,9 +61,16 @@ describe('contextual conversation routing', () => {
     const decision = vi.fn(); const s = setup({ runBooking: async (input) => { decision(await input.confirm('Shuttle')); return new Promise(() => {}); } }); await s.start(); await s.reply('shuttle'); await s.reply(text);
     expect(s.ports.converse).not.toHaveBeenCalled(); expect(decision).toHaveBeenCalledWith({ approved: text === 'oui', reply: text });
   });
+  it('speaks the model acknowledgement when approving an interpreted confirmation', async () => {
+    const decision = vi.fn(); const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'confirm', reply: 'Je transmets votre accord.' })), runBooking: async (input) => { decision(await input.confirm('Shuttle')); return new Promise(() => {}); } });
+    await s.start(); await s.reply('shuttle'); await s.reply('oui vas-y c’est bon');
+    expect(s.events).toContainEqual({ type: 'say', text: 'Je transmets votre accord.' });
+    expect(decision).toHaveBeenCalledWith({ approved: true, reply: 'oui vas-y c’est bon' });
+  });
   it('re-runs research and feasibility after a route correction', async () => {
     const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'correct', trip_patch: { destination: 'Orly' } })) }); await s.start(); await s.reply('plutôt Orly');
     expect(s.ports.trafficH).toHaveBeenCalledTimes(2); expect(s.session.stage).toBe('CHOOSE'); expect(s.events.filter((e) => e.type === 'options').at(-1)).toEqual({ type: 'options', items: [] });
+    expect(s.events).toContainEqual({ type: 'say', text: 'Quel trajet choisissez-vous ?' });
   });
   it.each(['RESEARCH', 'EXECUTE', 'HANDOFF', 'AWAIT_PAYMENT'] as const)('answers status in %s without changing flow', async (stage) => {
     const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply: 'Votre demande est en cours.' })) }); await s.start(); s.session.stage = stage; await s.reply('où en est-on ?');

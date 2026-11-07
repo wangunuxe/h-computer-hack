@@ -277,7 +277,7 @@ export class VoilaSession {
     if (result.intent === 'stop' && result.confidence >= .65) { this.stop(); return; }
     if (stage === 'CONFIRM') {
       const uncertain = /\b(euh|maybe|perhaps|unsure|not|non|no|pas|attends|demain|tomorrow)\b/i.test(transcript);
-      if (result.intent === 'confirm' && result.confidence >= .9 && !uncertain && !Object.keys(result.trip_patch ?? {}).length) { this.decide(true, transcript); return; }
+      if (result.intent === 'confirm' && result.confidence >= .9 && !uncertain && !Object.keys(result.trip_patch ?? {}).length) { this.answer(result.reply); this.decide(true, transcript); return; }
       if (['decline', 'correct'].includes(result.intent) && result.confidence >= .65) { this.answer(result.reply); this.decide(false, transcript); return; }
       if (result.intent === 'confirm') result = { intent: 'unclear', reply: this.fallback(), confidence: 0 };
     }
@@ -288,6 +288,7 @@ export class VoilaSession {
       const next = ++this.generation;
       if (changedRoute || !this.research) { this.flow.abort(); this.flow = new AbortController(); this.research = this.startResearch(transcript, next); void this.research.catch(() => {}); }
       this.options = [];
+      if (!this.missing().length) this.answer(result.reply);
       await this.plan(transcript, next, result.reply); return;
     }
     if (stage === 'CHOOSE' && result.intent === 'choose' && result.confidence >= .65 && result.option_id && this.options.some((option) => option.id === result.option_id)) { this.answer(result.reply); this.select(result.option_id); return; }

@@ -57,7 +57,8 @@ setInterval(() => {
 const live = params.get("source") === "live";
 const director = new Director(bus, heroScenario({ coldOpen: !params.has("nocold") }));
 if (params.has("speed")) director.speed = Number(params.get("speed")) || 1;
-const liveSource = live ? new LiveSource(bus, params.get("ws") ?? `ws://${location.hostname}:8787/ws/session/demo`) : null;
+const liveUrl = params.get("ws") ?? `ws://${location.hostname}:8787/ws/session/demo`;
+let liveSource = live ? new LiveSource(bus, liveUrl) : null;
 
 const overlays = mountOverlays(
   stage,
@@ -120,17 +121,23 @@ window.addEventListener("keydown", (e) => {
     pauseEl.textContent = p ? "PAUSED" : "";
     stage.classList.toggle("is-paused", p);
   }
-  if (k === "arrowright" && begun) director.skip();
+  if (k === "arrowright" && begun && !live) director.skip();
   if (k === "r") {
     sfx.ambienceOff(0.3);
     director.tts.cancel();
     stage.classList.remove("is-paused");
     pauseEl.textContent = "";
     begun = true;
-    director.restart();
+    if (live) {
+      liveSource?.stop();
+      bus.emit({ type: "cue", name: "reset" });
+      liveSource = new LiveSource(bus, liveUrl);
+      liveSource.start();
+    } else director.restart();
   }
   if (k === "escape") {
     director.stop();
+    liveSource?.stop();
     sfx.ambienceOff(0.3);
     bus.emit({ type: "cue", name: "reset" });
     overlays.showTitle();

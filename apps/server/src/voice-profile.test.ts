@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { parsePhone, parseEmail, VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 describe('local spoken contact parsers', () => {
+  it.each(['2027-01-15', '15/01/2027', '15.01.2027', '15-01-2027', '2027/01/15', '20:45', '20:45:30', '2027-01-15T20:45:00+01:00'])('preserves the trip date/time %s while still removing phone numbers', (when) => {
+    const safe = redactContactText(`Gare du Nord to CDG 2E, ${when}. Call me on 06 12 34 56 78 or +33 6 12 34 56 78 or zero six twelve thirty four fifty six seventy eight.`);
+    expect(safe).toContain(when); expect(safe).toContain('Gare du Nord to CDG 2E'); expect(safe).not.toMatch(/06 12|\+33 6|zero six/);
+  });
+  it('preserves adjacent dates and times but does not mistake phone-number subgroups for dates', () => {
+    expect(redactContactText('2027-01-15 20:45, 15/01/2027 à 20:45')).toBe('2027-01-15 20:45, 15/01/2027 à 20:45');
+    expect(redactContactText('06.12.3456.78')).toBe('[phone]');
+  });
   it.each(['Dr.', 'Dr', 'M.', 'Mme', 'Mr', 'Mrs', 'Ms', 'Monsieur', 'Madame', 'Mademoiselle'])('redacts the name following the honorific %s, not just the title', (title) => {
     for (const intro of ['my name is', "c'est", "I'm"]) {
       const safe = redactContactText(`${intro} ${title} Anna Lee, from Gare du Nord to CDG 2E`);

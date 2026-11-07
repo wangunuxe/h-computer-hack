@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConnectionAttempt, replaceOnForeground } from './connection.js';
+import { ConnectionAttempt, replaceOnForeground, requiresFreshSession } from './connection.js';
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 describe('connection deadlines', () => {
+  it.each([4401, 4409, 1000, 1006, 1011])('abandons only rejected or evicted credentials, preserving normal payment return: %s', (code) => expect(requiresFreshSession(code)).toBe(code === 4401 || code === 4409));
   it('bounds both fetch and connecting sockets, aborting before retry', () => {
     const expired = vi.fn(); const attempt = new ConnectionAttempt(expired);
     vi.advanceTimersByTime(9999); expect(expired).not.toHaveBeenCalled();

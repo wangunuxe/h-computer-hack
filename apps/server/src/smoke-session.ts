@@ -7,6 +7,15 @@ import { ServerEventSchema } from '@voila/shared';
 import { runBooking } from './booking.js';
 import { createSessionServer } from './index.js';
 
+export function finishOnce(complete: (reason: string) => void) {
+  let finished = false;
+  return (reason: string) => {
+    if (finished) return;
+    finished = true;
+    complete(reason);
+  };
+}
+
 export async function smokeSession() {
   const started = performance.now();
   const log = (value: unknown) => console.log(`[+${((performance.now() - started) / 1000).toFixed(3)}s] ${JSON.stringify(value)}`);
@@ -49,7 +58,7 @@ export async function smokeSession() {
     ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws/session/${randomUUID()}`);
     const socket = ws;
     await new Promise<void>((resolve) => {
-      const finish = (reason: string) => { outcome = reason; totalMs = Math.round(performance.now() - started); clearTimeout(timer); resolve(); };
+      const finish = finishOnce((reason) => { outcome = reason; totalMs = Math.round(performance.now() - started); clearTimeout(timer); resolve(); });
       const timer = setTimeout(() => finish('timeout'), 6 * 60_000);
       socket.on('open', () => {
         socket.send(JSON.stringify({ type: 'hello', profile: { name: 'Karim Demo', language: 'fr', guide_dog: true, phone: '+33612345678', email: 'karim@example.com' }, gps: null }));

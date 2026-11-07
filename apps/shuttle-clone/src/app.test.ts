@@ -41,6 +41,20 @@ async function complete(app: App, easy = false) {
 }
 
 describe('four-step booking', () => {
+  it.each([false, true])('selects only midnight by default and preserves chosen time (easy=%s)', async (easy) => {
+    const { app } = setup();
+    const base = await start(app, easy);
+    const selectedOptions = (body: string) => body.match(/<option\b[^>]*\bselected\b[^>]*>/g);
+    expect(selectedOptions(await (await app.request(base + '/route')).text())).toEqual(['<option value="00:00" selected>']);
+    await post(app, base + '/route', route);
+    expect(selectedOptions(await (await app.request(base + '/route')).text())).toEqual(['<option value="12:15" selected>']);
+    expect(selectedOptions(await (await app.request(base + '/vehicle')).text())).toEqual(['<option value="sedan" selected>']);
+    await post(app, base + '/vehicle', { vehicle: 'estate' });
+    expect(selectedOptions(await (await app.request(base + '/vehicle')).text())).toEqual(['<option value="estate" selected>']);
+    expect(selectedOptions(await (await app.request(base + '/info')).text())).toEqual([
+      '<option value="1" selected>', '<option value="0" selected>',
+    ]);
+  });
   it.each([false, true])('rejects past dates using Paris today (easy=%s)', async (easy) => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-07T23:30:00Z'));

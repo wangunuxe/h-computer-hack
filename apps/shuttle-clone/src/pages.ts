@@ -29,7 +29,7 @@ export function routePage(draft: Draft, error = '', values?: Record<string, stri
       ? html`<input type="date" name="date" min="${parisToday()}" required value="${route?.date ?? ''}">`
       : html`<input type="text" name="date" id="pickup-date" readonly required value="${route?.date ?? ''}" placeholder="Click calendar to choose">`}</div>
     <div class="field"><label>Pickup time</label><select name="time">${timeOptions.map((time) =>
-      html`<option value="${time}" selected=${route?.time === time}>${time}</option>`)}</select></div>
+      html`<option value="${time}"${(route?.time ?? '00:00') === time ? html` selected` : ''}>${time}</option>`)}</select></div>
     <button type="submit">Continue to vehicles</button></form>`);
 }
 export function vehiclePage(draft: Draft, error = '') {
@@ -37,7 +37,7 @@ export function vehiclePage(draft: Draft, error = '') {
     <p>${draft.route?.pickup} → ${draft.route?.dropoff}</p>
     <form method="post" action="/fr/reservation/${draft.id}/vehicle">
     <div class="field"><label>Vehicle class</label><select name="vehicle">${vehicles.map((v) =>
-      html`<option value="${v.id}" selected=${draft.vehicle?.id === v.id}>${v.text}</option>`)}</select></div>
+      html`<option value="${v.id}"${(draft.vehicle?.id ?? 'sedan') === v.id ? html` selected` : ''}>${v.text}</option>`)}</select></div>
     <button type="submit">Continue to passenger information</button></form>`);
 }
 export function infoPage(draft: Draft, error = '', values?: Record<string, string>) {
@@ -48,9 +48,9 @@ export function infoPage(draft: Draft, error = '', values?: Record<string, strin
     <div class="field"><label>Email</label><input name="email" type="email" required value="${info?.email ?? ''}"></div>
     <div class="field"><label>Telephone</label><input name="phone" type="tel" required value="${info?.phone ?? ''}"></div>
     <div class="field"><label>Passengers</label><select name="passengers">${passengerOptions.map((o) =>
-      html`<option value="${o.value}" selected=${info?.passengers === o.value}>${o.text}</option>`)}</select></div>
+      html`<option value="${o.value}"${(info?.passengers ?? '1') === o.value ? html` selected` : ''}>${o.text}</option>`)}</select></div>
     <div class="field"><label>Luggage</label><select name="luggage">${luggageOptions.map((o) =>
-      html`<option value="${o.value}" selected=${info?.luggage === o.value}>${o.text}</option>`)}</select></div>
+      html`<option value="${o.value}"${(info?.luggage ?? '0') === o.value ? html` selected` : ''}>${o.text}</option>`)}</select></div>
     <details><summary>Additional information / Notes</summary><label>Notes for the driver</label>
     <textarea name="notes" rows="4">${info?.notes ?? ''}</textarea></details>
     <p>Continuing creates an unpaid order. Review your details before submitting.</p>

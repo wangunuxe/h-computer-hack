@@ -29,6 +29,7 @@ export class VoilaSession {
   private trip: Partial<Trip> = {};
   private options: Option[] = [];
   private booking?: Booking;
+  private paidRefs = new Set<string>();
   private generation = 0;
   private flow = new AbortController();
   private bookingController?: AbortController;
@@ -111,13 +112,21 @@ export class VoilaSession {
   }
 
   markPaid(orderRef: string): boolean {
+    if (!this.booking && ['EXECUTE', 'CONFIRM', 'HANDOFF'].includes(this.stage)) {
+      this.paidRefs.add(orderRef);
+      return true;
+    }
     if (this.booking?.ref !== orderRef) return false;
     if (this.stage === 'DONE') return true;
     if (this.stage !== 'AWAIT_PAYMENT') return false;
-    this.transition('DONE');
-    this.send({ type: 'booking_card', booking: this.booking });
-    this.speak('booking-done', { ref: this.booking.ref });
+    this.finishPayment();
     return true;
+  }
+
+  private finishPayment() {
+    this.transition('DONE');
+    this.send({ type: 'booking_card', booking: this.booking! });
+    this.speak('booking-done', { ref: this.booking!.ref });
   }
 
   dispose() { this.cancel(); this.ports.timers.clearInterval(this.heartbeat); this.emit = () => {}; }
@@ -135,6 +144,7 @@ export class VoilaSession {
     this.bookingController?.abort();
     this.confirmation?.resolve({ approved: false, reply: 'Stopped' });
     this.confirmation = undefined;
+    this.paidRefs.clear();
   }
   private stop() {
     this.cancel();
@@ -207,6 +217,7 @@ export class VoilaSession {
     }
   }
   private async execute(id: string, generation: number) {
+    this.paidRefs.clear();
     this.transition('EXECUTE');
     const controller = new AbortController();
     this.bookingController = controller;
@@ -240,7 +251,9 @@ export class VoilaSession {
       });
       if (!current()) return;
       this.booking = result.booking;
-      this.transition('AWAIT_PAYMENT');
+      if (this.paidRefs.has(this.booking.ref)) this.finishPayment();
+      else this.transition('AWAIT_PAYMENT');
+      this.paidRefs.clear();
     } catch {
       if (!current()) return;
       this.confirmation?.resolve({ approved: false, reply: 'Booking failed' }); this.confirmation = undefined;

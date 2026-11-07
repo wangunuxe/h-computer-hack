@@ -32,6 +32,28 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); });
 
 describe('VoilaSession', () => {
+  it.each(['EXECUTE', 'HANDOFF'])('remembers payment during %s and finishes only when the matching booking arrives', async (stage) => {
+    const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();
+    let input!: BookingInput;
+    const s = setup({ runBooking: async (value) => { input = value; return pending.promise; } });
+    await s.start(); await s.choose();
+    if (stage === 'HANDOFF') await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: '' });
+    expect(s.session.markPaid(booking.ref)).toBe(true);
+    expect(s.events.some((e) => e.type === 'booking_card')).toBe(false);
+    pending.resolve(completed); await flush();
+    expect(s.session.stage).toBe('DONE');
+    expect(s.events).toContainEqual({ type: 'booking_card', booking });
+    expect(s.events).not.toContainEqual({ type: 'stage', stage: 'AWAIT_PAYMENT' });
+  });
+  it('does not apply an early receipt for a different booking reference', async () => {
+    const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();
+    const s = setup({ runBooking: () => pending.promise }); await s.start(); await s.choose();
+    expect(s.session.markPaid('another-order')).toBe(true);
+    pending.resolve(completed); await flush();
+    expect(s.session.stage).toBe('AWAIT_PAYMENT');
+    expect(s.events.some((e) => e.type === 'booking_card')).toBe(false);
+    s.session.markPaid(booking.ref); expect(s.session.stage).toBe('DONE');
+  });
   it('emits the exact happy-path event and stage sequence through paid', async () => {
     const prim = deferred<Awaited<ReturnType<SessionPorts['prim']>>>();
     const linkup = deferred<Awaited<ReturnType<SessionPorts['linkup']>>>();

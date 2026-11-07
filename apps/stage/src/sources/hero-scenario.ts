@@ -177,8 +177,10 @@ export function heroScenario(opts: ScenarioOptions = {}) {
     d.beat("Act");
     d.emit({ type: "stage", stage: "EXECUTE" });
     d.emit({ type: "cue", name: "pipeline", show: true });
-    await d.say("Under the hood: Voilà briefs H's computer-use agent. It reads the screen as pixels, and stops twice for Karim.");
-    await d.wait(3500);
+    const underTheHood = d.say("Under the hood: Voilà briefs H's computer-use agent. It reads the screen as pixels, and stops twice for Karim.");
+    underTheHood.catch(() => {});
+    await d.wait(12500);
+    await underTheHood;
     d.emit({ type: "cue", name: "pipeline", show: false });
     await d.wait(600);
     d.emit({ type: "cue", name: "focus", panel: "agent" });

@@ -20,10 +20,13 @@ describe('mobile microphone controls', () => {
     s.button.onpointerup!(s.pointer(2)); expect(s.release).not.toHaveBeenCalled();
     s.button.onpointerup!(event); expect(s.start).toHaveBeenCalledOnce(); expect(s.release).toHaveBeenCalledOnce();
   });
-  it('does not finish on pointer cancellation and permits a fresh pointer after a permission interruption', () => {
-    const s = setup('hold'); s.button.onpointerdown!(s.pointer()); s.button.onpointercancel!(s.pointer());
-    expect(s.release).not.toHaveBeenCalled(); s.button.onpointerdown!(s.pointer(2)); s.button.onpointerup!(s.pointer(2));
+  it('finalizes a cancelled hold once, ignores unrelated fingers, and permits a fresh hold', () => {
+    const s = setup('hold'); s.button.onpointerdown!(s.pointer()); s.button.onpointercancel!(s.pointer(2));
+    expect(s.release).not.toHaveBeenCalled();
+    s.button.onpointercancel!(s.pointer()); s.button.onpointerup!(s.pointer());
     expect(s.release).toHaveBeenCalledOnce();
+    s.button.onpointerdown!(s.pointer(2)); s.button.onpointerup!(s.pointer(2));
+    expect(s.release).toHaveBeenCalledTimes(2);
   });
   it.each(['hold', 'toggle'] as const)('supports screen-reader synthetic click in %s mode', (mode) => {
     const s = setup(mode); const event = { detail: 0 } as PointerEvent;

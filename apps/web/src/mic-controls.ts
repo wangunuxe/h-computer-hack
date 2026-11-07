@@ -11,7 +11,11 @@ export function bindMicControls(button: HTMLButtonElement, dock: HTMLElement, co
     if (event.pointerId !== pointer) return;
     event.preventDefault(); pointer = undefined; controls.release();
   };
-  button.onpointercancel = () => { pointer = undefined; };
+  button.onpointercancel = (event) => {
+    if (event.pointerId !== pointer) return;
+    pointer = undefined;
+    controls.release();
+  };
   button.onkeydown = (event) => {
     if (controls.mode() === 'hold' && [' ', 'Enter'].includes(event.key)) { event.preventDefault(); if (!event.repeat) controls.start(); }
   };

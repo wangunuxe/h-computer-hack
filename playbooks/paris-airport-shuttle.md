@@ -50,6 +50,9 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
 - Both modes reject dates before today in Europe/Paris, returning to step 1 with
   “Pickup date cannot be before today (Europe/Paris).” Easy mode also sets the
   native date input minimum to Paris today. Choose today or a later date.
+- Today's pickup time must not have already passed in Europe/Paris. Otherwise
+  step 1 re-renders with “Pickup date and time cannot be in the past (Europe/Paris).”
+  Select a later time (the default 00:00 is usually already past) or a future date.
 - Time, vehicle, passengers and luggage are native selects. Use full option text
   below. Time defaults to 00:00; set it explicitly. Times are Paris local time.
 - Passenger count must fit the selected vehicle: Sedan 3, Estate 4, Minivan 8.

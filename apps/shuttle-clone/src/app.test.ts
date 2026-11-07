@@ -41,6 +41,45 @@ async function complete(app: App, easy = false) {
 }
 
 describe('four-step booking', () => {
+  it.each([false, true])('rejects past pickup times on Paris today (easy=%s)', async (easy) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      for (const clock of ['2026-11-07T11:15:30Z', '2026-07-07T10:15:30Z']) {
+        vi.setSystemTime(new Date(clock));
+        const { app, store } = setup();
+        const base = await start(app, easy);
+        const date = parisToday();
+        for (const time of ['00:00', '12:00', '12:15']) {
+          const response = await post(app, base + '/route', { ...route, date, time });
+          expect(response.status).toBe(400);
+          const body = await response.text();
+          expect(body).toContain('Pickup date and time cannot be in the past (Europe/Paris).');
+          expect(body).toContain('Step 1 — Route');
+          expect(body).toContain(`<option value="${time}" selected>`);
+          expect([...store.drafts.values()][0]!.route).toBeUndefined();
+        }
+        expect((await post(app, base + '/route', { ...route, date, time: '' })).status).toBe(400);
+        expect((await post(app, base + '/route', { ...route, date, time: '12:30' })).status).toBe(303);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it.each([false, true])('compares Paris time across midnight and at the exact pickup instant (easy=%s)', async (easy) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const { app } = setup();
+      const base = await start(app, easy);
+      vi.setSystemTime(new Date('2026-11-07T23:30:00Z'));
+      expect((await post(app, base + '/route', { ...route, date: '2026-11-08', time: '00:00' })).status).toBe(400);
+      expect((await post(app, base + '/route', { ...route, date: '2026-11-08', time: '00:30' })).status).toBe(303);
+      vi.setSystemTime(new Date('2026-11-07T23:30:00.001Z'));
+      expect((await post(app, base + '/route', { ...route, date: '2026-11-08', time: '00:30' })).status).toBe(400);
+      expect((await post(app, base + '/route', { ...route, date: '2026-11-09', time: '00:00' })).status).toBe(303);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it.each(vehicles)('enforces advertised luggage capacity for $id', async (vehicle) => {
     const { app, store } = setup();
     const base = await start(app);

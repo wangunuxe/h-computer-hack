@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { z } from 'zod';
-import { parisToday } from './dates.js';
+import { parisToday, pickupIsPast } from './dates.js';
 import { createPayments } from './payments.js';
 import type { PaymentGateway } from './payments.js';
 import { confirmationPage, infoPage, paymentPage, routePage, stubPage, vehiclePage } from './pages.js';
@@ -47,8 +47,12 @@ export function createApp({
     const parsed = routeSchema.safeParse(values);
     if (!parsed.success) return c.html(routePage(draft, 'Please complete the route, date and time.', values), 400);
     const r = parsed.data;
-    if (r.date < parisToday()) {
+    const now = new Date();
+    if (r.date < parisToday(now)) {
       return c.html(routePage(draft, 'Pickup date cannot be before today (Europe/Paris).', values), 400);
+    }
+    if (pickupIsPast(r.date, r.time, now)) {
+      return c.html(routePage(draft, 'Pickup date and time cannot be in the past (Europe/Paris).', values), 400);
     }
     if (draft.difficulty === 'real' && (!validCoordinate(r.pickup_lat, 90) || !validCoordinate(r.pickup_lng, 180)
       || !validCoordinate(r.dropoff_lat, 90) || !validCoordinate(r.dropoff_lng, 180))) {

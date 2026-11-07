@@ -3,6 +3,7 @@ import { OptionSchema, type Option, type Trip } from '@voila/shared';
 import { assessOptions } from './feasibility.js';
 import { bookingMethods, matchesPresetRoute, mergeOptions, presetOptions } from './options.js';
 import { chooseOption } from './choose.js';
+import { say } from './narrate.js';
 
 const trip: Trip = { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T12:00:00+01:00', passengers: 1, luggage: 1, guide_dog: true };
 const now = new Date('2027-01-15T10:00:00+01:00');
@@ -70,6 +71,18 @@ describe('preset options and merge', () => {
 });
 
 describe('chooseOption', () => {
+  it.each(['fr', 'en'])('recognizes the exact spoken names in %s with case/accent normalization and fillers', (language) => {
+    for (const option of presetOptions) {
+      const spoken = say('present-options', { options: [option], now }, language).split(',')[0]!.replace(/^1\. /, '');
+      expect(chooseOption(spoken, presetOptions)).toBe(option.id);
+      expect(chooseOption(spoken.toUpperCase().normalize('NFD').replace(/\p{M}/gu, ''), presetOptions)).toBe(option.id);
+      expect(chooseOption(language === 'fr' ? `la ${spoken} s’il vous plaît` : `the ${spoken} please`, presetOptions)).toBe(option.id);
+    }
+  });
+  it('does not select names of unavailable options or resolve colliding localized names arbitrarily', () => {
+    expect(chooseOption('taxi de la gare du Nord', [presetOptions[1]!])).toBeNull();
+    expect(chooseOption('taxi de la gare du Nord', [presetOptions[0]!, { ...presetOptions[2]!, id: 'other', name: 'Taxi de la gare du Nord' }])).toBeNull();
+  });
   it.each(['the shuttle is fine', "la navette c'est bien", 'la navette', 'the shuttle please', 'la navette s’il vous plaît', 'je choisis la navette', 'Paris Airport Shuttle'])('accepts affirmative selection: %s', (reply) => {
     expect(chooseOption(reply, presetOptions)).toBe('paris-airport-shuttle');
   });

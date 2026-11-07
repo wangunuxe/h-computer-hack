@@ -1,4 +1,5 @@
 import type { Option } from '@voila/shared';
+import { spokenOptionName } from './narrate.js';
 
 const normalize = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 const ordinals: Record<string, number> = {
@@ -8,26 +9,28 @@ const ordinals: Record<string, number> = {
   troisieme: 3, third: 3, '3e': 3, '3eme': 3, '3rd': 3,
   quatrieme: 4, fourth: 4, '4e': 4, '4eme': 4, '4th': 4,
 };
+const words = (text: string) => (normalize(text).match(/[a-z0-9]+/g) ?? []).join(' ');
+const prefix = '(?:(?:please|oui|yes|ok|okay|merci) )?(?:(?:je prends|je choisis|i choose|i select|i will take|i ll take) )?(?:(?:le|la|l|les|the|option|numero|number) )?';
+const suffix = '(?: (?:s il vous plait|s il te plait|please|merci|thanks|thank you|c est bien|is fine))?';
 
 export function chooseOption(reply: string, options: readonly Option[]): string | null {
   const text = normalize(reply).trim();
   if (/\?|\bsavoir si\b|\best[ -]ce\b|\bdo you know\b|\bwhether\b|\bsi\b.*\baccepte[a-z]*\b|\bcan i\b/.test(text)) return null;
   if (/\?/.test(text) || /^(?:est[ -]ce\b|qu['’]est[ -]ce\b|combien\b|quel[a-z]*\b|quand\b|comment\b|pourquoi\b|ou\b|is\b|are\b|does\b|do\b|can\b|how\b|what\b|which\b|when\b|where\b|why\b|[a-z]+(?:-t)?-(?:il|elle|on|ils|elles|vous|tu|nous)\b)/.test(text)) return null;
   if (/\b(?:demain|tomorrow|instead|moins|plus|cheapest|fastest|cher|rapide|stop[a-z]*|arret[a-z]*|annul[a-z]*|cancel[a-z]*|no|non|pas|not)\b/.test(text)) return null;
-  const words = (text.match(/[a-z0-9]+/g) ?? []).join(' ');
-  const selection = /^(?:(?:please|oui|yes|ok|okay|merci) )?(?:(?:je prends|je choisis|i choose|i select|i will take|i ll take) )?(?:(?:le|la|l|les|the|option|numero|number) )?(.+?)(?: (?:s il vous plait|s il te plait|please|merci|thanks|thank you|c est bien|is fine))?$/.exec(words)?.[1];
+  const selection = words(text);
   if (!selection) return null;
-  const index = ordinals[selection] ?? (/^\d+$/.test(selection) ? Number(selection) : undefined);
-  if (index !== undefined) return options[index - 1]?.id ?? null;
   const matches = new Set<string>();
-  const keyword = selection === 'navette' ? 'shuttle' : selection;
-  for (const option of options) {
-    const name = (normalize(option.name).match(/[a-z0-9]+/g) ?? []).join(' ');
-    if (name === selection) matches.add(option.id);
+  for (const [index, option] of options.entries()) {
+    const aliases = new Set([option.name, spokenOptionName(option, 'fr'), spokenOptionName(option, 'en'), String(index + 1), ...Object.keys(ordinals).filter((ordinal) => ordinals[ordinal] === index + 1)]);
     const tokens = normalize(`${option.name} ${option.id}`).split(/[^a-z0-9]+/);
-    if (keyword === 'taxi' && tokens.some((token) => ['taxi', 'g7'].includes(token))) matches.add(option.id);
-    if (keyword === 'shuttle' && tokens.some((token) => ['shuttle', 'navette'].includes(token))) matches.add(option.id);
-    if (['g7', 'bus'].includes(keyword) && tokens.includes(keyword)) matches.add(option.id);
+    if (tokens.some((token) => ['taxi', 'g7'].includes(token))) aliases.add('taxi');
+    if (tokens.some((token) => ['shuttle', 'navette'].includes(token))) { aliases.add('shuttle'); aliases.add('navette'); }
+    for (const keyword of ['g7', 'bus']) if (tokens.includes(keyword)) aliases.add(keyword);
+    if ([...aliases].some((alias) => {
+      const name = words(alias);
+      return name && new RegExp(`^${prefix}${name}${suffix}$`).test(selection);
+    })) matches.add(option.id);
   }
   return matches.size === 1 ? [...matches][0]! : null;
 }

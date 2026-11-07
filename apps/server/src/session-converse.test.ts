@@ -3,6 +3,8 @@ import { type ServerEvent, type Trip } from '@voila/shared';
 import { VoilaSession, type SessionPorts } from './session.js';
 import type { TurnResult } from './converse.js';
 import type { BookingInput } from './booking.js';
+import { presetOptions } from './options.js';
+import { say } from './narrate.js';
 
 const trip: Trip = { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T21:00:00+01:00', guide_dog: true, passengers: 1, luggage: 0 };
 const profile = { name: 'Karim', phone: '+33612345678', email: 'karim@example.com', guide_dog: true, language: 'fr' };
@@ -26,6 +28,15 @@ function setup(overrides: Partial<SessionPorts> = {}) {
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00+01:00')); });
 afterEach(() => { sessions.splice(0).forEach((session) => session.dispose()); vi.useRealTimers(); });
 describe('contextual conversation routing', () => {
+  it.each(['fr', 'en'])('selects spoken option names in %s without Gemini, including when offline', async (language) => {
+    for (const option of presetOptions) {
+      const s = setup({ converse: vi.fn().mockRejectedValue(new Error('Unavailable')) }); await s.start(language);
+      const spoken = say('present-options', { options: [option], now: new Date() }, language).split(',')[0]!.replace(/^1\. /, '');
+      await s.reply(language === 'fr' ? `${spoken} s’il vous plaît` : `${spoken} please`);
+      expect(s.ports.converse).not.toHaveBeenCalled();
+      expect(s.session.stage).toBe(option.id === 'paris-airport-shuttle' ? 'EXECUTE' : 'DONE');
+    }
+  });
   it.each(['je veux savoir si la navette accepte mon chien', 'est-ce que la navette accepte les chiens', 'I wonder whether the shuttle takes dogs'])('routes longer option questions to Gemini: %s', async (text) => {
     const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply: 'Je vérifie la politique concernant les chiens guides.' })) }); await s.start(); await s.reply(text);
     expect(s.ports.converse).toHaveBeenCalledWith(expect.objectContaining({ transcript: text }));

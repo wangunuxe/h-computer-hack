@@ -9,6 +9,10 @@ const optionNames: Record<string, { fr: string; en: string }> = {
   'paris-airport-shuttle': { fr: 'Navette Paris Airport Shuttle', en: 'Paris Airport Shuttle' },
   'rer-b-replacement-bus': { fr: 'Bus de remplacement du RER B', en: 'RER B replacement bus' },
 };
+export function spokenOptionName(option: { id?: string; name: string }, language: string): string {
+  const locale = language.toLowerCase().split('-')[0] === 'fr' ? 'fr' : 'en';
+  return (option.id ? optionNames[option.id]?.[locale] : undefined) ?? option.name;
+}
 export interface NarrationParams {
   acknowledgement: Empty;
   'clarify-deadline': Empty;
@@ -34,7 +38,7 @@ export interface NarrationParams {
 export function say<K extends keyof NarrationParams>(key: K, params: NarrationParams[K], language: string): string {
   const fr = language.toLowerCase().split('-')[0] === 'fr';
   const locale = fr ? 'fr-FR' : 'en-GB';
-  const optionName = (option: { id?: string; name: string }) => (option.id ? optionNames[option.id]?.[fr ? 'fr' : 'en'] : undefined) ?? option.name;
+  const optionName = (option: { id?: string; name: string }) => spokenOptionName(option, language);
   const money = (amount: number) => new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR' }).format(amount);
   const templates: { [P in keyof NarrationParams]: (p: NarrationParams[P]) => string } = {
     acknowledgement: () => fr ? 'Je vous aide à rejoindre l’aéroport.' : 'I’ll help you reach the airport.',

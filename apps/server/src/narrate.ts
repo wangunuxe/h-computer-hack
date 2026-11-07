@@ -4,20 +4,20 @@ import { sanitizeConfirmationFields, type ConfirmationFields } from './confirmat
 
 type Empty = Record<string, never>;
 const optionNames: Record<string, { fr: string; en: string }> = {
-  'gare-du-nord-taxi': { fr: 'Taxi de la gare du Nord', en: 'Gare du Nord taxi rank' },
-  'g7-phone': { fr: 'Taxi G7 par téléphone', en: 'G7 by phone' },
-  'paris-airport-shuttle': { fr: 'Navette Paris Airport Shuttle', en: 'Paris Airport Shuttle' },
+  'paris-airport-shuttle': { fr: 'Taxi vers l’aéroport', en: 'Airport taxi' },
   'rer-b-replacement-bus': { fr: 'Bus de remplacement du RER B', en: 'RER B replacement bus' },
 };
 export function spokenOptionName(option: { id?: string; name: string }, language: string): string {
   const locale = language.toLowerCase().split('-')[0] === 'fr' ? 'fr' : 'en';
-  return (option.id ? optionNames[option.id]?.[locale] : undefined) ?? option.name;
+  const separator = option.name.indexOf(' — ');
+  const name = (option.id ? optionNames[option.id]?.[locale] : undefined) ?? (separator < 0 ? option.name : option.name.slice(0, separator));
+  return separator < 0 ? name : `${name}, ${locale === 'fr' ? 'prise en charge à' : 'pickup at'} ${option.name.slice(separator + 3)}`;
 }
 export interface NarrationParams {
   acknowledgement: Empty;
   'clarify-deadline': Empty;
   'research-started': Empty;
-  disruption: { cause: string; recorded: boolean; mode?: 'demo' | 'live'; status?: 'normal' | 'disrupted' | 'unknown' };
+  disruption: { cause: string; recorded: boolean; mode?: 'demo' | 'live'; status?: 'normal' | 'disrupted' | 'unknown'; origin?: string };
   'present-options': { options: readonly Option[]; now: Date };
   'still-working': Empty;
   confirm: { trip: Trip; option: Option; details?: ConfirmationFields; now: Date };
@@ -44,10 +44,11 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
     acknowledgement: () => fr ? 'Je vous aide à rejoindre l’aéroport.' : 'I’ll help you reach the airport.',
     'clarify-deadline': () => fr ? 'À quelle heure ferme l’enregistrement ?' : 'What time does check-in close?',
     'research-started': () => fr ? 'Je vérifie le trafic et les alternatives.' : 'I’m checking traffic and alternatives.',
-    disruption: ({ cause, recorded, mode, status }) => {
+    disruption: ({ cause, recorded, mode, status, origin: pickup }) => {
       const origin = mode === 'demo' ? (fr ? 'Mode démonstration. ' : 'Demo mode. ') : mode === 'live' ? (status === 'unknown' ? (fr ? 'Mode direct. Vérification par H indisponible. ' : 'Live mode. H traffic check unavailable. ') : (fr ? 'Trafic en direct, pages officielles lues par H. ' : 'Live traffic, official pages read by H. ')) : '';
       const body = status === 'normal' ? (fr ? 'Le RER B circule normalement. Je vous propose aussi des alternatives.' : 'The RER B is running normally. I’ll still offer alternatives.') : status === 'unknown' ? (fr ? 'Je ne peux pas vérifier l’état du RER B. Statut inconnu. Voici les alternatives.' : 'I can’t verify the RER B status. Its status is unknown. Here are the alternatives.') : cause;
-      return `${origin}${recorded ? (fr ? 'Données enregistrées, pas en direct : ' : 'Recorded data, not live: ') : ''}${body}`;
+      const route = pickup && status === 'disrupted' ? (fr ? `Le RER B vers l’aéroport est perturbé. Les alternatives partent de ${pickup}.` : `The airport RER B service is disrupted. Alternatives pick up at ${pickup}.`) : body;
+      return `${origin}${recorded ? (fr ? 'Données enregistrées, pas en direct : ' : 'Recorded data, not live: ') : ''}${route}`;
     },
     'present-options': ({ options, now }) => {
       if (!options.length) return fr ? 'Aucune option réalisable pour cet horaire.' : 'No feasible options for this deadline.';
@@ -92,8 +93,6 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
       payment: fr ? 'La réservation est prête pour le paiement.' : 'The booking is ready for payment.',
     })[page],
     'manual-instructions': ({ id, instructions }) => fr ? (({
-      'gare-du-nord-taxi': 'Rejoignez la station officielle de taxis de Gare du Nord. Demandez de l’aide pour la file, signalez le chien guide et confirmez le tarif.',
-      'g7-phone': 'Appelez G7 au 3607. Indiquez le point de départ, le terminal, les passagers et le chien guide. Confirmez la disponibilité et le tarif.',
       'rer-b-replacement-bus': 'Demandez aux agents si un bus de remplacement dessert CDG et où monter. Confirmez le terminal, l’accessibilité et le départ.',
     } as Record<string, string>)[id] ?? instructions) : instructions,
     'no-feasible-options': ({ rejected }) => [fr ? 'Aucune option réalisable.' : 'No feasible options.', ...rejected.map((option) => `${optionName(option)}: ${option.reason === 'too_late' ? (fr ? 'arrivée trop tardive' : 'arrival too late') : (fr ? 'chien guide refusé' : 'guide dog refused')}.`)].join(' '),

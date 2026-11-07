@@ -10,7 +10,7 @@ const ordinals: Record<string, number> = {
   quatrieme: 4, fourth: 4, '4e': 4, '4eme': 4, '4th': 4,
 };
 const words = (text: string) => (normalize(text).match(/[a-z0-9]+/g) ?? []).join(' ');
-const prefix = '(?:(?:please|oui|yes|ok|okay|merci) )?(?:(?:je prends|je choisis|i choose|i select|i will take|i ll take) )?(?:(?:le|la|l|les|the|option|numero|number) )?';
+const prefix = '(?:(?:please|oui|yes|ok|okay|merci) )?(?:(?:je prends|je choisis|je veux|je voudrais|i choose|i select|i will take|i ll take|i want|i need|call me|book me) )?(?:(?:le|la|l|les|the|option|numero|number|un|une|a|an) )?';
 const suffix = '(?: (?:s il vous plait|s il te plait|please|merci|thanks|thank you|c est bien|is fine))?';
 
 export function chooseOption(reply: string, options: readonly Option[]): string | null {
@@ -23,6 +23,7 @@ export function chooseOption(reply: string, options: readonly Option[]): string 
   const matches = new Set<string>();
   for (const [index, option] of options.entries()) {
     const aliases = new Set([option.name, spokenOptionName(option, 'fr'), spokenOptionName(option, 'en'), String(index + 1), ...Object.keys(ordinals).filter((ordinal) => ordinals[ordinal] === index + 1)]);
+    if (option.id === 'paris-airport-shuttle') for (const alias of ['Paris Airport Shuttle', 'Airport taxi', 'Taxi vers l’aéroport']) aliases.add(alias);
     const tokens = normalize(`${option.name} ${option.id}`).split(/[^a-z0-9]+/);
     if (tokens.some((token) => ['taxi', 'g7'].includes(token))) aliases.add('taxi');
     if (tokens.some((token) => ['shuttle', 'navette'].includes(token))) { aliases.add('shuttle'); aliases.add('navette'); }

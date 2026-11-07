@@ -18,8 +18,11 @@ export const stages: Record<'fr' | 'en', Record<Stage, string>> = {
   en: { LISTEN: 'Ready to listen', UNDERSTAND: 'Understanding your request', CLARIFY: 'One more detail', RESEARCH: 'Finding routes', PRESENT: 'Your travel options', CHOOSE: 'Choose your route', EXECUTE: 'Booking in progress', CONFIRM: 'Your confirmation', HANDOFF: 'Pay on your device', AWAIT_PAYMENT: 'Awaiting payment', DONE: 'Booking complete' },
 };
 export const optionNames: Record<string, { fr: string; en: string }> = {
-  'gare-du-nord-taxi': { fr: 'Taxi de la gare du Nord', en: 'Gare du Nord taxi rank' },
-  'g7-phone': { fr: 'Taxi G7 par téléphone', en: 'G7 phone booking' },
-  'paris-airport-shuttle': { fr: 'Navette Paris Airport Shuttle', en: 'Paris Airport Shuttle' },
+  'paris-airport-shuttle': { fr: 'Taxi vers l’aéroport', en: 'Airport taxi' },
   'rer-b-replacement-bus': { fr: 'Bus de remplacement du RER B', en: 'RER B replacement bus' },
 };
+export function optionLabel(option: { id: string; name: string }, language: 'fr' | 'en'): string {
+  const separator = option.name.indexOf(' — ');
+  const name = optionNames[option.id]?.[language] ?? (separator < 0 ? option.name : option.name.slice(0, separator));
+  return separator < 0 ? name : `${name}, ${language === 'fr' ? 'prise en charge à' : 'pickup at'} ${option.name.slice(separator + 3)}`;
+}

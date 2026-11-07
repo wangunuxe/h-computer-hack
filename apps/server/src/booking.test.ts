@@ -124,6 +124,12 @@ describe('H booking runner', () => {
     mock.input.onAgentView = () => { throw new Error('view callback failed'); };
     await expect(runBooking(mock.input, mock.client)).resolves.toMatchObject({ booking: { ref: answer.ref } });
   });
+  it('briefs H with the stated pickup instead of a station example', async () => {
+    const mock = setup(); mock.input.trip.origin = 'Étoile'; await runBooking(mock.input, mock.client);
+    const params = mock.startSession.mock.calls[0] as unknown as [{ agent: { instructions: string } }];
+    expect(params[0].agent.instructions).toContain('Pickup address: "Étoile". Enter this trip origin in the pickup field');
+    expect(params[0].agent.instructions).toContain('Never substitute a station or an example address');
+  });
   it.each([{ total_price: undefined }, { currency: undefined }, { currency: 'USD' }])('rejects missing or unsupported fare facts before asking the user: %j', async (missing) => {
     const mock = setup(async function* (tools) {
       expect(await call(tools, 'confirm_with_user', { summary: 'Shuttle', ...confirmationFields, ...missing })).toContain('REJECTED');

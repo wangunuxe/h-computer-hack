@@ -483,7 +483,7 @@ function setLiveStage(stage){
   if(stage===lastServerStage||!Object.hasOwn(indices,stage))return;
   const next=indices[stage],previous=si;
   lastServerStage=stage;liveError=false;appendLiveLog(`stage  ${stage}`);
-  if(previous===7&&next===0)clearLiveBooking();
+  if(next===0&&previous>0)clearLiveBooking();
   if(next!==si){si=next;te=0;paintChips()}
   if(next===4){
     focusExec=true;camT={x:STAGES[4].x,y:STAGES[4].y,z:2.55};

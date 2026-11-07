@@ -1,9 +1,12 @@
 import { ProfileSchema, ScenarioSchema, ServerEventSchema, type WebEvent } from '@voila/shared';
-import { initialState, optionEvent, reduce, transcriptEvent, type Stage } from './state.js';
+import { canStop, initialState, optionEvent, reduce, transcriptEvent, type Stage } from './state.js';
 import { SpeechQueue } from './speech.js';
 import { Recorder, type Credentials } from './recorder.js';
 import { clientProfile, type ClientProfile } from './preferences.js';
 import { labels, optionNames, stages } from './labels.js';
+import { bindMicControls } from './mic-controls.js';
+import { recordingDiagnostic, recordingErrorKeys } from './recording-error.js';
+import { ConnectionAttempt, replaceOnForeground } from './connection.js';
 import './style.css';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -14,6 +17,7 @@ try { profile = clientProfile(JSON.parse(localStorage.getItem('voila.profile') ?
 if (profile) language = profile.language.startsWith('fr') ? 'fr' : 'en';
 let state = initialState(); let credentials: Credentials | undefined; let socket: WebSocket | undefined;
 let helloSent = false; let connecting = false; let retry: ReturnType<typeof setTimeout> | undefined; let pendingStop = false; let connected = false;
+let attempt: ConnectionAttempt | undefined;
 let recorder: Recorder | undefined; let releasing = false; let audio: AudioContext | undefined;
 let lastSay = ''; let pendingFocus: Stage | undefined;
 const t = () => labels[language];
@@ -59,14 +63,23 @@ function connection(ready: boolean) {
 async function connect() {
   if (!profile || connecting || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
   connecting = true; connection(false);
+  const current = attempt = new ConnectionAttempt(() => {
+    if (attempt !== current) return;
+    attempt = undefined; connecting = false;
+    const stale = socket; socket = undefined; stale?.close();
+    connection(false); clearTimeout(retry); retry = setTimeout(() => void connect(), 1500);
+  });
   try {
     if (!credentials) {
-      const response = await fetch('/session', { method: 'POST' }); if (!response.ok) throw new Error('Session unavailable');
-      credentials = await response.json(); helloSent = false;
+      const response = await fetch('/session', { method: 'POST', signal: current.controller.signal }); if (!response.ok) throw new Error('Session unavailable');
+      const issued: Credentials = await response.json();
+      if (attempt !== current) return;
+      credentials = issued; helloSent = false;
     }
     const ws = socket = new WebSocket((location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws/session/' + credentials!.id + '?token=' + encodeURIComponent(credentials!.resume_token));
     ws.onopen = () => {
       if (ws !== socket) return;
+      current.clear();
       connection(true);
       if (!helloSent) { send({ type: 'hello', profile: ProfileSchema.parse(profile), gps: null, scenario: ScenarioSchema.safeParse(new URLSearchParams(location.search).get('scenario')).data }); helloSent = true; }
       if (pendingStop) { send({ type: 'stop' }); pendingStop = false; recordingLabel(); }
@@ -76,7 +89,7 @@ async function connect() {
       try {
         const event = ServerEventSchema.parse(JSON.parse(String(message.data)));
         const previous = state.stage; state = reduce(state, event);
-        if (event.type === 'stage' && state.stage !== previous) pendingFocus = state.stage;
+        if (event.type === 'stage' && state.stage !== previous) pendingFocus = ['UNDERSTAND', 'RESEARCH', 'EXECUTE'].includes(state.stage) ? undefined : state.stage;
         if (event.type === 'say') { announce(event.text); if (profile?.tts_enabled) voice.enqueue(event.text); }
         if (event.type === 'error') announce(event.message, true);
         if (event.type === 'clarify') announce(event.question);
@@ -86,18 +99,20 @@ async function connect() {
     };
     ws.onclose = (event) => {
       if (ws !== socket) return;
+      current.clear();
       recorder?.cancel(); connection(false); $('connection').textContent = t().disconnected;
       if (event.code === 4401) { credentials = undefined; helloSent = false; }
       clearTimeout(retry); retry = setTimeout(() => void connect(), 1500);
     };
-    ws.onerror = () => { $('connection').textContent = t().disconnected; };
-  } catch { announce(t().disconnected, true); clearTimeout(retry); retry = setTimeout(() => void connect(), 3000); }
-  finally { connecting = false; }
+    ws.onerror = () => { if (ws === socket) $('connection').textContent = t().disconnected; };
+  } catch { if (attempt === current) { current.clear(); announce(t().disconnected, true); clearTimeout(retry); retry = setTimeout(() => void connect(), 3000); } }
+  finally { if (attempt === current) connecting = false; }
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     clearTimeout(retry);
-    if (socket?.readyState === WebSocket.OPEN) { socket.close(); socket = undefined; }
+    attempt?.cancel(); attempt = undefined; connecting = false;
+    if (replaceOnForeground(socket?.readyState)) { const stale = socket; socket = undefined; stale?.close(); }
     void connect();
   } else recorder?.cancel();
 });
@@ -112,12 +127,13 @@ function recordingLabel() {
   talk.setAttribute('aria-label', active ? t().stopListening : releasing ? t().processing : profile?.mic_mode === 'hold' ? t().hold : t().tap);
   talk.disabled = !connected || releasing;
   $('talk-help').textContent = profile?.mic_mode === 'hold' ? t().holdHelp : t().toggleHelp;
-  $('stop').hidden = !recorder && !pendingStop && ['LISTEN', 'DONE'].includes(state.stage);
+  $('stop').hidden = !!recorder || !canStop(state.stage);
 }
 function start() {
   if (recorder || !credentials || socket?.readyState !== WebSocket.OPEN) return;
   unlock(); cue(); releasing = false;
-  const current = new Recorder(sendTranscript, () => announce(t().microphone, true), () => { if (recorder === current) { recorder = undefined; releasing = false; $('elapsed').hidden = true; recordingLabel(); } }, () => {
+  $('errors').replaceChildren();
+  const current = new Recorder(sendTranscript, (failure) => { console.warn('Speech recording failed', recordingDiagnostic(failure)); announce(t()[recordingErrorKeys[failure.kind]], true); }, () => { if (recorder === current) { recorder = undefined; releasing = false; $('elapsed').hidden = true; recordingLabel(); } }, () => {
     releasing = true; cue(true); recordingLabel();
     const text = language === 'fr' ? 'Trois minutes atteintes. Je termine la transcription.' : 'Three-minute limit reached. Finishing the transcript.';
     announce(text); if (profile?.tts_enabled) voice.enqueue(text);
@@ -126,12 +142,7 @@ function start() {
 }
 function release() { if (!recorder || releasing) return; releasing = true; cue(true); recordingLabel(); recorder.stop(); }
 const talk = $<HTMLButtonElement>('talk');
-talk.onpointerdown = (event) => { if (profile?.mic_mode !== 'hold' || event.button !== 0) return; event.preventDefault(); talk.setPointerCapture(event.pointerId); start(); };
-talk.onpointerup = (event) => { if (profile?.mic_mode === 'hold') { event.preventDefault(); release(); } };
-talk.onpointercancel = () => { if (profile?.mic_mode === 'hold') recorder?.cancel(); };
-talk.onkeydown = (event) => { if (profile?.mic_mode === 'hold' && [' ', 'Enter'].includes(event.key)) { event.preventDefault(); if (!event.repeat) start(); } };
-talk.onkeyup = (event) => { if (profile?.mic_mode === 'hold' && [' ', 'Enter'].includes(event.key)) { event.preventDefault(); release(); } };
-talk.onclick = (event) => { if (profile?.mic_mode === 'toggle' || event.detail === 0) { if (recorder) release(); else start(); } };
+bindMicControls(talk, $('dock'), { mode: () => profile?.mic_mode ?? 'toggle', active: () => !!recorder, start, release });
 $('stop').onclick = () => { unlock(); recorder?.cancel(); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); };
 $('repeat').onclick = () => { unlock(); if (!lastSay) return; if (profile?.tts_enabled) voice.enqueue(lastSay); else announce(lastSay); };
 

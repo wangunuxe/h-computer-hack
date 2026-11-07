@@ -48,6 +48,7 @@ describe('recorder audio startup and finalization', () => {
     const s = setup(); const limit = vi.fn(), elapsed = vi.fn();
     const recorder = new Recorder(s.transcript, s.error, s.done, limit, elapsed); active.push(recorder);
     await recorder.start(credentials); const socket = Socket.instances[0]!; socket.open();
+    Worklet.instances[0]!.emit(new ArrayBuffer(2)); socket.send.mockClear();
     vi.advanceTimersByTime(179_000); expect(socket.send).not.toHaveBeenCalled(); expect(elapsed).toHaveBeenLastCalledWith(179);
     vi.advanceTimersByTime(1000); expect(socket.send).toHaveBeenCalledExactlyOnceWith(stopRecording);
     expect(limit).toHaveBeenCalledOnce(); expect(s.done).not.toHaveBeenCalled(); expect(s.error).not.toHaveBeenCalled();
@@ -74,12 +75,12 @@ describe('recorder audio startup and finalization', () => {
     s.recorder.stop(); socket.finish('Merci');
     expect(socket.send.mock.calls).toEqual([[first], [second], [stopRecording]]); expect(s.transcript).toHaveBeenCalledWith('Merci');
   });
-  it('stops late microphone tracks after release without cancelling the connecting socket', async () => {
+  it('cleans up a release during permission prompts without creating a speech session', async () => {
     const s = setup(); const permission = deferred<typeof s.stream>(); s.media.mockReturnValue(permission.promise);
     const starting = s.recorder.start(credentials); s.recorder.stop(); permission.resolve(s.stream); await starting;
     expect(s.track.stop).toHaveBeenCalled(); expect(Worklet.instances).toHaveLength(0);
-    const socket = Socket.instances[0]!; socket.open(); expect(socket.send.mock.calls).toEqual([[stopRecording]]);
-    socket.finish(); expect(s.transcript).not.toHaveBeenCalled(); expect(s.error).toHaveBeenCalledOnce(); expect(s.done).toHaveBeenCalledOnce();
+    expect(s.fetcher).not.toHaveBeenCalled(); expect(Socket.instances).toHaveLength(0);
+    expect(s.transcript).not.toHaveBeenCalled(); expect(s.error).toHaveBeenCalledExactlyOnceWith({ kind: 'empty', code: 'released-before-audio' }); expect(s.done).toHaveBeenCalledOnce();
   });
   it('cleans up late permission results after cancellation and ignores the aborted URL response', async () => {
     const s = setup(); const permission = deferred<typeof s.stream>(); const request = deferred<Response>();
@@ -96,7 +97,31 @@ describe('recorder audio startup and finalization', () => {
     expect(s.error).toHaveBeenCalledOnce(); expect(s.done).toHaveBeenCalledOnce(); expect(s.track.stop).toHaveBeenCalled(); expect(Socket.instances).toHaveLength(0);
   });
   it('bounds finalization after release', async () => {
-    const s = setup(); await s.recorder.start(credentials); Socket.instances[0]!.open(); s.recorder.stop();
+    const s = setup(); await s.recorder.start(credentials); Socket.instances[0]!.open(); Worklet.instances[0]!.emit(new ArrayBuffer(2)); s.recorder.stop();
     vi.advanceTimersByTime(10_000); expect(s.error).toHaveBeenCalledOnce(); expect(s.done).toHaveBeenCalledOnce(); expect(s.track.stop).toHaveBeenCalled();
+  });
+  it.each([['NotAllowedError', 'permission'], ['NotFoundError', 'device'], ['NotReadableError', 'capture']])('classifies %s without starting Gladia', async (name, kind) => {
+    const s = setup(); const cause = new DOMException('private device detail', name); s.media.mockRejectedValue(cause);
+    await s.recorder.start(credentials);
+    expect(s.error).toHaveBeenCalledExactlyOnceWith({ kind, code: 'capture', cause }); expect(s.fetcher).not.toHaveBeenCalled();
+  });
+  it('distinguishes empty speech, provider errors and connection failures', async () => {
+    for (const kind of ['empty', 'provider', 'service']) {
+      const s = setup(); await s.recorder.start(credentials); const socket = Socket.instances.at(-1)!; socket.open();
+      if (kind === 'empty') socket.finish();
+      if (kind === 'provider') socket.onmessage?.({ data: JSON.stringify({ type: 'error', error: 'secret upstream details' }) });
+      if (kind === 'service') socket.onerror?.();
+      expect(s.error).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind })); expect(s.done).toHaveBeenCalledOnce();
+    }
+  });
+  it('retains 429 status without confusing it with a mic failure', async () => {
+    const s = setup(); s.fetcher.mockResolvedValue(new Response('{}', { status: 429 })); await s.recorder.start(credentials);
+    expect(s.error).toHaveBeenCalledWith(expect.objectContaining({ kind: 'service', code: 'rate-limit', cause: expect.objectContaining({ status: 429 }) }));
+  });
+  it('does not announce a recording-limit finalization after permission startup produced no audio', async () => {
+    const s = setup(); const permission = deferred<typeof s.stream>(); s.media.mockReturnValue(permission.promise);
+    const limit = vi.fn(); const recorder = new Recorder(s.transcript, s.error, s.done, limit); active.push(recorder);
+    const started = recorder.start(credentials); vi.advanceTimersByTime(180_000); permission.resolve(s.stream); await started;
+    expect(limit).not.toHaveBeenCalled(); expect(s.error).toHaveBeenCalledOnce(); expect(s.fetcher).not.toHaveBeenCalled();
   });
 });

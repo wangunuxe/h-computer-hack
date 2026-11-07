@@ -83,8 +83,11 @@ export class VoilaSession {
       return;
     }
     if (!this.profile) { this.error('Send hello first.'); return; }
-    if (event.type === 'final_transcript' && this.stage === 'LISTEN') {
+    if (event.type === 'final_transcript' && ['LISTEN', 'DONE'].includes(this.stage)) {
       if (!event.text.trim()) { this.error('Transcript must not be empty.'); return; }
+      const restarting = this.stage === 'DONE';
+      this.resetTrip();
+      if (restarting) this.transition('LISTEN');
       this.flow = new AbortController();
       const generation = ++this.generation;
       this.lastHeartbeat = -Infinity;
@@ -159,9 +162,12 @@ export class VoilaSession {
     this.confirmation = undefined;
     this.paidRefs.clear();
   }
-  private stop() {
+  private resetTrip() {
     this.cancel();
     this.research = undefined; this.booking = undefined; this.payment = undefined; this.options = []; this.trip = {};
+  }
+  private stop() {
+    this.resetTrip();
     this.speak('stopped', {});
     this.transition('LISTEN');
   }

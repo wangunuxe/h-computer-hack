@@ -33,6 +33,49 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it.each(['demo', 'live'] as const)('starts a new trip from a paid DONE booking, preserving profile and %s scenario', async (scenario) => {
+    const understand = vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip, missing: [] });
+    const s = setup({ understand });
+    const savedProfile = { ...profile, language: 'fr' };
+    s.session.handle({ type: 'hello', profile: savedProfile, gps: null, scenario });
+    s.session.handle({ type: 'final_transcript', text: 'Premier trajet vers CDG' });
+    await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE'));
+    await s.choose(); s.session.handle({ type: 'paid' }); expect(s.session.stage).toBe('DONE');
+    const count = s.events.length;
+    s.session.handle({ type: 'final_transcript', text: 'Encore un trajet vers CDG' });
+    expect(s.session.stage).toBe('UNDERSTAND');
+    expect(s.events.slice(count, count + 2)).toEqual([{ type: 'stage', stage: 'LISTEN' }, { type: 'stage', stage: 'UNDERSTAND' }]);
+    await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE'));
+    expect(understand).toHaveBeenLastCalledWith(expect.objectContaining({ transcript: 'Encore un trajet vers CDG', profile: savedProfile, previous: {}, signal: expect.any(AbortSignal) }));
+    expect(s.ports.trafficH).toHaveBeenCalledTimes(scenario === 'demo' ? 0 : 2);
+    expect(s.ports.linkup).toHaveBeenCalledTimes(scenario === 'demo' ? 0 : 2);
+    await s.choose('1'); expect(s.session.stage).toBe('DONE');
+    expect(s.ports.runBooking).toHaveBeenCalledOnce();
+    const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toEqual([{ type: 'stage', stage: 'DONE' }]);
+    expect(s.events.slice(count).filter((event) => ['error', 'booking_card', 'payment_handoff', 'confirm'].includes(event.type))).toEqual([]);
+    s.session.handle({ type: 'final_transcript', text: 'Nouvelle réservation après le taxi' });
+    await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE'));
+    await s.choose(); expect(s.session.stage).toBe('AWAIT_PAYMENT');
+    expect(s.ports.runBooking).toHaveBeenCalledTimes(2);
+    expect(understand).toHaveBeenLastCalledWith(expect.objectContaining({ profile: savedProfile, previous: {} }));
+  });
+  it('keeps a completed booking when DONE receives an empty transcript', async () => {
+    const s = setup(); await s.start(); await s.choose(); s.session.handle({ type: 'paid' });
+    s.session.handle({ type: 'final_transcript', text: '   ' });
+    expect(s.session.stage).toBe('DONE'); expect(s.ports.understand).toHaveBeenCalledOnce();
+    expect(s.events.at(-1)).toEqual({ type: 'error', message: 'Transcript must not be empty.' });
+    const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toEqual([{ type: 'stage', stage: 'DONE' }, { type: 'booking_card', booking }]);
+  });
+  it('does not restore a previous booking when understanding the next trip fails', async () => {
+    const understand = vi.fn<SessionPorts['understand']>().mockResolvedValueOnce({ trip, missing: [] }).mockRejectedValueOnce(new Error('unavailable'));
+    const s = setup({ understand }); await s.start(); await s.choose(); s.session.handle({ type: 'paid' });
+    s.session.handle({ type: 'final_transcript', text: 'Another trip' }); await flush();
+    expect(s.session.stage).toBe('LISTEN'); expect(s.session.markPaid(booking.ref)).toBe(false);
+    const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toEqual([{ type: 'stage', stage: 'LISTEN' }]);
+  });
   it.each([undefined, 'demo', 'invalid'])('defaults to deterministic demo with VOILA_SCENARIO=%s and never calls H or Linkup', async (value) => {
     vi.stubEnv('VOILA_SCENARIO', value);
     const s = setup();

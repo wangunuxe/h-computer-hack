@@ -23,6 +23,17 @@ describe('event state and routing', () => {
   });
   it('bounds the feed', () => { let state = initialState(); for (let i = 0; i < 101; i++) state = reduce(state, { type: 'feed', kind: 'test', text: String(i) }); expect(state.feed).toHaveLength(100); expect(state.feed[0]?.text).toBe('1'); });
   it.each(['LISTEN', 'UNDERSTAND', 'CLARIFY', 'RESEARCH', 'PRESENT', 'CHOOSE', 'EXECUTE', 'CONFIRM', 'HANDOFF', 'AWAIT_PAYMENT', 'DONE'] as Stage[])('routes text from %s', (stage) => {
-    expect(transcriptEvent(stage, ' Bonjour ')).toEqual({ type: stage === 'LISTEN' ? 'final_transcript' : 'user_reply', text: 'Bonjour' }); expect(transcriptEvent(stage, '  ')).toBeUndefined();
+    expect(transcriptEvent(stage, ' Bonjour ')).toEqual({ type: ['LISTEN', 'DONE'].includes(stage) ? 'final_transcript' : 'user_reply', text: 'Bonjour' }); expect(transcriptEvent(stage, '  ')).toBeUndefined();
+  });
+  it('starts a fresh trip from DONE and clears completed-trip UI on the server LISTEN transition', () => {
+    let state = reduce(initialState(), { type: 'options', items: [{ id: 'shuttle', name: 'Shuttle', price: 65, pickup_wait_minutes: 10, journey_minutes: 45, guide_dog_status: 'accepted' }] });
+    state = reduce(state, { type: 'confirm', summary: 'Previous booking' });
+    state = reduce(state, { type: 'payment_handoff', url: 'https://example.com/pay', amount: 65, merchant: 'Shuttle' });
+    state = reduce(state, { type: 'booking_card', booking: { ref: 'OLD', pickup_time: '2027-01-15T20:00:00+01:00', pickup_point: 'Paris', price: 65, operator_phone: '123', payment_url: 'https://example.com/pay', guide_dog_status: 'accepted' } });
+    state = reduce(state, { type: 'stage', stage: 'DONE' });
+    expect(transcriptEvent(state.stage, ' Un autre trajet ')).toEqual({ type: 'final_transcript', text: 'Un autre trajet' });
+    state = reduce(state, { type: 'stage', stage: 'LISTEN' });
+    state = reduce(state, { type: 'stage', stage: 'UNDERSTAND' });
+    expect(state).toEqual({ ...initialState(), stage: 'UNDERSTAND' });
   });
 });

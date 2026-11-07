@@ -20,7 +20,7 @@ export function reduce(state: State, event: ServerEvent): State {
 }
 export function transcriptEvent(stage: Stage, text: string): WebEvent | undefined {
   const trimmed = text.trim();
-  return trimmed ? { type: stage === 'LISTEN' ? 'final_transcript' : 'user_reply', text: trimmed } : undefined;
+  return trimmed ? { type: ['LISTEN', 'DONE'].includes(stage) ? 'final_transcript' : 'user_reply', text: trimmed } : undefined;
 }
 export function optionEvent(options: State['options'], id: string): WebEvent | undefined {
   const index = options.findIndex((option) => option.id === id);

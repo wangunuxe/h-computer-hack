@@ -38,9 +38,7 @@ export async function searchDisruptionAndAlternatives({ query, context, signal, 
         // Only operator/station sources identify catalogue modes; snippets never supply fares or availability.
         const host = new URL(result.url).hostname.replace(/^www\./, '');
         const text = `${result.name} ${result.content}`.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-        const id = host === 'g7.fr' && /\bg7\b/.test(text) ? 'g7-phone'
-          : host === 'paris-airport-shuttle.com' && /paris airport shuttle/.test(text) ? 'paris-airport-shuttle'
-          : host === 'garesetconnexions.sncf' && /gare du nord/.test(text) && /\btaxi/.test(text) ? 'gare-du-nord-taxi'
+        const id = host === 'paris-airport-shuttle.com' && /paris airport shuttle/.test(text) ? 'paris-airport-shuttle'
           : host === 'rerb-leblog.fr' && /\bbus\b/.test(text) && /remplacement|replacement|substitution/.test(text) ? 'rer-b-replacement-bus' : undefined;
         const preset = presetOptions.find((option) => option.id === id);
         if (preset) modes.set(preset.id, OptionSchema.parse({ ...preset, source: result.url }));

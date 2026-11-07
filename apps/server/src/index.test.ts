@@ -189,9 +189,9 @@ describe('real WebSocket round-trip', () => {
     await second.until(() => second.messages.length > 0);
     expect(running.sessions.get(issued.id)).toBe(session);
     expect(second.messages[0]).toEqual({ type: 'stage', stage: 'CHOOSE' });
-    second.ws.send(JSON.stringify({ type: 'user_reply', text: 'G7' }));
+    second.ws.send(JSON.stringify({ type: 'user_reply', text: 'bus' }));
     await second.until(() => second.messages.some((e) => e.type === 'stage' && e.stage === 'DONE'));
-    expect(second.messages).toContainEqual({ type: 'say', text: expect.stringContaining('Appelez G7') });
+    expect(second.messages).toContainEqual({ type: 'say', text: expect.stringContaining('Demandez aux agents si un bus de remplacement') });
     expect(running.sessions.size).toBe(1);
     const fresh = await connect(another.resume_token, another.id);
     await fresh.until(() => fresh.messages.length > 0);

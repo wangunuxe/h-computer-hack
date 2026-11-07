@@ -6,7 +6,7 @@ import { searchDisruptionAndAlternatives } from './adapters/linkup.js';
 import { runBooking } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
 import { assessOptions } from './feasibility.js';
-import { bookingMethods, matchesPresetRoute, mergeOptions, presetOptions } from './options.js';
+import { bookingMethods, isRerBOrigin, mergeOptions, optionsForTrip } from './options.js';
 import { chooseOption } from './choose.js';
 import { say, type NarrationParams } from './narrate.js';
 import { converse, type ConfirmationContext, type Turn, type TurnResult } from './converse.js';
@@ -365,12 +365,17 @@ export class VoilaSession {
       this.transition('RESEARCH');
       const research = await this.research!;
       if (!this.active(generation)) return;
-      const catalogue = mergeOptions(matchesPresetRoute(trip) ? presetOptions : [], research.extraOptions);
+      const local = optionsForTrip(trip, research.disruption.status === 'disrupted');
+      const catalogue = mergeOptions(local, research.extraOptions).filter((option) => bookingMethods[option.id] &&
+        (option.id !== 'rer-b-replacement-bus' || research.disruption.status === 'disrupted' && isRerBOrigin(trip.origin))).map((option) => {
+        const contextual = local.find((item) => item.id === option.id);
+        return contextual ? { ...option, name: contextual.name, journey_minutes: contextual.journey_minutes, pickup_wait_minutes: contextual.pickup_wait_minutes } : option;
+      });
       const assessed = assessOptions(catalogue, trip, this.ports.clock());
       this.options = assessed.feasible;
       this.transition('PRESENT');
       this.send({ type: 'options', items: this.options });
-      this.speak('disruption', research.disruption);
+      this.speak('disruption', { ...research.disruption, origin: !/gare du nord/i.test(trip.origin) && local.length ? trip.origin : undefined });
       if (this.options.length) this.speak('present-options', { options: this.options, now: this.ports.clock() });
       else if (!catalogue.length) this.speak('no-known-options', {});
       else this.speak('no-feasible-options', { rejected: assessed.rejected.map(({ option, reason }) => ({ id: option.id, name: option.name, reason })) });

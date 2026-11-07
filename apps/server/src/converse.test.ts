@@ -3,7 +3,7 @@ import { converse, type TurnInput } from './converse.js';
 import { presetOptions } from './options.js';
 
 const input: TurnInput = { transcript: 'le moins cher', stage: 'CHOOSE', language: 'fr', trip: {}, missing: [], options: [...presetOptions], history: [], attempt: 0, now: new Date('2027-01-15T12:00:00Z') };
-const result = { intent: 'choose', option_id: 'gare-du-nord-taxi', reply: 'Le taxi de la gare est le moins cher parmi les taxis.', confidence: .95 };
+const result = { intent: 'choose', option_id: 'paris-airport-shuttle', reply: 'Voici le taxi vers l’aéroport.', confidence: .95 };
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 describe('Gemini turn interpreter', () => {
   it('does not expose a self-introduced name after an honorific in the SDK request', async () => {

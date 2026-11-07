@@ -29,6 +29,9 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
 
 - All labels intentionally lack associations; locate inputs visually by order.
 - Addresses: type a substring and CLICK a matching dropdown div below the input.
+  Pickup MUST be the supplied trip origin, not a default station. For an unlisted
+  pickup, type the full supplied location and select its custom suggestion. The
+  simulator uses approximate Paris coordinates for custom pickups, not geocoding.
   Clicking fills hidden lat/lng fields. Typing without selecting fails on submit:
   “Select both addresses from the suggestion dropdown (missing lat/lng).”
   Editing the address clears hidden coordinates, so select again.
@@ -37,6 +40,8 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
   - Gare de Lyon, Place Louis-Armand, Paris
   - Gare Montparnasse, 17 Boulevard de Vaugirard, Paris
   - Gare de l’Est, Place du 11 Novembre 1918, Paris
+  - Charles de Gaulle–Étoile, Place Charles de Gaulle, Paris
+  - Châtelet–Les Halles, Paris
   - CDG Airport Terminal 1, Roissy-en-France
   - CDG Airport Terminal 2E, Roissy-en-France
   - CDG Airport Terminal 2F, Roissy-en-France

@@ -37,6 +37,37 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it.each(['je veux un taxi', 'taxi', 'un taxi', 'call me a taxi', 'la navette'])('books the airport taxi from Étoile in the demo for "%s", with confirmation and user payment', async (choice) => {
+    const client = { models: { generateContent: vi.fn(async () => ({ text: JSON.stringify({ trip: { origin: 'Étoile', destination: 'CDG' } }) })) } };
+    const runBooking = vi.fn<SessionPorts['runBooking']>().mockImplementation(async (input) => {
+      const decision = await input.confirm('Taxi', { ...fare, pickup_date: '2027-01-15', pickup_time: '10:15' });
+      expect(decision.approved).toBe(true);
+      await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Paris Airport Shuttle', summary: 'Taxi' });
+      return { ...completed, booking: { ...booking, pickup_point: 'Étoile' } };
+    });
+    const s = setup({ understand: (input) => understand(input, client), runBooking });
+    s.session.handle({ type: 'hello', profile: { ...profile, language: 'fr' }, gps: null, scenario: 'demo' });
+    s.session.handle({ type: 'final_transcript', text: "Je suis à l'Étoile, mon avion part dans 2 heures, je dois aller à CDG" });
+    await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE'));
+    expect(s.events.find((event) => event.type === 'options')).toMatchObject({ items: [{ id: 'paris-airport-shuttle', name: 'Airport taxi — Étoile' }] });
+    expect(runBooking).not.toHaveBeenCalled();
+    expect(JSON.stringify(s.events.filter((event) => event.type === 'say' || event.type === 'options'))).not.toContain('Gare du Nord');
+    await s.choose(choice); expect(runBooking).toHaveBeenCalledOnce(); expect(s.session.stage).toBe('CONFIRM');
+    expect(runBooking.mock.calls[0]![0]).toMatchObject({ trip: { origin: 'Étoile', destination: 'CDG' }, journeyMinutes: 35 });
+    expect(s.events).toContainEqual({ type: 'say', text: expect.stringContaining('Taxi vers l’aéroport, prise en charge à Étoile') });
+    expect(JSON.stringify(client.models.generateContent.mock.calls)).not.toContain('Gare du Nord');
+    await s.choose('oui'); expect(s.session.stage).toBe('AWAIT_PAYMENT');
+    s.session.handle({ type: 'paid' }); expect(s.session.stage).toBe('DONE');
+    expect(s.events).toContainEqual(expect.objectContaining({ type: 'booking_card', booking: expect.objectContaining({ pickup_point: 'Étoile' }) }));
+    expect(s.ports.linkup).not.toHaveBeenCalled(); expect(s.ports.trafficH).not.toHaveBeenCalled();
+  });
+  it('keeps the stated pickup when live research returns a context-free catalogue or obsolete manual taxis', async () => {
+    const s = setup({ understand: async () => ({ trip: { ...trip, origin: 'Châtelet' }, missing: [] }), linkup: async () => ({ corroboration: [], extraOptions: [presetOptions[0]!, { ...presetOptions[0]!, id: 'g7-phone', name: 'G7 by phone' }, { ...presetOptions[0]!, id: 'gare-du-nord-taxi', name: 'Gare du Nord taxi rank' }] }) });
+    s.hello(); s.session.handle({ type: 'final_transcript', text: 'Châtelet vers CDG' }); await flush();
+    const options = s.events.find((event) => event.type === 'options');
+    expect(options).toMatchObject({ items: [expect.objectContaining({ name: 'Airport taxi — Châtelet', journey_minutes: 45 }), expect.objectContaining({ id: 'rer-b-replacement-bus' })] });
+    expect(JSON.stringify(options)).not.toMatch(/Gare du Nord|g7-phone/);
+  });
   it('does not enter departure-time clarification for an ASAP relative flight with a known origin', async () => {
     const client = { models: { generateContent: vi.fn(async () => ({ text: JSON.stringify({ trip: { origin: 'Gare du Nord', destination: 'CDG 2E' } }) })) } };
     const s = setup({ understand: (input) => understand(input, client) }); s.hello();
@@ -112,7 +143,7 @@ describe('VoilaSession', () => {
   });
   it('asks only for guide-dog information for a manual option and skips stored fields', async () => {
     const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'en', guide_dog: false }, gps: null, scenario: 'demo' });
-    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE')); await s.choose('1');
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE')); await s.choose('bus');
     expect(s.session.stage).toBe('DONE'); expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
   });
   it.each(['efface mes informations', 'forget my details'])('clears saved and pending profile data without Gemini: %s', async (text) => {
@@ -166,7 +197,7 @@ describe('VoilaSession', () => {
     expect(understand).toHaveBeenLastCalledWith(expect.objectContaining({ transcript: 'Encore un trajet vers CDG', profile: savedProfile, previous: {}, signal: expect.any(AbortSignal) }));
     expect(s.ports.trafficH).toHaveBeenCalledTimes(scenario === 'demo' ? 0 : 2);
     expect(s.ports.linkup).toHaveBeenCalledTimes(scenario === 'demo' ? 0 : 2);
-    await s.choose('1'); expect(s.session.stage).toBe('DONE');
+    await s.choose('bus'); expect(s.session.stage).toBe('DONE');
     expect(s.ports.runBooking).toHaveBeenCalledOnce();
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
     expect(replay.filter((event) => !['activity', 'profile'].includes(event.type))).toEqual([{ type: 'stage', stage: 'DONE' }]);
@@ -397,7 +428,7 @@ describe('VoilaSession', () => {
     expect(s.ports.linkup.mock.calls[0]?.[0].query).not.toContain('Gare du Nord to CDG');
   });
   it('uses only researched extra options for an unsupported preset route', async () => {
-    const extra = { ...presetOptions[1]!, name: 'G7 to Orly', source: 'https://www.g7.fr/orly' };
+    const extra = { ...presetOptions[0]!, name: 'Airport taxi to Orly', source: 'https://paris-airport-shuttle.com/fr/reservation/' };
     const s = setup({ understand: async () => ({ trip: { ...trip, destination: 'Orly' }, missing: [] }), linkup: async () => ({ corroboration: [], extraOptions: [extra] }) });
     await s.start();
     expect(s.events).toContainEqual({ type: 'options', items: [extra] });
@@ -420,9 +451,9 @@ describe('VoilaSession', () => {
   });
   it('reads manual instructions in the profile language then ends without H', async () => {
     const s = setup(); s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush();
-    await s.choose('G7');
+    await s.choose('bus');
     expect(s.session.stage).toBe('DONE');
-    expect(s.events).toContainEqual({ type: 'say', text: expect.stringContaining('Appelez G7 au 3607') });
+    expect(s.events).toContainEqual({ type: 'say', text: expect.stringContaining('Demandez aux agents si un bus de remplacement') });
     expect(s.ports.runBooking).not.toHaveBeenCalled();
   });
   it.each([['yes', true], ["d'accord", true], ['vas-y', true], ['non', false], ['attends', false]])('passes confirmation %s back to the runner', async (reply, approved) => {
@@ -448,16 +479,16 @@ describe('VoilaSession', () => {
   ])('builds French confirmation cards and speech from structured facts, not agent prose: %s', async (summary) => {
     const s = setup({ runBooking: async (input) => { await input.confirm(summary, { pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR' }); return completed; } });
     s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
-    expect(s.events).toContainEqual({ type: 'confirm', summary: 'Navette Paris Airport Shuttle, vers CDG 2E, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?' });
-    expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Navette Paris Airport Shuttle, vers CDG 2E, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?' });
+    expect(s.events).toContainEqual({ type: 'confirm', summary: 'Taxi vers l’aéroport, prise en charge à Gare du Nord, vers CDG 2E, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?' });
+    expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Taxi vers l’aéroport, prise en charge à Gare du Nord, vers CDG 2E, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?' });
     expect(s.events.filter((e) => e.type === 'say').map((e) => e.text).join(' ')).not.toMatch(/Booking summary|karim@example|\*\*/);
   });
   it('never extracts date or time from a summary when only structured fare is provided', async () => {
     const summary = 'Date: 2027-01-15\nTime: 20:00\nFlight Price: 400 EUR\nTotal - 65 EUR';
     const s = setup({ runBooking: async (input) => { await input.confirm(summary, fare); return completed; } });
     s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
-    expect(s.events).toContainEqual({ type: 'confirm', summary: 'Navette Paris Airport Shuttle, vers CDG 2E, 65 €, avec votre chien guide. Je confirme ?' });
-    expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Navette Paris Airport Shuttle, vers CDG 2E, 65 €, avec votre chien guide. Je confirme ?' });
+    expect(s.events).toContainEqual({ type: 'confirm', summary: 'Taxi vers l’aéroport, prise en charge à Gare du Nord, vers CDG 2E, 65 €, avec votre chien guide. Je confirme ?' });
+    expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Taxi vers l’aéroport, prise en charge à Gare du Nord, vers CDG 2E, 65 €, avec votre chien guide. Je confirme ?' });
   });
   it('stop aborts booking and suppresses late callbacks and results', async () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { OptionSchema, type Option, type Trip } from '@voila/shared';
 import { assessOptions } from './feasibility.js';
-import { bookingMethods, matchesPresetRoute, mergeOptions, presetOptions } from './options.js';
+import { bookingMethods, matchesPresetRoute, mergeOptions, optionsForTrip, presetOptions } from './options.js';
 import { chooseOption } from './choose.js';
 import { say } from './narrate.js';
 
@@ -43,22 +43,39 @@ describe('assessOptions', () => {
 });
 
 describe('preset options and merge', () => {
+  it.each(['Étoile', 'Charles de Gaulle–Étoile', 'Châtelet', '12 Rue de la Paix, Paris', 'Gare de Lyon'])('offers a bookable taxi from %s, never a manual taxi', (origin) => {
+    const options = optionsForTrip({ origin, destination: 'CDG 2E' }, true);
+    expect(options[0]!.name).toContain(origin); expect(options[0]!.id).toBe('paris-airport-shuttle');
+    expect(options.every((option) => option.id === 'rer-b-replacement-bus' || bookingMethods[option.id]?.kind === 'h_agent')).toBe(true);
+    expect(JSON.stringify(options)).not.toContain('Gare du Nord');
+  });
+  it('uses zone estimates and limits replacement buses to disrupted RER B origins', () => {
+    const route = (origin: string, disrupted = true) => optionsForTrip({ origin, destination: 'CDG' }, disrupted);
+    expect(route('Étoile')[0]!.journey_minutes).toBe(35); expect(route('Châtelet')[0]!.journey_minutes).toBe(45);
+    expect(route('Montparnasse')[0]!.journey_minutes).toBe(55); expect(route('12 Rue de la Paix')[0]!.journey_minutes).toBe(50);
+    expect(route('Étoile')).toHaveLength(1); expect(route('Gare du Nord')).toHaveLength(2); expect(route('Châtelet')).toHaveLength(2);
+    expect(route('Gare du Nord', false)).toHaveLength(1); expect(route('Châtelet', false)).toHaveLength(1);
+    expect(optionsForTrip({ origin: '', destination: 'CDG' }, true)).toEqual([]);
+    expect(optionsForTrip({ origin: 'Étoile', destination: 'Orly' }, true)).toEqual([]);
+    expect(presetOptions[0]!.name).toBe('Airport taxi');
+  });
   it.each(['CDG 2E', 'ROISSY', 'Aéroport Charles-de-Gaulle'])('recognizes the supported airport route to %s', (destination) => {
     expect(matchesPresetRoute({ origin: 'GARE DU NÖRD, Paris', destination })).toBe(true);
   });
   it.each([
-    { origin: 'Gare de Lyon', destination: 'CDG' }, { origin: 'Gare du Nord', destination: 'Orly' },
+    { origin: 'Gare du Nord', destination: 'Charles de Gaulle–Étoile' }, { origin: 'Gare du Nord', destination: 'Orly' },
     { origin: '', destination: 'CDG' }, { origin: 'Gare du Nord', destination: 'ABCDG' },
   ])('rejects a different or unknown preset route: %j', (route) => { expect(matchesPresetRoute(route)).toBe(false); });
-  it('has four valid sourced options and a booking method for each', () => {
-    expect(presetOptions).toHaveLength(4);
+  it('has only a bookable airport taxi and a manual replacement bus', () => {
+    expect(presetOptions).toHaveLength(2);
     for (const o of presetOptions) {
       expect(OptionSchema.parse(o)).toEqual(o);
       expect(o.source).toMatch(/^https:/);
       expect(bookingMethods[o.id]).toBeDefined();
     }
     expect(bookingMethods['paris-airport-shuttle']).toEqual({ kind: 'h_agent', playbook: 'paris-airport-shuttle' });
-    expect(presetOptions.filter((o) => /taxi|G7/.test(o.name)).every((o) => o.guide_dog_status === 'accepted')).toBe(true);
+    expect(presetOptions.filter((o) => /taxi/i.test(o.name)).every((o) => bookingMethods[o.id]?.kind === 'h_agent')).toBe(true);
+    expect(bookingMethods['gare-du-nord-taxi']).toBeUndefined(); expect(bookingMethods['g7-phone']).toBeUndefined();
   });
   it('dedupes by id with extra taking precedence and preserves input', () => {
     const first = option('first', 30);
@@ -81,7 +98,7 @@ describe('chooseOption', () => {
   });
   it('does not select names of unavailable options or resolve colliding localized names arbitrarily', () => {
     expect(chooseOption('taxi de la gare du Nord', [presetOptions[1]!])).toBeNull();
-    expect(chooseOption('taxi de la gare du Nord', [presetOptions[0]!, { ...presetOptions[2]!, id: 'other', name: 'Taxi de la gare du Nord' }])).toBeNull();
+    expect(chooseOption('Airport taxi', [presetOptions[0]!, { ...presetOptions[0]!, id: 'other', name: 'Airport taxi' }])).toBeNull();
   });
   it.each(['the shuttle is fine', "la navette c'est bien", 'la navette', 'the shuttle please', 'la navette s’il vous plaît', 'je choisis la navette', 'Paris Airport Shuttle'])('accepts affirmative selection: %s', (reply) => {
     expect(chooseOption(reply, presetOptions)).toBe('paris-airport-shuttle');
@@ -98,14 +115,14 @@ describe('chooseOption', () => {
   it.each(['stop the shuttle', 'annuler la navette', 'not the shuttle', 'le shuttle demain', 'le moins cher', 'the fastest shuttle'])('still defers cancellation, corrections and preferences: %s', (reply) => {
     expect(chooseOption(reply, presetOptions)).toBeNull();
   });
-  it('selects either feasible taxi by ordinal or full name, but not an ambiguous keyword', () => {
+  it('selects the sole bookable taxi by ordinal, full name or keyword', () => {
     const options = assessOptions(presetOptions, trip, now).feasible;
-    for (const id of ['gare-du-nord-taxi', 'g7-phone']) {
+    for (const id of ['paris-airport-shuttle']) {
       const index = options.findIndex((option) => option.id === id); expect(index).toBeGreaterThanOrEqual(0);
       expect(chooseOption(String(index + 1), options)).toBe(id);
     }
-    expect(chooseOption('Gare du Nord taxi rank', options)).toBe('gare-du-nord-taxi');
-    expect(chooseOption('taxi', options)).toBeNull();
+    expect(chooseOption('Airport taxi', options)).toBe('paris-airport-shuttle');
+    expect(chooseOption('taxi', options)).toBe('paris-airport-shuttle');
   });
   it.each(['le premier', 'LA PREMIÈRE', 'first', '1', 'option 1'])('maps %s to the first option', (reply) => {
     expect(chooseOption(reply, presetOptions)).toBe(presetOptions[0]!.id);
@@ -113,16 +130,16 @@ describe('chooseOption', () => {
   it.each(['la deuxième', 'second', '2', 'option 2'])('maps %s to the second option', (reply) => {
     expect(chooseOption(reply, presetOptions)).toBe(presetOptions[1]!.id);
   });
-  it.each([['navette', 'paris-airport-shuttle'], ['SHUTTLE', 'paris-airport-shuttle'], ['G7', 'g7-phone'], ['bus', 'rer-b-replacement-bus']])('matches keyword %s', (reply, id) => {
+  it.each([['navette', 'paris-airport-shuttle'], ['SHUTTLE', 'paris-airport-shuttle'], ['taxi', 'paris-airport-shuttle'], ['je veux un taxi', 'paris-airport-shuttle'], ['un taxi', 'paris-airport-shuttle'], ['call me a taxi', 'paris-airport-shuttle'], ['bus', 'rer-b-replacement-bus']])('matches keyword %s', (reply, id) => {
     expect(chooseOption(reply, presetOptions)).toBe(id);
   });
-  it.each(['taxi', 'bus ou navette', 'option 1 ou 2', 'first bus', 'option 99', 'train', ''])('rejects ambiguous or unmatched %s', (reply) => {
+  it.each(['G7', 'bus ou navette', 'option 1 ou 2', 'first bus', 'option 99', 'train', ''])('rejects ambiguous or unmatched %s', (reply) => {
     expect(chooseOption(reply, presetOptions)).toBeNull();
   });
   it('supports taxi when only one taxi option exists and handles an empty list', () => {
     expect(chooseOption('taxi', [presetOptions[0]!])).toBe(presetOptions[0]!.id);
     expect(chooseOption('first', [])).toBeNull();
-    expect(chooseOption('NAVETTE', [{ ...presetOptions[2]!, id: 'transfer', name: 'Navette aéroport' }])).toBe('transfer');
-    expect(chooseOption('bus', [{ ...presetOptions[3]!, id: 'flight', name: 'Airbus' }])).toBeNull();
+    expect(chooseOption('NAVETTE', [{ ...presetOptions[0]!, id: 'transfer', name: 'Navette aéroport' }])).toBe('transfer');
+    expect(chooseOption('bus', [{ ...presetOptions[1]!, id: 'flight', name: 'Airbus' }])).toBeNull();
   });
 });

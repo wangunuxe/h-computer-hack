@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { say } from './narrate.js';
-import { presetOptions } from './options.js';
+import { optionsForTrip, presetOptions } from './options.js';
 import type { ConfirmationFields } from './confirmation.js';
 
-const confirmation = { trip: { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T22:00:00+01:00', passengers: 1, luggage: 1, guide_dog: true }, option: presetOptions[2]!, now: new Date('2027-01-15T10:00:00Z') };
+const confirmation = { trip: { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T22:00:00+01:00', passengers: 1, luggage: 1, guide_dog: true }, option: presetOptions[0]!, now: new Date('2027-01-15T10:00:00Z') };
 const details: ConfirmationFields = { pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR' };
 
 describe('say', () => {
+  it.each(['fr', 'en'])('keeps Étoile in taxi options and confirmation without narrating a station pickup in %s', (language) => {
+    const trip = { ...confirmation.trip, origin: 'Étoile' };
+    const options = optionsForTrip(trip, true);
+    for (const text of [say('present-options', { options, now: confirmation.now }, language), say('confirm', { ...confirmation, trip, option: options[0]! }, language), say('disruption', { mode: 'demo', status: 'disrupted', cause: 'Gare du Nord to CDG interrupted', origin: trip.origin, recorded: true }, language)]) {
+      expect(text).toContain('Étoile'); expect(text).not.toContain('Gare du Nord');
+    }
+  });
   it.each(['fr', 'en'])('clearly announces normal and unknown live status in %s', (language) => {
     const normal = say('disruption', { mode: 'live', status: 'normal', cause: '', recorded: false }, language);
     expect(normal).toContain('H'); expect(normal).toContain(language === 'fr' ? 'circule normalement' : 'running normally');
@@ -42,17 +49,18 @@ describe('say', () => {
     expect(say('disruption', { cause: 'Live incident.', recorded: false }, 'en')).toBe('Live incident.');
   });
   it('reads at most three numbered options with Paris arrival and EUR prices', () => {
-    const text = say('present-options', { options: presetOptions, now: new Date('2027-01-15T10:00:00Z') }, 'en');
-    expect(text).toContain('1. Gare du Nord taxi rank, estimated arrival 11:55, €56.00.');
-    expect(text).toContain('3. Paris Airport Shuttle');
-    expect(text).not.toContain('replacement bus');
+    const options = [...presetOptions, { ...presetOptions[0]!, id: 'third', name: 'Third option' }, { ...presetOptions[0]!, id: 'fourth', name: 'Fourth option' }];
+    const text = say('present-options', { options, now: new Date('2027-01-15T10:00:00Z') }, 'en');
+    expect(text).toContain('1. Airport taxi, estimated arrival 11:55, €65.00.');
+    expect(text).toContain('3. Third option');
+    expect(text).not.toContain('Fourth option');
   });
   it('handles no options and no failure reason without empty or undefined speech', () => {
     expect(say('present-options', { options: [], now: new Date() }, 'fr')).toContain('Aucune option');
     expect(say('booking-failed', {}, 'en')).toBe('Booking failed.');
   });
   it('summarizes structured pickup facts in French', () => {
-    expect(say('confirm', { ...confirmation, details }, 'fr')).toBe('Navette Paris Airport Shuttle, vers CDG, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?');
+    expect(say('confirm', { ...confirmation, details }, 'fr')).toBe('Taxi vers l’aéroport, vers CDG, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?');
   });
   it('supports tomorrow and uses the Paris date across midnight and DST', () => {
     expect(say('confirm', { ...confirmation, details: { ...details, pickup_date: '2027-01-16', pickup_time: '20:30', total_price: 65.5 } }, 'en')).toContain('tomorrow at 20:30, €65.5');
@@ -62,7 +70,7 @@ describe('say', () => {
   it('omits missing or invalid fields instead of using the deadline or catalogue price', () => {
     for (const value of [undefined, {}, { pickup_date: '2027-02-30', pickup_time: '29:99', total_price: -1, currency: 'USD' }]) {
       const text = say('confirm', { ...confirmation, trip: { ...confirmation.trip, guide_dog: false }, details: value as ConfirmationFields }, 'en');
-      expect(text).toBe('Paris Airport Shuttle, to CDG. Shall I confirm?');
+      expect(text).toBe('Airport taxi, to CDG. Shall I confirm?');
     }
   });
   it('says a later pickup date explicitly', () => {
@@ -76,8 +84,7 @@ describe('say', () => {
     expect(say('confirm', { ...confirmation, details: { pickup_time: '20:30' } }, 'fr')).toContain('à 20 h 30');
   });
   it.each([
-    ['gare-du-nord-taxi', 'Taxi de la gare du Nord'], ['g7-phone', 'Taxi G7 par téléphone'],
-    ['paris-airport-shuttle', 'Navette Paris Airport Shuttle'], ['rer-b-replacement-bus', 'Bus de remplacement du RER B'],
+    ['paris-airport-shuttle', 'Taxi vers l’aéroport'], ['rer-b-replacement-bus', 'Bus de remplacement du RER B'],
   ])('uses a French spoken name for %s without changing the option data', (id, name) => {
     const option = presetOptions.find((o) => o.id === id)!;
     expect(say('present-options', { options: [option], now: confirmation.now }, 'fr')).toContain(`1. ${name},`);

@@ -55,26 +55,48 @@ export function redactContactText(text: string, profile?: TravelerProfile): stri
   for (const value of [profile?.name, profile?.phone, profile?.email]) if (value) safe = safe.replace(new RegExp(`(?<![\\p{L}\\p{N}])${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'giu'), '[contact]');
   safe = safe.replace(/[a-z\d.!#$%&'*+/=?^_`{|}~-]+@[a-z\d.-]+\.[a-z]{2,}/gi, '[email]')
     .replace(/\b[\p{L}\d_+-]+(?:(?:\.|\s+(?:point|dot|tiret bas|tiret|dash|underscore)\s+)[\p{L}\d_+-]+)*\s*(?:@|\b(?:arobase|at)\b)\s*[\p{L}\d-]+(?:(?:\s*\.\s*|\s+(?:point|dot)\s+)[\p{L}\d-]+)+\b/giu, (value) => parseEmail(value) ? '[email]' : value);
-  const parts = safe.split(temporalSpan);
-  for (let index = 1; index < parts.length; index += 2) {
-    const continuation = /^(?:[\s().,;:-]+\d+(?![\p{L}\d]))+/u.exec(parts[index + 1]!)?.[0];
-    if (continuation && (parts[index]! + continuation).replace(/\D/g, '').length >= 7) {
-      parts[index - 1] += parts[index]! + parts[index + 1]!;
-      parts.splice(index, 2); index -= 2;
+  let result = '', cursor = 0;
+  for (const match of safe.matchAll(contactSpan)) {
+    const offset = match.index!;
+    if (offset < cursor) continue;
+    let value = match[0], joined = false;
+    const groups = match.groups!;
+    const introduced = /\b(?:call me(?: on| at)?|reach me(?: on| at)?|(?:my )?(?:phone(?: number)?|number)(?: is| s)?|(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:appelez|contactez)(?: moi)?(?: au)?)$/.test(normal(safe.slice(0, offset)));
+    const commaRun = introduced ? commaPhoneSpan.exec(safe.slice(offset))?.[0] : undefined;
+    if (commaRun) {
+      const fragments = commaRun.split(',');
+      if (/^[ \t]+(?:personnes?|passagers?|passengers?|people|bags?|bagages?|valises?)\b/iu.test(safe.slice(offset + commaRun.length))) fragments.pop();
+      value = '';
+      for (const fragment of fragments) {
+        if (temporalFragment.test(fragment.trim())) break;
+        const candidate = value + (value ? ',' : '') + fragment;
+        const current = phoneDigits(candidate);
+        const limit = current && (current.international || current.digits.startsWith('00')) ? 15 : 10;
+        if (!current || current.digits.length > limit) break;
+        value = candidate;
+      }
+      joined = !!phoneDigits(value);
     }
+    const digits = groups.spoken ? phoneDigits(value)?.digits : undefined;
+    const redact = groups.phone || joined || (digits && ((/\p{L}/u.test(value) && digits.length >= 9) || introduced));
+    result += safe.slice(cursor, offset) + (redact ? '[phone]' : value); cursor = offset + value.length;
   }
-  return parts.map((part, index) => {
-    if (index % 2) return part;
-    return part.replace(spokenPhoneSpan, (value: string, offset: number) => {
-      const digits = phoneDigits(value)?.digits;
-      const introduced = /\b(?:call me(?: on| at)?|reach me(?: on| at)?|(?:my )?(?:phone(?: number)?|number)(?: is| s)?|(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:appelez|contactez)(?: moi)?(?: au)?)$/.test(normal(part.slice(0, offset)));
-      return digits && (digits.length >= 7 || introduced) ? '[phone]' : value;
-    });
-  }).join('');
+  return result + safe.slice(cursor);
 }
-const temporalSpan = /((?<![\p{L}\d])(?<!\d[./:-])(?:\d{4}[-/.](?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])[-/.](?:0?[1-9]|1[0-2])[-/.]\d{4}|(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)(?!\d|[./:-]\d))/gu;
-const numberWords = [...numbers.keys(), 'plus', 'double', 'triple'].sort((a, b) => b.length - a.length).map((word) => word.replace(/zero/g, 'z[eé]ro').replace(/ /g, '\\s+')).join('|');
-const spokenPhoneSpan = new RegExp(`(?<![\\p{L}\\p{N}])\\+?(?:\\d+|${numberWords})(?:[\\s().,;:-]+(?:\\d+|${numberWords}))*(?![\\p{L}\\p{N}])`, 'giu');
+const dateSpan = /(?<![\p{L}\d])(?<!\d[./:-])(?:\d{4}[-/.](?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])[-/.](?:0?[1-9]|1[0-2])[-/.]\d{4})(?!\d|[./:-]\d)/gu;
+const timeSpan = /(?<![\p{L}\d])(?<!\d[./:-])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?!\d|[./:-]\d)/gu;
+const numberWords = [...numbers.keys(), 'plus', 'double', 'triple'].sort((a, b) => b.length - a.length).map((word) => word.replace(/zero/g, 'z[eé]ro').replace(/ /g, '[ \\t-]+')).join('|');
+const separator = '(?:[ \\t]+|[.:-](?!\\s))?';
+const internationalSeparator = '(?:[ \\t]+|[.-](?!\\s))?';
+const temporalToken = `(?:${dateSpan.source}|\\d{1,2}[:h]\\d{2})`;
+const temporalFragment = new RegExp(`^${temporalToken}`, 'iu');
+const internationalDigit = `(?!${temporalToken})\\d`;
+const numericPhone = `(?<![\\p{L}\\d])(?:\\+${internationalDigit}(?:${internationalSeparator}${internationalDigit}){7,14}|(?:\\+33|0033)${separator}\\(?[1-9]\\)?(?:${separator}\\d){8}|0${separator}[1-9](?:${separator}\\d){8}|\\d{10})(?![\\p{L}\\d])`;
+const spokenToken = `(?:\\d{1,2}(?!\\d)|${numberWords})`;
+const spokenRun = `${spokenToken}(?:(?:[ \\t:-]+|\\.(?!\\s))${spokenToken})*`;
+const spokenPhoneSpan = `(?<![\\p{L}\\d])\\+?${spokenRun}(?![\\p{L}\\d])`;
+const commaPhoneSpan = new RegExp(`^\\+?${spokenRun}(?:,[ \\t]*${spokenRun})+(?![\\p{L}\\d])`, 'iu');
+const contactSpan = new RegExp(`(?<date>${dateSpan.source})|(?<beforePhone>${timeSpan.source})(?=[ \\t]+${numericPhone})|(?<phone>${numericPhone})|(?<time>${timeSpan.source})|(?<spoken>${spokenPhoneSpan})`, 'giu');
 type Field = 'name' | 'phone' | 'email' | 'guide_dog';
 const yes = (text: string) => /^(oui|yes|correct|exactement|c est correct|c est ca|oui c est ca|c est bon|that s right)$/.test(normal(text));
 const no = (text: string) => /^(non|no|non merci|no thanks)$/.test(normal(text));

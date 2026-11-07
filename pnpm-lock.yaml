@@ -29,12 +29,18 @@ importers:
       '@voila/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      hai-agents:
+        specifier: ^1.3.2
+        version: 1.3.2(zod@4.6.7)
       hono:
         specifier: ^4.11.7
         version: 4.13.17
       ws:
         specifier: ^8.19.0
         version: 8.22.1
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
       '@types/ws':
         specifier: ^8.18.1
@@ -476,6 +482,15 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
+
+  hai-agents@1.3.2:
+    resolution: {integrity: sha512-5lA5K0yOtcPsAz6LrEHSnTccjg4vIH+skxnJrZ4QC0bCa4G7keYI5MtDADduVHdzndukNZVz22SCYU5exh7Vag==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^4.0.0
+    peerDependenciesMeta:
+      zod:
+        optional: true
 
   hono@4.13.17:
     resolution: {integrity: sha512-vZIcbkvjOR5hHRWERbGkr8fGfF0GGM1ooYkuH448iO3b2AdVEr3AXZSw4Z3Kn+1L5z0CVoVeyV29VGYmFh05kQ==}
@@ -942,6 +957,10 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  hai-agents@1.3.2(zod@4.6.7):
+    optionalDependencies:
+      zod: 4.6.7
 
   hono@4.13.17: {}
 

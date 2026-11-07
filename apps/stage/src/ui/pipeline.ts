@@ -206,5 +206,10 @@ export function mountPipeline(root: HTMLElement, bus: Bus) {
     if (a.kind === "done") clearInterval(tick);
   });
 
-  return { show, hide, renderStatic, toggle: () => (scene.classList.contains("is-on") ? hide() : (show(false), scene.classList.add("is-front"))) };
+  return { show, hide, renderStatic, toggle: () => {
+      if (scene.classList.contains("is-on")) return hide();
+      if (scene.dataset.phase === "0") renderStatic();
+      else show(false);
+      scene.classList.add("is-front");
+    } };
 }

@@ -118,7 +118,10 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
             const line = content?.replace(/\s+/g, ' ').trim().slice(0, 240);
             if (line) input.onProgress(line);
           }
-          if (kind === 'error_event') throw new Error(`H agent error: ${JSON.stringify(event.data)}`);
+          if (kind === 'error_event') {
+            const { error } = z.object({ error: z.string() }).parse(event.data);
+            input.onProgress(`H step error (recoverable): ${error.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+          }
         }
         if (event.type === 'AgentErrorEvent') throw new Error(z.object({ error: z.string() }).parse(event.data).error);
         if (event.type === 'MetricsUpdateEvent') {

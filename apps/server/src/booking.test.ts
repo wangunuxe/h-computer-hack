@@ -164,6 +164,28 @@ describe('H booking runner', () => {
     expect(mock.cancel).toHaveBeenCalledOnce();
   });
 
+  it('reports recoverable step errors and continues to a booking', async () => {
+    const mock = setup(async function* (tools) {
+      yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'error_event', error: 'Click\n failed', origin: 'browser' } };
+      await confirm(tools);
+      yield observation(stub);
+      await handoff(tools);
+    });
+    expect((await runBooking(mock.input, mock.client)).booking.ref).toBe(answer.ref);
+    expect(mock.input.onProgress).toHaveBeenCalledWith('H step error (recoverable): Click failed');
+    expect(mock.input.onPaymentHandoff).toHaveBeenCalledOnce();
+    expect(mock.cancel).toHaveBeenCalledOnce();
+  });
+
+  it('treats AgentErrorEvent as fatal and cancels', async () => {
+    const mock = setup(async function* () {
+      yield { type: 'AgentErrorEvent', timestamp: new Date(), data: { error: 'browser unavailable' } };
+    });
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow('browser unavailable');
+    expect(mock.cancel).toHaveBeenCalledOnce();
+    expect(mock.input.onPaymentHandoff).not.toHaveBeenCalled();
+  });
+
   it('cancels on callback errors even if SDK tool dispatch catches them', async () => {
     const mock = setup(async function* (tools) {
       await confirm(tools).catch(() => {});

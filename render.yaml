@@ -5,7 +5,7 @@ services:
     plan: free
     branch: main
     autoDeploy: true
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm -r build
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm -r build
     startCommand: node apps/server/dist/index.js
     healthCheckPath: /health
     envVars:
@@ -35,7 +35,7 @@ services:
     plan: free
     branch: main
     autoDeploy: true
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm -r build
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm -r build
     startCommand: node apps/shuttle-clone/dist/index.js
     envVars:
       - key: NODE_VERSION

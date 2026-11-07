@@ -1,15 +1,50 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Voilà</title>
-  </head>
-  <body>
-    <main>
-      <h1>Voilà</h1>
-      <button type="button" disabled>Speak — coming soon</button>
-    </main>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d171b" />
+  <title>Voilà</title>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><h1>Voilà<span aria-hidden="true">.</span></h1><div class="connection-status"><span class="status-dot" aria-hidden="true"></span><span id="connection" role="status"></span></div></div>
+    <button id="edit" class="profile-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 22v-3a8 8 0 0 1 16 0v3"/></svg><span data-label="edit">Profil</span></button>
+  </header>
+  <main>
+    <form id="profile-form">
+      <p class="eyebrow" data-label="welcomeTag"></p><h2 data-label="profile">Votre profil</h2><p class="muted" data-label="profileHelp"></p>
+      <label><span data-label="name">Nom</span><input id="name" name="name" autocomplete="name" required></label>
+      <label><span data-label="phone">Téléphone</span><input name="phone" type="tel" autocomplete="tel" required></label>
+      <label><span data-label="email">Adresse e-mail</span><input name="email" type="email" autocomplete="email" required></label>
+      <label><input name="guide_dog" type="checkbox"><span data-label="dog">Chien guide</span></label>
+      <label><span data-label="language">Langue</span><select name="language"><option value="fr">Français</option><option value="en">English</option></select></label>
+      <fieldset><legend data-label="accessibility"></legend>
+        <label><span data-label="micMode"></span><select name="mic_mode"><option value="toggle" data-label="toggleMode"></option><option value="hold" data-label="holdMode"></option></select></label>
+        <label><span data-label="voiceMode"></span><select name="voice_mode"><option value="voila" data-label="voilaVoice"></option><option value="screen_reader" data-label="readerVoice"></option></select></label>
+        <p class="muted" data-label="readerHelp"></p>
+      </fieldset>
+      <button type="submit" data-label="save">Enregistrer</button>
+    </form>
+    <div id="journey" hidden>
+      <h2 id="stage" class="stage-pill" tabindex="-1"></h2>
+      <div class="caption-wrap">
+        <div class="caption-card" id="announcements" role="status" aria-live="polite" aria-atomic="true"><p class="eyebrow" data-label="captionLabel"></p><p id="caption"></p></div>
+        <button id="repeat" class="secondary repeat" type="button" data-label="repeat"></button>
+      </div>
+      <div id="user-bubble" class="user-bubble" hidden><p class="eyebrow" data-label="youSaid"></p><p id="last-transcript"></p></div>
+      <section id="actions" aria-labelledby="stage"></section>
+      <details id="feed" class="feed-sheet"><summary data-label="feed"></summary><ul id="feed-items"></ul></details>
+    </div>
+    <div id="errors" role="alert" aria-live="assertive"></div>
+  </main>
+  <footer id="dock" hidden>
+    <div class="dock-inner">
+      <button id="stop" class="secondary dock-stop" type="button" data-label="stop" hidden></button>
+      <div class="mic-control" id="mic-control" data-mode="idle"><div class="mic-orbit"><button id="talk" type="button" aria-describedby="talk-help" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="2" width="8" height="13" rx="4"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg></button></div><p id="mic-label"></p></div>
+    </div>
+    <p id="talk-help"></p>
+  </footer>
+  <script type="module" src="/src/main.ts"></script>
+</body>
 </html>

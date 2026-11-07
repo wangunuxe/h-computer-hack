@@ -12,6 +12,7 @@ import { say, type NarrationParams } from './narrate.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 type Research = { disruption: Disruption; extraOptions: Option[] };
+const userPayment = Symbol('user-payment');
 export interface SessionPorts {
   understand: typeof understand;
   trafficH: typeof readRerBTraffic;
@@ -24,6 +25,7 @@ export interface SessionPorts {
 }
 
 export class VoilaSession {
+  get language() { return this.profile?.language ?? 'fr'; }
   stage: Stage = 'LISTEN';
   private profile?: Profile;
   private scenario: Scenario = 'demo';
@@ -32,7 +34,7 @@ export class VoilaSession {
   private options: Option[] = [];
   private booking?: Booking;
   private payment?: Extract<ServerEvent, { type: 'payment_handoff' }>;
-  private paidRefs = new Set<string>();
+  private paidRefs = new Set<string | symbol>();
   private generation = 0;
   private flow = new AbortController();
   private bookingController?: AbortController;
@@ -81,8 +83,11 @@ export class VoilaSession {
       return;
     }
     if (!this.profile) { this.error('Send hello first.'); return; }
-    if (event.type === 'final_transcript' && this.stage === 'LISTEN') {
+    if (event.type === 'final_transcript' && ['LISTEN', 'DONE'].includes(this.stage)) {
       if (!event.text.trim()) { this.error('Transcript must not be empty.'); return; }
+      const restarting = this.stage === 'DONE';
+      this.resetTrip();
+      if (restarting) this.transition('LISTEN');
       this.flow = new AbortController();
       const generation = ++this.generation;
       this.lastHeartbeat = -Infinity;
@@ -115,6 +120,8 @@ export class VoilaSession {
       this.confirmation = undefined;
       this.transition('EXECUTE');
       pending.resolve({ approved: yes, reply: event.text });
+    } else if (event.type === 'paid' && this.stage === 'HANDOFF' && this.payment) {
+      this.paidRefs.add(userPayment);
     } else if (event.type === 'paid' && this.stage === 'AWAIT_PAYMENT' && this.booking) {
       this.markPaid(this.booking.ref);
     } else this.error(`Event ${event.type} is not allowed in ${this.stage}.`);
@@ -155,9 +162,12 @@ export class VoilaSession {
     this.confirmation = undefined;
     this.paidRefs.clear();
   }
-  private stop() {
+  private resetTrip() {
     this.cancel();
     this.research = undefined; this.booking = undefined; this.payment = undefined; this.options = []; this.trip = {};
+  }
+  private stop() {
+    this.resetTrip();
     this.speak('stopped', {});
     this.transition('LISTEN');
   }
@@ -271,7 +281,7 @@ export class VoilaSession {
       });
       if (!current()) return;
       this.booking = result.booking;
-      if (this.paidRefs.has(this.booking.ref)) this.finishPayment();
+      if (this.paidRefs.has(this.booking.ref) || this.paidRefs.has(userPayment)) this.finishPayment();
       else this.transition('AWAIT_PAYMENT');
       this.paidRefs.clear();
     } catch {

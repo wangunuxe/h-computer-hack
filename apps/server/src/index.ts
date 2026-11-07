@@ -10,15 +10,28 @@ import { WebEventSchema, type ServerEvent } from '@voila/shared';
 import { z } from 'zod';
 import { VoilaSession, type SessionPorts } from './session.js';
 import { SessionRegistry, secureEqual } from './session-registry.js';
+import { createGladiaSession } from './adapters/gladia.js';
 
 const paymentSchema = z.object({ order_id: z.string().min(1), ref: z.string().min(1), status: z.literal('paid') });
 
-export function createApp({ registry = new SessionRegistry(), token = process.env.INTERNAL_CALLBACK_TOKEN,
+export function createApp({ registry = new SessionRegistry(), token = process.env.INTERNAL_CALLBACK_TOKEN, gladia = createGladiaSession,
   webDistDir = process.env.NODE_ENV === 'production' ? (process.env.WEB_DIST_DIR ?? fileURLToPath(new URL('../../web/dist', import.meta.url))) : undefined }: {
-  registry?: SessionRegistry; token?: string; webDistDir?: string;
+  registry?: SessionRegistry; token?: string; gladia?: typeof createGladiaSession; webDistDir?: string;
 } = {}) {
   const app = new Hono();
   app.get('/health', (c) => c.json({ status: 'ok' }));
+  app.post('/gladia/session', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    let body: unknown;
+    try { body = await c.req.json(); } catch { return c.json({ error: 'Invalid JSON' }, 400); }
+    const parsed = z.object({ id: z.string(), resume_token: z.string() }).safeParse(body);
+    if (!parsed.success) return c.json({ error: 'Unauthorized' }, 401);
+    const authorization = registry.authorizeGladia(parsed.data.id, parsed.data.resume_token);
+    if (authorization === 'unauthorized') return c.json({ error: 'Unauthorized' }, 401);
+    if (authorization === 'limited') return c.json({ error: 'Speech session rate limit reached' }, 429);
+    try { return c.json(await gladia(registry.sessions.get(parsed.data.id)?.language ?? 'fr')); }
+    catch { return c.json({ error: 'Speech recognition unavailable' }, 502); }
+  });
   app.post('/session', (c) => {
     c.header('Cache-Control', 'no-store');
     let clientIp = process.env.TRUST_PROXY === '1' ? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() : undefined;

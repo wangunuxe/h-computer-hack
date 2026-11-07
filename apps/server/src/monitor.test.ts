@@ -69,6 +69,22 @@ describe('MonitorHub', () => {
     expect(events.map(({ type }) => type)).toEqual(['session', 'feed', 'agent_frame']);
   });
 
+  it('does not replay booking screen details after returning to LISTEN', () => {
+    const hub = new MonitorHub();
+    hub.publish('s1', sessionEvent('Amina'));
+    hub.publish('s1', { type: 'agent_frame', image: 'data:image/png;base64,old-frame', step: 1 });
+    hub.publish('s1', { type: 'agent_view', url: 'https://h.example/view/old' });
+    hub.publish('s1', { type: 'agent_metrics', steps: 1, cost_usd: 0.01 });
+    hub.publish('s1', { type: 'stage', stage: 'LISTEN' });
+
+    const client = socket();
+    hub.subscribe(client.ws);
+    const events = messages(client.sent).map(({ event }) => event);
+    expect(events.map(({ type }) => type)).toEqual(['session', 'stage']);
+    expect(events.some((event) => event.type === 'agent_frame')).toBe(false);
+    expect(events.some((event) => event.type === 'agent_view' || event.type === 'agent_metrics')).toBe(false);
+  });
+
   it('clears prior monitor history when the session is reset', () => {
     const hub = new MonitorHub();
     hub.publish('s1', sessionEvent('Amina'));

@@ -22,6 +22,12 @@ export class MonitorHub {
     this.sessions.delete(session);
     this.sessions.set(session, buffer);
 
+    if (event.type === 'stage' && event.stage === 'LISTEN') {
+      buffer.frame = undefined;
+      buffer.messages = buffer.messages.filter(({ message }) =>
+        message.event.type !== 'agent_view' && message.event.type !== 'agent_metrics');
+    }
+
     const buffered = { message };
     if (event.type === 'session') buffer.session = buffered;
     else if (event.type === 'agent_frame') buffer.frame = buffered;

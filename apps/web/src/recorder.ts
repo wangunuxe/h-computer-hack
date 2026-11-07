@@ -1,6 +1,7 @@
 import workletUrl from './pcm-worklet.ts?worker&url';
 import { parseGladia, stopRecording } from './protocol.js';
 import { captureFailure, SpeechInitializationError, type RecordingFailure } from './recording-error.js';
+import { playbackSession } from './speech.js';
 
 export interface Credentials { id: string; resume_token: string }
 export class Recorder {
@@ -9,13 +10,13 @@ export class Recorder {
   private buffered: ArrayBuffer[] = []; private bufferedBytes = 0;
   private ticker?: ReturnType<typeof setInterval>;
   private audioBytes = 0;
-  constructor(private transcript: (text: string) => void, private error: (failure: RecordingFailure) => void, private done: () => void, private limit: () => void = () => {}, private elapsed: (seconds: number) => void = () => {}) {}
+  constructor(private transcript: (text: string) => void, private error: (failure: RecordingFailure) => void, private done: () => void, private limit: () => void = () => {}, private elapsed: (seconds: number) => void = () => {}, private playback: () => void = () => {}) {}
   async start(credentials: Credentials) {
     try {
       const started = Date.now(); this.elapsed(0);
       this.ticker = setInterval(() => this.elapsed(Math.floor((Date.now() - started) / 1000)), 1000);
       this.timer = setTimeout(() => { if (!this.stopping) { this.stop(); if (!this.controller.signal.aborted) this.limit(); } }, 180_000);
-      this.context = new AudioContext();
+      playbackSession('play-and-record'); this.context = new AudioContext();
       const resumed = this.context.resume();
       void resumed.catch(() => {});
       await this.capture(resumed);
@@ -28,6 +29,7 @@ export class Recorder {
     const stream = this.stream = await navigator.mediaDevices.getUserMedia({ audio: { noiseSuppression: true, echoCancellation: true, channelCount: 1 } });
     if (this.controller.signal.aborted || this.stopping) { stream.getTracks().forEach((track) => track.stop()); return; }
     await resumed;
+    if (this.controller.signal.aborted || this.stopping) return;
     await this.context!.audioWorklet.addModule(workletUrl);
     if (this.controller.signal.aborted || this.stopping) return;
     this.node = new AudioWorkletNode(this.context!, 'pcm16');
@@ -67,18 +69,23 @@ export class Recorder {
     if (!this.audioBytes) { this.fail({ kind: 'empty', code: 'released-before-audio' }); return; }
     clearTimeout(this.timer); clearInterval(this.ticker);
     this.timer = setTimeout(() => this.fail({ kind: 'service', code: 'finalization-timeout' }), 10_000);
-    this.stopping = true; this.node?.disconnect(); this.stream?.getTracks().forEach((track) => track.stop());
+    this.stopping = true; this.releaseCapture();
     if (this.socket?.readyState === WebSocket.OPEN) this.sendStop();
   }
   private sendStop() {
     this.socket!.send(stopRecording); clearTimeout(this.timer);
     this.timer = setTimeout(() => this.fail({ kind: 'service', code: 'finalization-timeout' }), 10_000);
   }
+  private releaseCapture() {
+    this.stream?.getTracks().forEach((track) => track.stop()); this.node?.disconnect();
+    const context = this.context; this.context = undefined;
+    void Promise.resolve(context?.close()).catch(() => {}).then(() => { playbackSession('playback'); this.playback(); });
+  }
   cancel() {
     if (this.controller.signal.aborted) return;
-    this.controller.abort(); clearTimeout(this.timer); clearInterval(this.ticker); this.stream?.getTracks().forEach((track) => track.stop()); this.node?.disconnect();
+    this.controller.abort(); clearTimeout(this.timer); clearInterval(this.ticker); this.releaseCapture();
     this.buffered = []; this.bufferedBytes = 0;
-    this.socket?.close(); void this.context?.close(); this.done();
+    this.socket?.close(); this.done();
   }
   private fail(failure: RecordingFailure) { if (this.controller.signal.aborted) return; this.cancel(); this.error(failure); }
   private finish() { if (this.controller.signal.aborted) return; const text = [...this.final.values()].join(' ').trim(); if (text) { this.cancel(); this.transcript(text); } else this.fail({ kind: 'empty', code: 'empty-transcript' }); }

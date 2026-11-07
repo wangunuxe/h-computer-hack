@@ -1,4 +1,4 @@
-import type { Booking, TransportOption, Trip } from "@voila/shared";
+import type { Booking, TransportOption, Trip } from "../core/protocol";
 import type { Bus } from "../core/bus";
 import { h } from "../core/dom";
 

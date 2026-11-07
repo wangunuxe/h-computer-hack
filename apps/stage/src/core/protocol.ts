@@ -1,3 +1,4 @@
+// Stage-side superset of @voila/shared ServerEvent; adds agent/transcript/trip/choice/payment_done events for the jury view.
 /**
  * Voilà session event protocol (docs/PLAN.md §2.3).
  * One WebSocket per session: `/ws/session/:id`.

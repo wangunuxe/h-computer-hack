@@ -1,4 +1,4 @@
-import type { Booking, TransportOption, Trip } from "@voila/shared";
+import type { Booking, TransportOption, Trip } from "../core/protocol";
 import { sfx } from "../core/audio";
 import type { Director } from "../core/director";
 

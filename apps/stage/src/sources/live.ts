@@ -1,4 +1,4 @@
-import type { ClientEvent, ServerEvent } from "@voila/shared";
+import type { ClientEvent, ServerEvent } from "../core/protocol";
 import type { Bus, EventSourceLike } from "../core/bus";
 
 /** Live mode: forwards events from the Voilà server (`/ws/session/:id`) onto the bus. */

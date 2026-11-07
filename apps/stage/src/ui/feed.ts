@@ -1,4 +1,4 @@
-import type { FeedKind, TransportOption } from "@voila/shared";
+import type { FeedKind, TransportOption } from "../core/protocol";
 import type { Bus } from "../core/bus";
 import { fmtHM, h } from "../core/dom";
 import { sfx } from "../core/audio";

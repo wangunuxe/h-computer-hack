@@ -1,11 +1,18 @@
 {
-  "name": "h-computer-hack",
+  "name": "voila",
   "private": true,
-  "version": "0.0.0",
-  "description": "Voilà — voice assistant that books transport for blind travellers when the city breaks down",
+  "type": "module",
+  "packageManager": "pnpm@10.28.2",
   "scripts": {
-    "dev": "pnpm --filter @voila/web dev",
+    "dev": "pnpm -r --parallel dev",
+    "stage": "pnpm --filter @voila/stage dev",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck"
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "tsx": "^4.21.0",
+    "vitest": "^4.0.18",
+    "@types/node": "^25.2.0"
   }
 }

@@ -1,0 +1,16 @@
+{
+  "name": "@voila/stage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc -p . && vite build",
+    "typecheck": "tsc -p .",
+    "preview": "vite preview --host"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vite": "^7.3.0"
+  }
+}

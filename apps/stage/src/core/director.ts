@@ -1,4 +1,4 @@
-import type { AgentAction, ServerEvent } from "@voila/shared";
+import type { AgentAction, ServerEvent } from "./protocol";
 import type { Bus, BusEvent, EventSourceLike } from "./bus";
 import { sfx } from "./audio";
 import { Tts } from "./tts";

@@ -1,4 +1,4 @@
-import type { ServerEvent } from "@voila/shared";
+import type { ServerEvent } from "./protocol";
 
 /** Stage-only cues that are not part of the server protocol. */
 export type DirectorCue =

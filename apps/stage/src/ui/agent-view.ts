@@ -1,4 +1,4 @@
-import type { AgentAction } from "@voila/shared";
+import type { AgentAction } from "../core/protocol";
 import type { Bus } from "../core/bus";
 import { h } from "../core/dom";
 import { sfx } from "../core/audio";

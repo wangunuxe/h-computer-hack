@@ -1,4 +1,4 @@
-import { FLOW, flowIndex } from "@voila/shared";
+import { FLOW, flowIndex } from "../core/protocol";
 import type { Bus } from "../core/bus";
 import { fmtClock, fmtMMSS, h } from "../core/dom";
 

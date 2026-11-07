@@ -178,6 +178,10 @@ Unclaimed session credentials expire after two minutes. Disconnected sessions
 expire after thirty minutes idle and are disposed, cancelling pending H work.
 Reconnecting resets the idle deadline. At most 100 issued sessions (including
 unclaimed reservations) are held; `POST /session` returns 503 at capacity.
+Each client IP may hold at most three unclaimed reservations; further requests
+return 429 until a reservation is claimed or expires. The first `x-forwarded-for`
+hop is used when present, otherwise the socket address. A deployed proxy must
+overwrite untrusted forwarded headers rather than blindly preserving them.
 Session timers are injectable for offline tests. There is no persistence.
 Payment callbacks arriving before the runner finishes are remembered; a matching
 booking reference completes directly in DONE, without waiting for another callback.

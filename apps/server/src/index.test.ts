@@ -53,6 +53,15 @@ describe('payment callback', () => {
 });
 
 describe('real WebSocket round-trip', () => {
+  it('uses the socket address for pending limits when no forwarded IP is supplied', async () => {
+    const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports }); cleanup.push(running.close);
+    if (!running.server.listening) await once(running.server, 'listening');
+    const address = running.server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP port');
+    const request = () => fetch(`http://127.0.0.1:${address.port}/session`, { method: 'POST' });
+    for (let i = 0; i < 3; i++) expect((await request()).status).toBe(201);
+    expect((await request()).status).toBe(429);
+  });
   it('validates JSON, streams events, and reattaches an existing session with its stage replayed', async () => {
     const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports, token: 'test' });
     cleanup.push(running.close);

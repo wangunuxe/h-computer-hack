@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { pathToFileURL } from 'node:url';
 import { Hono } from 'hono';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -16,8 +17,14 @@ export function createApp({ registry = new SessionRegistry(), token = process.en
   app.get('/health', (c) => c.json({ status: 'ok' }));
   app.post('/session', (c) => {
     c.header('Cache-Control', 'no-store');
-    const issued = registry.issue();
-    if (!issued) return c.json({ error: 'Session capacity reached' }, 503);
+    let clientIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
+    if (!clientIp) {
+      try { clientIp = getConnInfo(c).remote.address; } catch { clientIp = 'unknown'; }
+    }
+    const issued = registry.issue(clientIp);
+    if ('error' in issued) return issued.error === 'client-limit'
+      ? c.json({ error: 'Too many unclaimed sessions for this client' }, 429)
+      : c.json({ error: 'Session capacity reached' }, 503);
     return c.json(issued, 201);
   });
   app.get('/ws/session/:id', (c) => c.text('WebSocket upgrade required', 426));

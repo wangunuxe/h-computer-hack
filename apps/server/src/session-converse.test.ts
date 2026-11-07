@@ -9,6 +9,7 @@ import { say } from './narrate.js';
 
 const trip: Trip = { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T21:00:00+01:00', guide_dog: true, passengers: 1, luggage: 0 };
 const profile = { name: 'Karim', phone: '+33612345678', email: 'karim@example.com', guide_dog: true, language: 'fr' };
+const busTraffic = { status: 'disrupted' as const, mode: 'live' as const, summary: 'RER B disrupted', cause: 'Signal failure.', source: 'https://www.ratp.fr', recorded: false };
 const result = (value: Partial<TurnResult>): TurnResult => ({ intent: 'unclear', reply: 'Quel trajet choisissez-vous ?', confidence: .95, ...value });
 const sessions: VoilaSession[] = [];
 async function flush() { for (let i = 0; i < 100; i++) await Promise.resolve(); }
@@ -43,7 +44,7 @@ describe('contextual conversation routing', () => {
   });
   it.each(['fr', 'en'])('selects spoken option names in %s without Gemini, including when offline', async (language) => {
     for (const option of presetOptions) {
-      const s = setup({ converse: vi.fn().mockRejectedValue(new Error('Unavailable')) }); await s.start(language);
+      const s = setup({ converse: vi.fn().mockRejectedValue(new Error('Unavailable')), trafficH: vi.fn().mockResolvedValue(busTraffic) }); await s.start(language);
       const spoken = say('present-options', { options: [option], now: new Date() }, language).split(',')[0]!.replace(/^1\. /, '');
       await s.reply(language === 'fr' ? `${spoken} s’il vous plaît` : `${spoken} please`);
       expect(s.ports.converse).not.toHaveBeenCalled();
@@ -76,15 +77,15 @@ describe('contextual conversation routing', () => {
     await s.start(); await s.reply('shuttle'); await s.reply('quel est le prix ?');
     expect(s.events.some((event) => event.type === 'confirm' && !event.summary.includes(summary))).toBe(true);
     const context = s.ports.converse.mock.calls[0]![0];
-    expect(context.confirmation).toEqual({ pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR', option_name: 'Paris Airport Shuttle', guide_dog_status: 'unknown' });
+    expect(context.confirmation).toEqual({ pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR', option_name: 'Airport taxi — Gare du Nord', guide_dog_status: 'unknown' });
     for (const value of [profile.name, profile.phone, profile.email, summary]) expect(JSON.stringify(context)).not.toContain(value);
   });
   it('keeps ordinal selection instant without calling Gemini', async () => {
-    const s = setup(); await s.start(); await s.reply('2'); expect(s.session.stage).toBe('DONE'); expect(s.ports.converse).not.toHaveBeenCalled();
+    const s = setup({ trafficH: vi.fn().mockResolvedValue(busTraffic) }); await s.start(); await s.reply('2'); expect(s.session.stage).toBe('DONE'); expect(s.ports.converse).not.toHaveBeenCalled();
   });
   it.each(['le moins cher', 'le plus rapide', 'celui qui accepte le chien'])('routes semantic choice %s through Gemini', async (text) => {
-    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'choose', option_id: 'gare-du-nord-taxi' })) }); await s.start(); await s.reply(text);
-    expect(s.ports.converse).toHaveBeenCalledOnce(); expect(s.session.stage).toBe('DONE'); expect(s.ports.runBooking).not.toHaveBeenCalled();
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'choose', option_id: 'paris-airport-shuttle' })) }); await s.start(); await s.reply(text);
+    expect(s.ports.converse).toHaveBeenCalledOnce(); expect(s.session.stage).toBe('EXECUTE'); expect(s.ports.runBooking).toHaveBeenCalledOnce();
   });
   it.each(['le taxi accepte mon chien ?', 'does the shuttle accept my dog?'])('answers option questions without choosing: %s', async (text) => {
     const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply: 'Les deux taxis acceptent les chiens guides.' })) }); await s.start(); await s.reply(text);
@@ -145,7 +146,7 @@ describe('contextual conversation routing', () => {
     expect(s.session.stage).toBe('LISTEN'); expect(decision).toHaveBeenCalledExactlyOnceWith({ approved: false, reply: 'Stopped' });
   });
   it('clears previous conversation history when starting another trip', async () => {
-    const s = setup(); await s.start(); await s.reply('ancienne question ?'); await s.reply('1');
+    const s = setup({ trafficH: vi.fn().mockResolvedValue(busTraffic) }); await s.start(); await s.reply('ancienne question ?'); await s.reply('bus');
     s.session.handle({ type: 'final_transcript', text: 'Nouveau trajet' }); await flush(); await s.reply('nouvelle question ?');
     const history = s.ports.converse.mock.calls.at(-1)![0].history;
     expect(history).toHaveLength(6); expect(history.some((turn) => turn.text === 'ancienne question ?')).toBe(false);
@@ -183,7 +184,7 @@ describe('contextual conversation routing', () => {
     expect(s.events.at(-1)).toEqual({ type: 'say', text: language === 'fr' ? 'Autrement dit, voici les prix.' : 'In other words, here are the prices.' });
   });
   it('does not select a journey on bare hesitation even if a model overstates confidence', async () => {
-    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'choose', option_id: 'gare-du-nord-taxi', confidence: 1 })) }); await s.start(); await s.reply('euh');
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'choose', option_id: 'paris-airport-shuttle', confidence: 1 })) }); await s.start(); await s.reply('euh');
     expect(s.session.stage).toBe('CHOOSE'); expect(s.ports.runBooking).not.toHaveBeenCalled();
   });
   it.each(['arrêter la navette', 'annuler le shuttle'])('does not mistake cancellation for fast selection: %s', async (text) => {

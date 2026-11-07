@@ -19,8 +19,8 @@ describe('Linkup search', () => {
       result('https://blog.example/taxi', 'G7 taxi', 'Taxi option'),
     ]);
     const response = await searchDisruptionAndAlternatives({ query: 'alternatives', apiKey: 'fake', fetch: fetcher });
-    expect(response.extraOptions.map((o) => o.id)).toEqual(['g7-phone', 'paris-airport-shuttle', 'gare-du-nord-taxi', 'rer-b-replacement-bus']);
-    expect(response.extraOptions[0]).toMatchObject({ price: 63, source: 'https://www.g7.fr/book' });
+    expect(response.extraOptions.map((o) => o.id)).toEqual(['paris-airport-shuttle', 'rer-b-replacement-bus']);
+    expect(response.extraOptions[0]).toMatchObject({ price: 65, source: 'https://paris-airport-shuttle.com/fr/reservation/' });
     expect(response.corroboration).toHaveLength(5);
   });
   it('handles empty results and images without inventing options', async () => {

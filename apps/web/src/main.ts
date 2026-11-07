@@ -3,7 +3,7 @@ import { canStop, initialState, optionEvent, reduce, transcriptEvent, type Stage
 import { BrowserSpeech, SpeechQueue } from './speech.js';
 import { Recorder, type Credentials } from './recorder.js';
 import { clientProfile, deviceLanguage } from './preferences.js';
-import { labels, optionNames, stages } from './labels.js';
+import { labels, optionLabel, stages } from './labels.js';
 import { bindMicControls, micControlState } from './mic-controls.js';
 import { recordingDiagnostic, recordingErrorKeys } from './recording-error.js';
 import { ConnectionAttempt, replaceOnForeground, requiresFreshSession } from './connection.js';
@@ -203,7 +203,7 @@ function render() {
     for (const [index, option] of state.options.entries()) {
       const choice = button('', () => { const event = optionEvent(state.options, option.id); if (event) send(event); });
       choice.id = 'option-' + option.id; choice.className = 'option-card';
-      const name = `${index + 1}. ${optionNames[option.id]?.[language] ?? option.name}`;
+      const name = `${index + 1}. ${optionLabel(option, language)}`;
       const arrival = new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }).format(new Date(Date.now() + (option.pickup_wait_minutes + option.journey_minutes) * 60_000));
       const details = `${t().arrival} ${arrival} · ${money(option.price)}`;
       choice.setAttribute('aria-label', `${name}. ${details}`);

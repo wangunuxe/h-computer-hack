@@ -36,6 +36,43 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it('defers one-field voice profile collection until selection and keeps replies/readbacks out of Gemini history', async () => {
+    const s = setup({ runBooking: vi.fn(() => new Promise(() => {})) });
+    s.session.handle({ type: 'hello', profile: { language: 'fr' }, gps: null, scenario: 'demo' });
+    s.session.handle({ type: 'final_transcript', text: 'CDG depuis Gare du Nord' }); await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE'));
+    expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
+    await s.choose(); expect(s.ports.runBooking).not.toHaveBeenCalled();
+    const reply = async (text: string) => { s.session.handle({ type: 'user_reply', text }); await flush(); };
+    expect(s.events.at(-1)).toEqual({ type: 'say', text: expect.stringContaining('nom') });
+    await reply('Marie Test'); await reply('oui');
+    await reply('invalide'); expect(s.events.at(-1)).toEqual({ type: 'say', text: expect.stringContaining('téléphone') });
+    await reply('zéro six douze trente quatre cinquante six soixante dix huit'); await reply('non');
+    await reply('0712345678'); await reply('oui');
+    await reply('marie point test arobase example point com'); await reply('oui');
+    await reply('non'); expect(s.ports.runBooking).not.toHaveBeenCalled(); await reply('oui');
+    expect(s.ports.runBooking).toHaveBeenCalledOnce();
+    expect(s.ports.runBooking.mock.calls[0]![0].profile).toEqual({ language: 'fr', name: 'Marie Test', phone: '0712345678', email: 'marie.test@example.com', guide_dog: false });
+    expect(s.ports.converse).not.toHaveBeenCalled();
+    await reply('Où en est-on ?');
+    const context = JSON.stringify(s.ports.converse.mock.calls);
+    for (const secret of ['Marie Test', '0712345678', 'marie.test', 'zero, six', 'zero, sept']) expect(context).not.toContain(secret);
+    expect(s.events.filter((event) => event.type === 'profile')).toHaveLength(4);
+    expect(s.events).toContainEqual({ type: 'say', text: expect.stringContaining('efface mes informations') });
+  });
+  it('asks only for guide-dog information for a manual option and skips stored fields', async () => {
+    const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'en', guide_dog: false }, gps: null, scenario: 'demo' });
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE')); await s.choose('1');
+    expect(s.session.stage).toBe('DONE'); expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
+  });
+  it.each(['efface mes informations', 'forget my details'])('clears saved and pending profile data without Gemini: %s', async (text) => {
+    const s = setup(); await s.start(); await s.choose(text);
+    expect(s.session.stage).toBe('LISTEN'); expect(s.events).toContainEqual({ type: 'profile', profile: { language: 'en' } });
+    expect(s.ports.converse).not.toHaveBeenCalled(); expect(s.ports.runBooking).not.toHaveBeenCalled();
+  });
+  it('accepts spoken Stop before a trip without starting research or Gemini', () => {
+    const s = setup(); s.hello(); s.session.handle({ type: 'final_transcript', text: 'Stop.' });
+    expect(s.session.stage).toBe('LISTEN'); expect(s.ports.understand).not.toHaveBeenCalled(); expect(s.ports.trafficH).not.toHaveBeenCalled();
+  });
   it('keeps cancellation available in CLARIFY while research runs, replays it, and aborts on Stop', async () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['trafficH']>>>();
     const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { origin: 'Gare du Nord', destination: 'CDG' }, missing: ['deadline'] }), trafficH: vi.fn(() => pending.promise) });
@@ -81,7 +118,7 @@ describe('VoilaSession', () => {
     await s.choose('1'); expect(s.session.stage).toBe('DONE');
     expect(s.ports.runBooking).toHaveBeenCalledOnce();
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'DONE' }]);
+    expect(replay.filter((event) => !['activity', 'profile'].includes(event.type))).toEqual([{ type: 'stage', stage: 'DONE' }]);
     expect(s.events.slice(count).filter((event) => ['error', 'booking_card', 'payment_handoff', 'confirm'].includes(event.type))).toEqual([]);
     s.session.handle({ type: 'final_transcript', text: 'Nouvelle réservation après le taxi' });
     await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE'));
@@ -95,7 +132,7 @@ describe('VoilaSession', () => {
     expect(s.session.stage).toBe('DONE'); expect(s.ports.understand).toHaveBeenCalledOnce();
     expect(s.events.at(-1)).toEqual({ type: 'error', message: 'Transcript must not be empty.' });
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'DONE' }, { type: 'booking_card', booking }]);
+    expect(replay.filter((event) => !['activity', 'profile'].includes(event.type))).toEqual([{ type: 'stage', stage: 'DONE' }, { type: 'booking_card', booking }]);
   });
   it('does not restore a previous booking when understanding the next trip fails', async () => {
     const understand = vi.fn<SessionPorts['understand']>().mockResolvedValueOnce({ trip, missing: [] }).mockRejectedValueOnce(new Error('unavailable'));
@@ -103,7 +140,7 @@ describe('VoilaSession', () => {
     s.session.handle({ type: 'final_transcript', text: 'Another trip' }); await flush();
     expect(s.session.stage).toBe('LISTEN'); expect(s.session.markPaid(booking.ref)).toBe(false);
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'LISTEN' }]);
+    expect(replay.filter((event) => !['activity', 'profile'].includes(event.type))).toEqual([{ type: 'stage', stage: 'LISTEN' }]);
   });
   it.each([undefined, 'demo', 'invalid'])('defaults to deterministic demo with VOILA_SCENARIO=%s and never calls H or Linkup', async (value) => {
     vi.stubEnv('VOILA_SCENARIO', value);
@@ -156,13 +193,13 @@ describe('VoilaSession', () => {
   it('replays choices after the current stage without repeating speech', async () => {
     const s = setup(); await s.start();
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'CHOOSE' }, s.events.find((e) => e.type === 'options')]);
+    expect(replay.filter((event) => !['activity', 'profile'].includes(event.type))).toEqual([{ type: 'stage', stage: 'CHOOSE' }, s.events.find((e) => e.type === 'options')]);
   });
   it('replays the pending localized confirmation after CONFIRM', async () => {
     const s = setup({ runBooking: async (input) => { await input.confirm('Original agent summary', fare); return completed; } });
     await s.start(); await s.choose();
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'CONFIRM' }, s.events.find((event) => event.type === 'confirm')]);
+    expect(replay.filter((event) => !['activity', 'profile'].includes(event.type))).toEqual([{ type: 'stage', stage: 'CONFIRM' }, s.events.find((event) => event.type === 'confirm')]);
     expect(JSON.stringify(replay)).not.toContain('Original agent summary');
   });
   it('replays payment in HANDOFF and AWAIT_PAYMENT, then the booking card in DONE', async () => {
@@ -173,16 +210,16 @@ describe('VoilaSession', () => {
     await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: '' });
     const payment = { type: 'payment_handoff', url: booking.payment_url, amount: 65, merchant: 'Shuttle' };
     let replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'HANDOFF' }, payment]);
+    expect(replay.filter((event) => !['activity', 'profile'].includes(event.type))).toEqual([{ type: 'stage', stage: 'HANDOFF' }, payment]);
     pending.resolve(completed); await flush();
     replay = []; s.session.attach((event) => replay.push(event));
-    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'AWAIT_PAYMENT' }, payment]);
+    expect(replay.filter((event) => !['activity', 'profile'].includes(event.type))).toEqual([{ type: 'stage', stage: 'AWAIT_PAYMENT' }, payment]);
     s.session.markPaid(booking.ref);
     replay = []; s.session.attach((event) => replay.push(event));
-    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'DONE' }, { type: 'booking_card', booking }]);
+    expect(replay.filter((event) => !['activity', 'profile'].includes(event.type))).toEqual([{ type: 'stage', stage: 'DONE' }, { type: 'booking_card', booking }]);
     s.session.handle({ type: 'stop' });
     replay = []; s.session.attach((event) => replay.push(event));
-    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'LISTEN' }]);
+    expect(replay.filter((event) => !['activity', 'profile'].includes(event.type))).toEqual([{ type: 'stage', stage: 'LISTEN' }]);
   });
   it.each(['EXECUTE', 'HANDOFF'])('remembers payment during %s and finishes only when the matching booking arrives', async (stage) => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();

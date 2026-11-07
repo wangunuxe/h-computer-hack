@@ -32,6 +32,12 @@ describe('server events', () => {
 });
 
 describe('web events', () => {
+  it('accepts deferred profile fields but still validates supplied contacts', () => {
+    expect(WebEventSchema.safeParse({ type: 'hello', profile: { language: 'fr' }, gps: null }).success).toBe(true);
+    expect(WebEventSchema.safeParse({ type: 'hello', profile: { language: 'fr', email: 'invalid' }, gps: null }).success).toBe(false);
+    expect(ServerEventSchema.safeParse({ type: 'profile', profile: { language: 'en', guide_dog: false } }).success).toBe(true);
+    expect(ServerEventSchema.safeParse({ type: 'profile_request', question: 'Your name?' }).success).toBe(true);
+  });
   const events = [
     { type: 'hello', profile, gps: { latitude: 48.88, longitude: 2.35 } },
     { type: 'final_transcript', text: 'Take me to CDG' },

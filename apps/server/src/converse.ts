@@ -3,6 +3,7 @@ import { GuideDogStatusSchema, TripSchema, type Option, type Trip, type ServerEv
 import { z } from 'zod';
 import { parisIso, type UnderstandingClient } from './understand.js';
 import { sanitizeConfirmationFields, type ConfirmationFields } from './confirmation.js';
+import { redactContactText } from './voice-profile.js';
 
 export interface Turn { role: 'user' | 'assistant'; text: string }
 export type ConfirmationContext = ConfirmationFields & { option_name: string; guide_dog_status: Option['guide_dog_status'] };
@@ -40,11 +41,11 @@ export async function converse(input: TurnInput, client?: UnderstandingClient): 
   const cancelled = new Promise<never>((_, reject) => { rejectAbort = () => reject(new Error('Turn cancelled.')); controller.signal.addEventListener('abort', rejectAbort, { once: true }); });
   try {
     const context = {
-      transcript: input.transcript, stage: input.stage, language: input.language,
+      transcript: redactContactText(input.transcript), stage: input.stage, language: input.language,
       trip: TripSchema.partial().parse(input.trip), missing: input.missing,
       options: input.options.map(({ id, name, price, pickup_wait_minutes, journey_minutes, guide_dog_status }) => ({ id, name, price, pickup_wait_minutes, journey_minutes, guide_dog_status })),
       confirmation: input.confirmation ? { ...sanitizeConfirmationFields(input.confirmation), option_name: z.string().min(1).parse(input.confirmation.option_name), guide_dog_status: GuideDogStatusSchema.parse(input.confirmation.guide_dog_status) } : undefined,
-      history: input.history.slice(-10).map(({ role, text }) => ({ role, text })), attempt: input.attempt, now: parisIso(input.now),
+      history: input.history.slice(-10).map(({ role, text }) => ({ role, text: redactContactText(text) })), attempt: input.attempt, now: parisIso(input.now),
     };
     const sdk = client ?? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await Promise.race([sdk.models.generateContent({

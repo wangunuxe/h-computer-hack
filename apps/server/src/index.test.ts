@@ -1,4 +1,7 @@
 import { once } from 'node:events';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { ServerEventSchema, type ServerEvent } from '@voila/shared';
@@ -22,6 +25,39 @@ const ports: Partial<SessionPorts> = {
 async function flush() { for (let i = 0; i < 60; i++) await Promise.resolve(); }
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.unstubAllEnvs(); });
+
+describe('web static serving', () => {
+  it('serves assets and SPA fallback while preserving API and WebSocket routes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'voila-web-'));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    await writeFile(join(root, 'index.html'), '<!doctype html><title>Voilà</title>');
+    await writeFile(join(root, 'app.js'), 'window.voila = true;');
+    const registry = new SessionRegistry(); cleanup.push(() => registry.dispose());
+    const app = createApp({ webDistDir: root, registry });
+    for (const path of ['/', '/unknown/nested']) {
+      const response = await app.request(path);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain('text/html');
+      expect(await response.text()).toContain('<title>Voilà</title>');
+    }
+    expect(await (await app.request('/app.js')).text()).toBe('window.voila = true;');
+    expect(await (await app.request('/health')).json()).toEqual({ status: 'ok' });
+    expect((await app.request('/session', { method: 'POST' })).status).toBe(201);
+    expect((await app.request('/ws/session/test')).status).toBe(426);
+    for (const path of ['/gladia', '/session', '/internal/missing', '/ws/missing']) expect((await app.request(path)).status).toBe(404);
+    expect((await app.request('/unknown', { method: 'POST' })).status).toBe(404);
+  });
+  it('skips missing builds and directories without an index', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'voila-empty-'));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    for (const webDistDir of [root, join(root, 'missing')]) {
+      const app = createApp({ webDistDir });
+      expect((await app.request('/')).status).toBe(404);
+      expect((await app.request('/unknown')).status).toBe(404);
+      expect((await app.request('/health')).status).toBe(200);
+    }
+  });
+});
 
 describe('payment callback', () => {
   it('finds registry-only sessions for authenticated callbacks and marks paid idempotently', async () => {

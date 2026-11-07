@@ -2,8 +2,8 @@ import { WebSocket } from 'ws';
 import type { MonitorEvent, MonitorMessage, ServerEvent } from '@voila/shared';
 
 type PublishedEvent = ServerEvent | MonitorEvent;
-type BufferedMessage = { message: MonitorMessage; sequence: number };
-type SessionBuffer = { messages: BufferedMessage[]; frame?: BufferedMessage };
+type BufferedMessage = { message: MonitorMessage };
+type SessionBuffer = { messages: BufferedMessage[]; session?: BufferedMessage; frame?: BufferedMessage };
 type MonitorClient = { ws: WebSocket; pinned: boolean; session?: string };
 
 const MAX_MESSAGES = 300;
@@ -14,7 +14,6 @@ export class MonitorHub {
   private sessions = new Map<string, SessionBuffer>();
   private clients = new Set<MonitorClient>();
   private latestSession?: string;
-  private sequence = 0;
 
   publish(session: string, event: PublishedEvent) {
     const message: MonitorMessage = { session, at: new Date().toISOString(), event };
@@ -23,8 +22,9 @@ export class MonitorHub {
     this.sessions.delete(session);
     this.sessions.set(session, buffer);
 
-    const buffered = { message, sequence: this.sequence++ };
-    if (event.type === 'agent_frame') buffer.frame = buffered;
+    const buffered = { message };
+    if (event.type === 'session') buffer.session = buffered;
+    else if (event.type === 'agent_frame') buffer.frame = buffered;
     else {
       buffer.messages.push(buffered);
       if (buffer.messages.length > MAX_MESSAGES) buffer.messages.shift();
@@ -57,12 +57,9 @@ export class MonitorHub {
   private sendBuffer(client: MonitorClient, session: string) {
     const buffer = this.sessions.get(session);
     if (!buffer) return;
-    const messages = [...buffer.messages, ...(buffer.frame ? [buffer.frame] : [])].sort((a, b) => a.sequence - b.sequence);
-    let start = 0;
-    for (let index = 0; index < messages.length; index++) {
-      if (messages[index]!.message.event.type === 'session') start = index;
-    }
-    for (const item of messages.slice(start)) this.send(client, item);
+    if (buffer.session) this.send(client, buffer.session);
+    for (const item of buffer.messages) this.send(client, item);
+    if (buffer.frame) this.send(client, buffer.frame);
   }
 
   private send(client: MonitorClient, item: BufferedMessage) {

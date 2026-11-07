@@ -102,18 +102,19 @@ describe('MonitorHub', () => {
     expect(messages(backedUp.sent).map(({ event }) => event.type)).toEqual(['session']);
   });
 
-  it('retains only the 300 latest non-frame messages', () => {
+  it('replays the session before the capped history of 300 later messages', () => {
     const hub = new MonitorHub();
     hub.publish('s1', sessionEvent('Amina'));
-    for (let index = 0; index < 301; index++) {
+    for (let index = 0; index < 350; index++) {
       hub.publish('s1', { type: 'error', message: `error ${index}` } satisfies ServerEvent);
     }
     const client = socket();
     hub.subscribe(client.ws, 's1');
     const events = messages(client.sent).map(({ event }) => event);
-    expect(events).toHaveLength(300);
-    expect(events[0]).toEqual({ type: 'error', message: 'error 1' });
-    expect(events.at(-1)).toEqual({ type: 'error', message: 'error 300' });
+    expect(events).toHaveLength(301);
+    expect(events[0]).toEqual(sessionEvent('Amina'));
+    expect(events[1]).toEqual({ type: 'error', message: 'error 50' });
+    expect(events.at(-1)).toEqual({ type: 'error', message: 'error 349' });
   });
 
   it('evicts the least recently active session buffers at the 20-session cap', () => {

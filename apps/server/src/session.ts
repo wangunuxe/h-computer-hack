@@ -115,13 +115,15 @@ export class VoilaSession {
     if ((event.type === 'final_transcript' || event.type === 'user_reply') && /^(stop|arrete|arretez|annule|cancel)[.!? ]*$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim())) { this.stop(); return; }
     if (event.type === 'user_reply' && ['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) && this.payment && /^\/stub-payment\/[^/]+$/.test(new URL(this.payment.url).pathname) && /^(j ai paye|jai paye|i ve paid|i have paid|i paid)$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim())) { this.handle({ type: 'paid' }); return; }
     if (event.type === 'user_reply' && this.profileCollector) {
+      const field = this.profileCollector.field;
       const response = this.profileCollector.reply(event.text);
       this.profile = this.profileCollector.profile;
+      if (response.changed && field === 'guide_dog') this.trip.guide_dog = this.profile.guide_dog;
       if (response.changed) this.send({ type: 'profile', profile: this.profile });
       if (response.complete) {
         const id = this.pendingProfileOption!; this.profileCollector = undefined; this.pendingProfileOption = undefined;
         this.send({ type: 'say', text: this.language.startsWith('fr') ? 'Vos informations sont enregistrées sur cet appareil. Pour les effacer, dites « efface mes informations ».' : 'Your details are saved on this device. To clear them, say “forget my details”.' });
-        this.trip.guide_dog = this.profile.guide_dog ?? false; this.select(id);
+        this.trip.guide_dog ??= this.profile.guide_dog ?? false; this.select(id);
       } else this.profilePrompt(response.text);
       return;
     }

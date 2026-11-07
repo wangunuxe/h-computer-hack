@@ -1,6 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import { parsePhone, parseEmail, VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 describe('local spoken contact parsers', () => {
+  it.each(['Dr.', 'Dr', 'M.', 'Mme', 'Mr', 'Mrs', 'Ms', 'Monsieur', 'Madame', 'Mademoiselle'])('redacts the name following the honorific %s, not just the title', (title) => {
+    for (const intro of ['my name is', "c'est", "I'm"]) {
+      const safe = redactContactText(`${intro} ${title} Anna Lee, from Gare du Nord to CDG 2E`);
+      expect(safe).not.toMatch(/Anna|Lee/); expect(safe).toContain('[name]'); expect(safe).toContain('from Gare du Nord to CDG 2E');
+    }
+  });
+  it.each(['anna at gmail.com', 'anna arobase gmail.com', 'anna.smith at gmail.com', 'anna point smith arobase gmail.com', 'anna@gmail dot com', 'anna at example dot co.uk'])('redacts mixed spoken/literal email %s', (email) => {
+    const text = `my email is ${email}, from Gare du Nord to CDG 2E`;
+    const safe = redactContactText(text); expect(safe).toContain('[email]'); expect(safe).not.toContain('anna'); expect(safe).not.toContain('gmail'); expect(safe).toContain('Gare du Nord to CDG 2E');
+  });
+  it.each([
+    ['Call me on zero six twelve thirty four fifty six seventy eight, take me from Gare du Nord to CDG 2E', 'zero six twelve'],
+    ['Call me on zero six twelve, take me from Gare du Nord to CDG 2E', 'zero six twelve'],
+    ['Call me on zero 6 twelve 34 five six seventy eight, take me from Gare du Nord to CDG 2E', 'zero 6 twelve'],
+    ['Call me on zero six twelve thirty four fifty six seventy eight nine, take me from Gare du Nord to CDG 2E', 'zero six twelve'],
+    ["mon numéro c'est zéro six douze trente-quatre cinquante-six soixante-dix-huit, de Gare du Nord à CDG 2E", 'zéro six douze'],
+    ['mon téléphone est zéro six, douze, trente quatre, cinquante six, soixante dix huit, de Gare du Nord à CDG 2E', 'zéro six'],
+    ["I'm Marie, take me from Gare du Nord to CDG 2E", 'Marie'],
+    ["c'est Marie, emmenez-moi de Gare du Nord à CDG 2E", 'Marie'],
+    ['my email is marie at gmail dot com, from Gare du Nord to CDG 2E', 'marie'],
+    ['mon mail est marie arobase gmail point com, de Gare du Nord à CDG 2E', 'marie'],
+  ])('removes spoken contacts, including incomplete numbers, without removing the route: %s', (text, secret) => {
+    const safe = redactContactText(text); expect(safe.toLowerCase()).not.toContain(secret.toLowerCase()); expect(safe).toContain('Gare du Nord'); expect(safe).toContain('CDG 2E');
+  });
+  it('redacts every saved contact verbatim and leaves ordinary travel statements unchanged', () => {
+    const safe = redactContactText('Marie Dupont, 0612345678, marie@example.com: Gare du Nord to CDG 2E', { language: 'fr', name: 'Marie Dupont', phone: '0612345678', email: 'marie@example.com' });
+    expect(safe).not.toMatch(/Marie|0612345678|marie@example/); expect(safe).toContain('Gare du Nord to CDG 2E');
+    for (const text of ['', 'I am at Gare du Nord', "I'm travelling with a guide dog to CDG 2E", "c'est la navette pour CDG 2E", 'two passengers and one bag to CDG 2E']) expect(redactContactText(text)).toBe(text);
+  });
   it.each([
     ["je m'appelle Karim Benali, je suis à gare du Nord et je vais à CDG 2E", ['gare du Nord', 'CDG 2E']],
     ["je m'appelle Karim Benali je suis à gare du Nord et je vais à CDG 2E", ['gare du Nord', 'CDG 2E']],

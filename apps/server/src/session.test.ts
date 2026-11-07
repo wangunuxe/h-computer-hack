@@ -36,6 +36,23 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it.each([[false, true], [true, false]])('preserves an explicit trip dog=%s over saved dog=%s after contact collection', async (savedDog, tripDog) => {
+    const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { ...trip, guide_dog: tripDog }, missing: [] }) });
+    s.session.handle({ type: 'hello', profile: { language: 'en', guide_dog: savedDog }, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: `Gare du Nord to CDG ${tripDog ? 'with' : 'without'} a guide dog` }); await flush(); await s.choose();
+    for (const value of ['Marie', 'yes', '0612345678', 'yes', 'marie at example dot com', 'yes']) await s.choose(value);
+    expect(s.ports.runBooking).toHaveBeenCalledOnce();
+    expect(s.ports.runBooking.mock.calls[0]![0].trip.guide_dog).toBe(tripDog);
+    expect(s.ports.runBooking.mock.calls[0]![0].profile.guide_dog).toBe(tripDog);
+    expect(s.events.filter((event) => event.type === 'profile').at(-1)).toMatchObject({ profile: { guide_dog: savedDog } });
+  });
+  it.each([true, false])('still applies a newly confirmed guide-dog field: %s', async (guideDog) => {
+    const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { ...trip, guide_dog: false }, missing: [] }) });
+    s.session.handle({ type: 'hello', profile: { name: profile.name, phone: profile.phone, email: profile.email, language: 'en' }, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
+    await s.choose(guideDog ? 'yes' : 'no'); await s.choose('yes');
+    expect(s.ports.runBooking).toHaveBeenCalledOnce(); expect(s.ports.runBooking.mock.calls[0]![0].trip.guide_dog).toBe(guideDog); expect(s.ports.runBooking.mock.calls[0]![0].profile.guide_dog).toBe(guideDog);
+  });
   it.each(["j'ai payé", "I've paid", 'I have paid'])('accepts a spoken paid confirmation for a local stub only: %s', async (text) => {
     const s = setup({ runBooking: async (input) => { await input.onPaymentHandoff({ url: 'https://shuttle.example/stub-payment/demo?mode=no-stripe-key', amount: 65, merchant: 'Demo', summary: 'Demo' }); return completed; } });
     await s.start(); await s.choose(); expect(s.session.stage).toBe('AWAIT_PAYMENT'); s.session.handle({ type: 'user_reply', text }); await flush();

@@ -152,13 +152,15 @@ describe('VoilaSession', () => {
     expect(s.session.stage).toBe('DONE'); expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
   });
   it.each(['efface mes informations', 'forget my details'])('clears saved and pending profile data without Gemini: %s', async (text) => {
-    const s = setup(); await s.start(); s.session.attach(() => {});
+    const s = setup(); await s.start();
+    const phoneEvents: ServerEvent[] = [];
+    s.session.attach((event) => phoneEvents.push(event));
     const earlierProfile = s.observed.findIndex((event) => event.type === 'profile');
     await s.choose(text);
     const resetSession = s.observed.findIndex((event) => event.type === 'session' && event.name === 'User');
     expect(earlierProfile).toBeGreaterThanOrEqual(0);
     expect(resetSession).toBeGreaterThan(earlierProfile);
-    expect(s.session.stage).toBe('LISTEN'); expect(s.events).toContainEqual({ type: 'profile', profile: { language: 'en' } });
+    expect(s.session.stage).toBe('LISTEN'); expect(phoneEvents).toContainEqual({ type: 'profile', profile: { language: 'en' } });
     expect(s.ports.converse).not.toHaveBeenCalled(); expect(s.ports.runBooking).not.toHaveBeenCalled();
   });
   it('accepts spoken Stop before a trip without starting research or Gemini', () => {

@@ -97,6 +97,16 @@ const hud = h(
 stage.append(hud);
 director.onBeat = (n) => (beatEl.textContent = n);
 
+const updatePauseState = (paused: boolean) => {
+  if (paused) pausedAt = performance.now();
+  else if (pausedAt) {
+    pausedTotal += performance.now() - pausedAt;
+    pausedAt = 0;
+  }
+  pauseEl.textContent = paused ? "PAUSED" : "";
+  stage.classList.toggle("is-paused", paused);
+};
+
 const setMuted = (m: boolean) => {
   sfx.setMuted(m);
   director.tts.muted = m;
@@ -113,15 +123,13 @@ window.addEventListener("keydown", (e) => {
     if (!begun) return begin();
     if (live) return;
     const p = director.togglePause();
-    if (p) pausedAt = performance.now();
-    else if (pausedAt) {
-      pausedTotal += performance.now() - pausedAt;
-      pausedAt = 0;
-    }
-    pauseEl.textContent = p ? "PAUSED" : "";
-    stage.classList.toggle("is-paused", p);
+    updatePauseState(p);
   }
-  if (k === "arrowright" && begun && !live) director.skip();
+  if (k === "arrowright" && begun && !live) {
+    const wasPaused = director.paused;
+    director.skip();
+    if (wasPaused) updatePauseState(false);
+  }
   if (k === "r") {
     sfx.ambienceOff(0.3);
     director.tts.cancel();

@@ -8,7 +8,7 @@ h1 { margin: 0; font-size: 2rem; letter-spacing: -.06em; }
 main { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
 #caption { font-size: 1.25rem; line-height: 1.4; margin: .5rem 0 1rem; max-height: 5.6rem; overflow: auto; }
 #errors { color: #ffddbf; font-size: 1.2rem; }
-#errors:empty { display: none; }
+#errors:empty { margin: 0; }
 #dock { display: grid; gap: 1rem; position: relative; margin-top: 1rem; }
 #dock, #dock * { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; }
 button, .payment { font: inherit; font-weight: 700; font-size: 1.3rem; min-height: 4.5rem; border: 2px solid var(--accent); border-radius: 1.25rem; background: var(--accent); color: var(--ink); padding: 1rem; cursor: pointer; }

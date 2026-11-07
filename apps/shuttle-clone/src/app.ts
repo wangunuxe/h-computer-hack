@@ -28,6 +28,20 @@ export function createApp({
   store = createStore(), env = process.env, payments = createPayments(env), fetcher = fetch,
 }: { store?: Store; env?: NodeJS.ProcessEnv; payments?: PaymentGateway; fetcher?: typeof fetch } = {}) {
   const app = new Hono();
+  const completePayment = async (order: Order) => {
+    order.paid = true;
+    if (!env.SERVER_PUBLIC_URL) return true;
+    try {
+      const response = await fetcher(`${env.SERVER_PUBLIC_URL.replace(/\/$/, '')}/internal/payment-completed`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.INTERNAL_CALLBACK_TOKEN ?? ''}` },
+        body: JSON.stringify({ order_id: order.id, ref: order.ref, status: 'paid' }), signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return true;
+    } catch (error) {
+      console.error('Payment callback failed', error instanceof Error ? error.message : 'Unknown error'); return false;
+    }
+  };
   const root = fileURLToPath(new URL('../public', import.meta.url));
   app.use('/assets/*', serveStatic({ root, rewriteRequestPath: (path) => path.replace(/^\/assets/, '') }));
   app.get('/', (c) => c.redirect('/fr/reservation/'));
@@ -129,7 +143,15 @@ export function createApp({
   });
   app.get('/stub-payment/:orderId', (c) => {
     const order = store.orders.get(c.req.param('orderId'));
+    if (env.STRIPE_SECRET_KEY || order?.checkoutSessionId) return c.text('Stub payment unavailable', 404);
     return order ? c.html(stubPage(order)) : c.text('Order not found', 404);
+  });
+  app.post('/stub-payment/:orderId', async (c) => {
+    const order = store.orders.get(c.req.param('orderId'));
+    if (env.STRIPE_SECRET_KEY || order?.checkoutSessionId) return c.text('Stub payment unavailable', 404);
+    if (!order) return c.text('Order not found', 404);
+    if (!await completePayment(order)) return c.html(stubPage(order, 'Could not notify Voilà. Please retry the simulated payment.'), 503);
+    return c.redirect(`/fr/reservation/confirmation/${order.id}`, 303);
   });
   app.get('/fr/reservation/confirmation/:orderId', (c) => {
     const order = store.orders.get(c.req.param('orderId'));
@@ -148,21 +170,7 @@ export function createApp({
       const order = store.orders.get(session.metadata?.orderId ?? session.client_reference_id ?? '');
       if (!order) return c.text('Order not found', 404);
       if (session.payment_status !== 'paid') return c.json({ received: true });
-      order.paid = true;
-      if (env.SERVER_PUBLIC_URL) {
-        try {
-          const response = await fetcher(`${env.SERVER_PUBLIC_URL.replace(/\/$/, '')}/internal/payment-completed`, {
-            method: 'POST', headers: {
-              'Content-Type': 'application/json', Authorization: `Bearer ${env.INTERNAL_CALLBACK_TOKEN ?? ''}`,
-            },
-            body: JSON.stringify({ order_id: order.id, ref: order.ref, status: 'paid' }),
-            signal: AbortSignal.timeout(5000),
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        } catch (error) {
-          console.error('Payment callback failed', error instanceof Error ? error.message : 'Unknown error');
-        }
-      }
+      await completePayment(order);
     }
     return c.json({ received: true });
   });

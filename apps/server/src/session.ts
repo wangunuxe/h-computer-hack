@@ -114,20 +114,23 @@ export class VoilaSession {
       this.send({ type: 'say', text: this.language.startsWith('fr') ? 'Vos informations sont effacées de cet appareil et de cette session.' : 'Your details are cleared from this device and session.' }); return;
     }
     if ((event.type === 'final_transcript' || event.type === 'user_reply') && /^(stop|arrete|arretez|annule|cancel)[.!? ]*$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim())) { this.stop(); return; }
+    if (event.type === 'user_reply' && ['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) && this.payment && /^\/stub-payment\/[^/]+$/.test(new URL(this.payment.url).pathname) && /^(j ai paye|jai paye|i ve paid|i have paid|i paid)$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim())) { this.handle({ type: 'paid' }); return; }
     if (event.type === 'user_reply' && this.profileCollector) {
+      const field = this.profileCollector.field;
       const response = this.profileCollector.reply(event.text);
       this.profile = this.profileCollector.profile;
+      if (response.changed && field === 'guide_dog') this.trip.guide_dog = this.profile.guide_dog;
       if (response.changed) this.send({ type: 'profile', profile: this.profile });
       if (response.complete) {
         const id = this.pendingProfileOption!; this.profileCollector = undefined; this.pendingProfileOption = undefined;
         this.send({ type: 'say', text: this.language.startsWith('fr') ? 'Vos informations sont enregistrées sur cet appareil. Pour les effacer, dites « efface mes informations ».' : 'Your details are saved on this device. To clear them, say “forget my details”.' });
-        this.trip.guide_dog = this.profile.guide_dog ?? false; this.select(id);
+        this.trip.guide_dog ??= this.profile.guide_dog ?? false; this.select(id);
       } else this.profilePrompt(response.text);
       return;
     }
     if (event.type === 'final_transcript' && ['LISTEN', 'DONE'].includes(this.stage)) {
       if (!event.text.trim()) { this.error('Transcript must not be empty.'); return; }
-      this.observeSafely({ type: 'transcript', text: event.text });
+      this.observeSafely({ type: 'transcript', text: redactContactText(event.text, this.profile) });
       const restarting = this.stage === 'DONE';
       this.resetTrip();
       if (restarting) this.transition('LISTEN');
@@ -144,7 +147,7 @@ export class VoilaSession {
       void this.interpret(event.text, generation);
     } else if (event.type === 'user_reply') {
       if (!event.text.trim()) { this.error('Reply must not be empty.'); return; }
-      this.observeSafely({ type: 'transcript', text: event.text });
+      this.observeSafely({ type: 'transcript', text: redactContactText(event.text, this.profile) });
       this.turnController?.abort(); ++this.turnVersion;
       this.remember('user', event.text);
       const normalized = event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();

@@ -29,6 +29,18 @@ function setup(overrides: Partial<SessionPorts> = {}) {
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00+01:00')); });
 afterEach(() => { sessions.splice(0).forEach((session) => session.dispose()); vi.useRealTimers(); });
 describe('contextual conversation routing', () => {
+  it('redacts initial and corrective requests and history before Gemini and both Linkup research paths', async () => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'correct', trip_patch: { destination: 'CDG 2E' } })) });
+    s.session.handle({ type: 'hello', profile, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: "I'm Marie, take me from Gare du Nord to CDG. Call me on zero six twelve thirty four fifty six seventy eight. My email is marie at gmail dot com. Karim +33612345678 karim@example.com." }); await flush();
+    expect(s.ports.understand).toHaveBeenCalledOnce(); expect(s.ports.linkup).toHaveBeenCalledOnce();
+    await s.reply("c'est Marie, de Gare du Nord à CDG 2E. Mon numéro c'est zéro six douze trente quatre cinquante six soixante dix huit. Mon mail est marie arobase gmail point com.");
+    expect(s.ports.converse).toHaveBeenCalledOnce(); expect(s.ports.linkup).toHaveBeenCalledTimes(2);
+    const text = JSON.stringify([s.ports.understand.mock.calls[0]![0].transcript, s.ports.converse.mock.calls, s.ports.linkup.mock.calls]);
+    for (const secret of ['Marie', 'marie', 'Karim', '+33612345678', 'karim@example.com', 'zero six twelve', 'zéro six douze']) expect(text).not.toContain(secret);
+    for (const [request] of s.ports.linkup.mock.calls) { expect(request.query).toContain('Gare du Nord'); expect(request.query).toContain('CDG'); }
+    expect(s.ports.understand.mock.calls[0]![0].transcript).toContain('Gare du Nord');
+  });
   it.each(['fr', 'en'])('selects spoken option names in %s without Gemini, including when offline', async (language) => {
     for (const option of presetOptions) {
       const s = setup({ converse: vi.fn().mockRejectedValue(new Error('Unavailable')) }); await s.start(language);

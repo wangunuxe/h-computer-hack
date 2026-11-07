@@ -4,7 +4,7 @@ import { SpeechQueue } from './speech.js';
 import { Recorder, type Credentials } from './recorder.js';
 import { clientProfile, deviceLanguage } from './preferences.js';
 import { labels, optionNames, stages } from './labels.js';
-import { bindMicControls } from './mic-controls.js';
+import { bindMicControls, micControlState } from './mic-controls.js';
 import { recordingDiagnostic, recordingErrorKeys } from './recording-error.js';
 import { ConnectionAttempt, replaceOnForeground, requiresFreshSession } from './connection.js';
 import { SessionStorage } from './session-storage.js';
@@ -17,6 +17,7 @@ try { profile = clientProfile(JSON.parse(localStorage.getItem('voila.profile') ?
 let collectingProfile = false;
 let state = initialState(); let credentials: Credentials | undefined; let socket: WebSocket | undefined;
 let helloSent = false; let connecting = false; let retry: ReturnType<typeof setTimeout> | undefined; let pendingStop = false; let connected = false;
+let connectionFailed = false;
 let queuedTranscript: string | undefined;
 const sessionStorage = new SessionStorage();
 const savedSession = sessionStorage.load();
@@ -67,8 +68,17 @@ function sendTranscript(text: string) {
 }
 function connection(ready: boolean) {
   connected = ready; document.body.dataset.connected = String(ready);
-  $('connection').textContent = ready ? t().ready : t().connecting;
+  if (ready && connectionFailed) { connectionFailed = false; $('errors').replaceChildren(); }
+  $('connection').textContent = ready ? t().ready : connectionFailed ? t().connectionRetry : t().connecting;
   recordingLabel();
+}
+function connectionFailure() {
+  const first = !connectionFailed; connectionFailed = true; connection(false);
+  if (first) announce(t().connectionRetry, true);
+}
+function retryConnection() {
+  unlock(); clearTimeout(retry); attempt?.cancel(); attempt = undefined; connecting = false;
+  const stale = socket; socket = undefined; stale?.close(); void connect();
 }
 async function connect() {
   if (connecting || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
@@ -77,7 +87,7 @@ async function connect() {
     if (attempt !== current) return;
     attempt = undefined; connecting = false;
     const stale = socket; socket = undefined; stale?.close();
-    connection(false); clearTimeout(retry); retry = setTimeout(() => void connect(), 1500);
+    connectionFailure(); clearTimeout(retry); retry = setTimeout(() => void connect(), 1500);
   });
   try {
     if (!credentials) {
@@ -120,12 +130,12 @@ async function connect() {
     ws.onclose = (event) => {
       if (ws !== socket) return;
       current.clear();
-      recorder?.cancel(); connection(false); $('connection').textContent = t().disconnected;
+      recorder?.cancel(); connectionFailure();
       if (requiresFreshSession(event.code)) { credentials = undefined; helloSent = false; sessionStorage.clear(); queuedTranscript = undefined; pendingStop = false; state = initialState(); render(); }
       clearTimeout(retry); retry = setTimeout(() => void connect(), 1500);
     };
-    ws.onerror = () => { if (ws === socket) $('connection').textContent = t().disconnected; };
-  } catch { if (attempt === current) { current.clear(); announce(t().disconnected, true); clearTimeout(retry); retry = setTimeout(() => void connect(), 3000); } }
+    ws.onerror = () => { if (ws === socket) connectionFailure(); };
+  } catch { if (attempt === current) { current.clear(); connectionFailure(); clearTimeout(retry); retry = setTimeout(() => void connect(), 3000); } }
   finally { if (attempt === current) connecting = false; }
 }
 document.addEventListener('visibilitychange', () => {
@@ -140,15 +150,16 @@ window.addEventListener('pagehide', () => { if (credentials) sessionStorage.save
 setInterval(() => { if (connected && credentials) sessionStorage.save(credentials, helloSent); }, 60_000);
 function recordingLabel() {
   const active = !!recorder && !releasing;
-  const label = active ? t().listening : releasing ? t().processing : t().tap;
-  $('mic-label').textContent = label;
+  const control = micControlState({ connected, failed: connectionFailed, active, releasing }, t());
+  $('mic-label').textContent = control.caption;
   const talk = $<HTMLButtonElement>('talk');
-  talk.setAttribute('aria-pressed', String(active));
-  talk.setAttribute('aria-label', active ? t().stopListening : releasing ? t().processing : t().tap);
-  talk.disabled = !connected || releasing;
+  talk.setAttribute('aria-pressed', String(control.pressed));
+  talk.setAttribute('aria-label', control.label);
+  talk.disabled = control.disabled;
   $('stop').hidden = !!recorder || !canStop(state);
 }
 function start() {
+  if (!connected) { retryConnection(); return; }
   if (recorder || !credentials || socket?.readyState !== WebSocket.OPEN) return;
   unlock(); cue(); releasing = false;
   $('errors').replaceChildren();

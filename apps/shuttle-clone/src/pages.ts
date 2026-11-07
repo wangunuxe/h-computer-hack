@@ -86,7 +86,9 @@ export function confirmationPage(order: Order) {
   return page('Booking confirmation', html`${summary(order)}
     <p>A return from Checkout is not proof of payment; only the verified webhook marks this order paid.</p>`);
 }
-export function stubPage(order: Order) {
+export function stubPage(order: Order, error = '') {
   return page('FAKE PAYMENT — LOCAL STUB', html`<p>No STRIPE_SECRET_KEY is configured. No Stripe session exists and no payment is taken.</p>
-    ${summary(order)}<a href="/fr/reservation/confirmation/${order.id}">Return to unpaid confirmation</a>`);
+    ${error ? html`<p role="alert">${error}</p>` : ''}
+    ${summary(order)}<form method="post" action="/stub-payment/${order.id}"><button style="min-height:64px" type="submit">Simulate payment — no charge</button></form>
+    <p>Return to Voilà after confirming. If it is still waiting, say “I've paid” or “j'ai payé”.</p>`);
 }

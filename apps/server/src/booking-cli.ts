@@ -1,14 +1,26 @@
 import { createInterface } from 'node:readline/promises';
+import { isIP } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { bookingErrorMessage, runBooking } from './booking.js';
 
 export function publicShuttleUrl(value: string | undefined): URL {
   if (!value) throw new Error('Set SHUTTLE_PUBLIC_URL to the public shuttle-clone URL; the H cloud browser cannot reach localhost.');
   const url = new URL(value);
-  const host = url.hostname.toLowerCase();
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  const address = host.replace(/^\[|\]$/g, '');
+  const [first = 0, second = 0] = address.split('.').map(Number);
+  const privateIpv4 = isIP(address) === 4 && (
+    first === 0 || first === 10 || first === 127 || first === 169 && second === 254 ||
+    first === 172 && second >= 16 && second <= 31 || first === 192 && second === 168
+  );
+  const prefix = Number.parseInt(address.split(':')[0] || '0', 16);
+  const privateIpv6 = isIP(address) === 6 && (
+    address === '::' || address === '::1' || (prefix & 0xfe00) === 0xfc00 || (prefix & 0xffc0) === 0xfe80
+  );
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password ||
-    host === 'localhost' || host.endsWith('.localhost') || host.startsWith('127.') || host === '[::1]' || host === '0.0.0.0') {
-    throw new Error('SHUTTLE_PUBLIC_URL must be a public HTTP(S) URL, not localhost; the H cloud browser must reach it.');
+    host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') ||
+    privateIpv4 || privateIpv6) {
+    throw new Error('SHUTTLE_PUBLIC_URL must be a public HTTP(S) URL, not a private or local address; the H cloud browser must reach it.');
   }
   return url;
 }

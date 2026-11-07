@@ -323,6 +323,18 @@ describe('H booking runner', () => {
 });
 
 describe('CLI public URL validation', () => {
+  it.each([
+    '10.0.0.1', '10.255.255.255', '172.16.0.1', '172.31.255.255', '192.168.1.10',
+    '169.254.0.1', '169.254.255.255', '0.1.2.3', '0.255.255.255',
+    '[fc00::1]', '[fdff:ffff::1]', '[fe80::1]', '[febf:ffff::1]', '[::]',
+    'shuttle.local', 'shuttle.internal', 'shuttle.local.', 'shuttle.internal.', 'localhost.',
+  ])('rejects private shuttle host %s', (host) => {
+    expect(() => publicShuttleUrl(`http://${host}:3001`)).toThrow('public HTTP(S) URL');
+  });
+
+  it.each(['172.15.255.255', '172.32.0.1', '169.253.255.255', '192.169.0.1', '[2001:4860:4860::8888]', 'shuttle.example'])('accepts public host %s', (host) => {
+    expect(publicShuttleUrl(`https://${host}`).protocol).toBe('https:');
+  });
   it.each([undefined, 'http://localhost:3001', 'http://127.0.0.1:3001', 'http://[::1]:3001', 'ftp://shuttle.example'])('rejects missing or unreachable cloud URL %s', (url) => {
     expect(() => publicShuttleUrl(url)).toThrow();
   });

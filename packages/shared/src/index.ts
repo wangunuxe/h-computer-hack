@@ -48,10 +48,12 @@ export const StageSchema = z.enum([
   'LISTEN', 'UNDERSTAND', 'CLARIFY', 'RESEARCH', 'PRESENT', 'CHOOSE',
   'EXECUTE', 'CONFIRM', 'HANDOFF', 'AWAIT_PAYMENT', 'DONE',
 ]);
+export const ScenarioSchema = z.enum(['demo', 'live']);
+export type Scenario = z.infer<typeof ScenarioSchema>;
 export const ServerEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('stage'), stage: StageSchema }),
   z.object({ type: z.literal('say'), text }),
-  z.object({ type: z.literal('feed'), kind: text, text, source: z.url().optional() }),
+  z.object({ type: z.literal('feed'), kind: text, text, source: z.url().optional(), mode: z.enum(['demo', 'live']).optional(), status: z.enum(['normal', 'disrupted', 'unknown']).optional() }),
   z.object({ type: z.literal('clarify'), question: text }),
   z.object({ type: z.literal('options'), items: z.array(OptionSchema) }),
   z.object({ type: z.literal('confirm'), summary: text }),
@@ -67,6 +69,7 @@ export type ServerEvent = z.infer<typeof ServerEventSchema>;
 export const WebEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('hello'), profile: ProfileSchema,
+    scenario: ScenarioSchema.optional(),
     gps: z.object({
       latitude: z.number().min(-90).max(90),
       longitude: z.number().min(-180).max(180),

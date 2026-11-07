@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { initialState, optionEvent, reduce, transcriptEvent, type Stage } from './state.js';
 describe('event state and routing', () => {
+  it('keeps Stop in CLARIFY only while server-reported work is cancellable', () => {
+    let state = reduce(initialState(), { type: 'stage', stage: 'CLARIFY' });
+    state = reduce(state, { type: 'activity', cancellable: true }); expect(state.cancellable).toBe(true);
+    state = reduce(state, { type: 'activity', cancellable: false }); expect(state.cancellable).toBe(false);
+  });
   it('selects each taxi unambiguously by its current one-based ordinal rather than its name', () => {
     const taxi = { pickup_wait_minutes: 10, journey_minutes: 45, price: 56, guide_dog_status: 'accepted' as const };
     const options = [{ ...taxi, id: 'gare-du-nord-taxi', name: 'Gare du Nord taxi rank' }, { ...taxi, id: 'g7-phone', name: 'G7 by phone' }];

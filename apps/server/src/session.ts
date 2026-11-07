@@ -55,6 +55,8 @@ export class VoilaSession {
   private lastHeartbeat = -Infinity;
   private heartbeat: ReturnType<typeof setInterval>;
   private readonly ports: SessionPorts;
+  private operations = new Set<symbol>();
+  private lastActivity?: boolean;
 
   constructor(private emit: (event: ServerEvent) => void, ports: Partial<SessionPorts> = {}) {
     this.ports = { understand, converse, trafficH: readRerBTraffic, linkup: searchDisruptionAndAlternatives, runBooking,
@@ -77,6 +79,7 @@ export class VoilaSession {
     if (['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) && this.payment) this.send(this.payment);
     if (this.stage === 'CHOOSE') this.send({ type: 'options', items: this.options });
     if (this.stage === 'DONE' && this.booking) this.send({ type: 'booking_card', booking: this.booking });
+    this.reportActivity(true);
     return () => { if (this.emit === emit) this.emit = () => {}; };
   }
 
@@ -158,12 +161,22 @@ export class VoilaSession {
   private transition(stage: Stage) {
     if (stage !== this.stage) { this.attempt = 0; this.questionReplies = []; this.questionAsked = ['CHOOSE', 'CONFIRM'].includes(stage); }
     this.lastHeartbeat = -Infinity; this.stage = stage; this.send({ type: 'stage', stage });
+    this.reportActivity();
+  }
+  private reportActivity(force = false) {
+    const cancellable = !['LISTEN', 'DONE'].includes(this.stage) && (this.operations.size > 0 || !!this.confirmation || (!!this.payment && ['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage)));
+    if (force || cancellable !== this.lastActivity) { this.lastActivity = cancellable; this.send({ type: 'activity', cancellable }); }
+  }
+  private beginOperation() {
+    const id = Symbol(); this.operations.add(id); this.reportActivity();
+    return () => { if (this.operations.delete(id)) this.reportActivity(); };
   }
   private speak<K extends keyof NarrationParams>(key: K, params: NarrationParams[K]) {
     this.answer(say(key, params, this.profile?.language ?? 'en'), ['still-working', 'booking-page', 'research-started'].includes(key));
   }
   private active(generation: number) { return generation === this.generation && !this.flow.signal.aborted; }
   private cancel() {
+    this.operations.clear();
     this.turnController?.abort(); ++this.turnVersion;
     ++this.generation;
     this.flow.abort();
@@ -196,6 +209,8 @@ export class VoilaSession {
     finally { this.ports.timers.clearTimeout(timer); parent.removeEventListener('abort', abort); controller.abort(); }
   }
   private async startResearch(transcript: string, generation: number): Promise<Research> {
+    const finish = this.beginOperation();
+    try {
     const parent = this.flow.signal;
     const traffic = async (): Promise<Disruption> => {
       if (this.scenario === 'demo') return getDemoDisruption();
@@ -219,8 +234,10 @@ export class VoilaSession {
     }).catch(() => { if (this.active(generation)) this.ports.logger.error('Linkup research unavailable; retaining preset options.'); return []; });
     const [disruption, extraOptions] = await Promise.all([trafficResult, linkup]);
     return { disruption, extraOptions };
+    } finally { finish(); }
   }
   private async interpret(transcript: string, generation: number) {
+    const finish = this.beginOperation();
     try {
       const result = await this.limited((signal) => this.ports.understand({ transcript, profile: this.profile!, now: this.ports.clock(), previous: this.trip, signal }), 20_500, this.flow.signal);
       if (!this.active(generation)) return;
@@ -232,7 +249,7 @@ export class VoilaSession {
       this.error('Could not understand the trip. Please try again.');
       this.answer(this.fallback());
       this.cancel(); this.transition('LISTEN');
-    }
+    } finally { finish(); }
   }
   private missing() { return (['origin', 'destination', 'deadline'] as const).filter((key) => !this.trip[key]); }
   private remember(role: Turn['role'], text: string) { this.history = [...this.history, { role, text }].slice(-10); }
@@ -268,10 +285,11 @@ export class VoilaSession {
     const generation = this.generation, stage = this.stage, version = this.turnVersion;
     const controller = new AbortController(); this.turnController = controller;
     let result: TurnResult;
+    const finish = this.beginOperation();
     try {
       result = await this.limited((signal) => this.ports.converse({ transcript, stage, language: this.language, trip: { ...this.trip }, missing: this.missing(), options: this.options, confirmation: this.confirmation ? { ...this.confirmation.details } : undefined, history: [...this.history], attempt: this.attempt, now: this.ports.clock(), signal }), 20_500, controller.signal);
     } catch { result = { intent: 'unclear', confidence: 0, reply: this.fallback() }; }
-    finally { if (this.turnController === controller) this.turnController = undefined; }
+    finally { finish(); if (this.turnController === controller) this.turnController = undefined; }
     if (!this.active(generation) || this.stage !== stage || this.turnVersion !== version || controller.signal.aborted) return;
     if (result.intent !== 'unclear' && /^(euh|uh|um|hmm|(?:euh[, ]+)?je (?:ne )?sais pas|i don.t know|not sure)[.!? ]*$/i.test(transcript.trim())) result = { intent: 'unclear', confidence: 0, reply: this.fallback() };
     if (result.intent === 'stop' && result.confidence >= .65) { this.stop(); return; }
@@ -330,6 +348,7 @@ export class VoilaSession {
     this.paidRefs.clear();
     this.payment = undefined;
     this.transition('EXECUTE');
+    const finish = this.beginOperation();
     const controller = new AbortController();
     this.bookingController = controller;
     const current = () => this.active(generation) && !controller.signal.aborted;
@@ -378,6 +397,6 @@ export class VoilaSession {
       this.options = this.options.filter((option) => option.id !== id);
       this.send({ type: 'options', items: this.options });
       this.transition('CHOOSE');
-    } finally { controller.abort(); if (this.bookingController === controller) this.bookingController = undefined; }
+    } finally { controller.abort(); if (this.bookingController === controller) this.bookingController = undefined; finish(); }
   }
 }

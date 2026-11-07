@@ -144,7 +144,7 @@ function recordingLabel() {
   talk.setAttribute('aria-label', active ? t().stopListening : releasing ? t().processing : profile?.mic_mode === 'hold' ? t().hold : t().tap);
   talk.disabled = !connected || releasing;
   $('talk-help').textContent = profile?.mic_mode === 'hold' ? t().holdHelp : t().toggleHelp;
-  $('stop').hidden = !!recorder || !canStop(state.stage);
+  $('stop').hidden = !!recorder || !canStop(state);
 }
 function start() {
   if (recorder || !credentials || socket?.readyState !== WebSocket.OPEN) return;

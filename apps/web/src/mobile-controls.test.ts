@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { bindMicControls } from './mic-controls.js';
-import { canStop, type Stage } from './state.js';
+import { canStop, initialState, type Stage } from './state.js';
 import { labels } from './labels.js';
 import { captureFailure, recordingDiagnostic, recordingErrorKeys, SpeechInitializationError } from './recording-error.js';
 
@@ -42,6 +42,6 @@ describe('mobile microphone controls', () => {
     expect(recordingDiagnostic(captureFailure(new Error('wss://private?token=SECRET')))).toEqual({ kind: 'capture', code: 'capture', causeName: 'Error' });
     expect(recordingDiagnostic({ kind: 'service', code: 'rate-limit', cause: new SpeechInitializationError(429) })).toEqual({ kind: 'service', code: 'rate-limit', causeName: 'Error', status: 429 });
   });
-  it.each(['LISTEN', 'CLARIFY', 'PRESENT', 'CHOOSE', 'DONE'] as Stage[])('hides Stop while waiting for input in %s', (stage) => expect(canStop(stage)).toBe(false));
-  it.each(['UNDERSTAND', 'RESEARCH', 'EXECUTE', 'CONFIRM', 'HANDOFF', 'AWAIT_PAYMENT'] as Stage[])('allows cancellation in %s', (stage) => expect(canStop(stage)).toBe(true));
+  it.each(['LISTEN', 'CLARIFY', 'PRESENT', 'CHOOSE', 'DONE', 'RESEARCH'] as Stage[])('hides Stop without in-flight work in %s', (stage) => expect(canStop({ ...initialState(), stage })).toBe(false));
+  it.each(['UNDERSTAND', 'RESEARCH', 'CLARIFY', 'EXECUTE', 'CONFIRM', 'HANDOFF', 'AWAIT_PAYMENT'] as Stage[])('allows cancellation of in-flight work in %s', (stage) => expect(canStop({ ...initialState(), stage, cancellable: true })).toBe(true));
 });

@@ -16,6 +16,7 @@ async function flush() { for (let i = 0; i < 60; i++) await Promise.resolve(); }
 const sessions: VoilaSession[] = [];
 function setup(overrides: Partial<SessionPorts> = {}) {
   const events: ServerEvent[] = [];
+  const activity: Extract<ServerEvent, { type: 'activity' }>[] = [];
   const ports = {
     understand: vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip, missing: [] }),
     converse: vi.fn<SessionPorts['converse']>().mockRejectedValue(new Error('offline')),
@@ -24,17 +25,36 @@ function setup(overrides: Partial<SessionPorts> = {}) {
     runBooking: vi.fn<SessionPorts['runBooking']>().mockResolvedValue(completed),
     logger: { error: vi.fn() }, shuttlePublicUrl: () => 'https://shuttle.example', ...overrides,
   };
-  const session = new VoilaSession((event) => { ServerEventSchema.parse(event); events.push(event); }, ports);
+  const session = new VoilaSession((event) => { ServerEventSchema.parse(event); if (event.type === 'activity') activity.push(event); else events.push(event); }, ports);
   sessions.push(session);
   const hello = (language = 'en', gps: { latitude: number; longitude: number } | null = null) => session.handle({ type: 'hello', profile: { ...profile, language }, gps, scenario: 'live' });
   const start = async () => { hello(); session.handle({ type: 'final_transcript', text: 'CDG from Gare du Nord' }); await flush(); };
   const choose = async (text = 'shuttle') => { session.handle({ type: 'user_reply', text }); await flush(); };
-  return { session, events, ports, hello, start, choose };
+  return { session, events, activity, ports, hello, start, choose };
 }
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00+01:00')); });
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it('keeps cancellation available in CLARIFY while research runs, replays it, and aborts on Stop', async () => {
+    const pending = deferred<Awaited<ReturnType<SessionPorts['trafficH']>>>();
+    const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { origin: 'Gare du Nord', destination: 'CDG' }, missing: ['deadline'] }), trafficH: vi.fn(() => pending.promise) });
+    await s.start(); expect(s.session.stage).toBe('CLARIFY');
+    expect(s.activity.at(-1)).toEqual({ type: 'activity', cancellable: true });
+    const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toContainEqual({ type: 'activity', cancellable: true });
+    s.session.handle({ type: 'stop' });
+    expect(s.ports.trafficH.mock.calls[0]![0].signal?.aborted).toBe(true);
+    expect(replay.at(-1)).toEqual({ type: 'activity', cancellable: false });
+    pending.resolve(disruption); await flush();
+    expect(s.session.stage).toBe('LISTEN'); expect(replay.at(-1)).toEqual({ type: 'activity', cancellable: false });
+  });
+  it('hides cancellation in CLARIFY once all work settles, including understanding failures', async () => {
+    const s = setup({ understand: vi.fn().mockResolvedValue({ trip: {}, missing: ['origin', 'destination', 'deadline'] }) });
+    await s.start(); expect(s.session.stage).toBe('CLARIFY'); expect(s.activity.at(-1)?.cancellable).toBe(false);
+    const failed = setup({ understand: vi.fn().mockRejectedValue(new Error('unavailable')) });
+    await failed.start(); expect(failed.session.stage).toBe('LISTEN'); expect(failed.activity.at(-1)?.cancellable).toBe(false);
+  });
   it.each([{ pickup_date: '2027-01-15', pickup_time: '12:00' }, { total_price: 65 }, { currency: 'EUR' as const }])('never presents a confirmation without both transfer fare fields: %j', async (details) => {
     const decision = vi.fn();
     const s = setup({ runBooking: async (input) => { decision(await input.confirm('Unverified price', details)); return completed; } });
@@ -61,7 +81,7 @@ describe('VoilaSession', () => {
     await s.choose('1'); expect(s.session.stage).toBe('DONE');
     expect(s.ports.runBooking).toHaveBeenCalledOnce();
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay).toEqual([{ type: 'stage', stage: 'DONE' }]);
+    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'DONE' }]);
     expect(s.events.slice(count).filter((event) => ['error', 'booking_card', 'payment_handoff', 'confirm'].includes(event.type))).toEqual([]);
     s.session.handle({ type: 'final_transcript', text: 'Nouvelle réservation après le taxi' });
     await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE'));
@@ -75,7 +95,7 @@ describe('VoilaSession', () => {
     expect(s.session.stage).toBe('DONE'); expect(s.ports.understand).toHaveBeenCalledOnce();
     expect(s.events.at(-1)).toEqual({ type: 'error', message: 'Transcript must not be empty.' });
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay).toEqual([{ type: 'stage', stage: 'DONE' }, { type: 'booking_card', booking }]);
+    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'DONE' }, { type: 'booking_card', booking }]);
   });
   it('does not restore a previous booking when understanding the next trip fails', async () => {
     const understand = vi.fn<SessionPorts['understand']>().mockResolvedValueOnce({ trip, missing: [] }).mockRejectedValueOnce(new Error('unavailable'));
@@ -83,7 +103,7 @@ describe('VoilaSession', () => {
     s.session.handle({ type: 'final_transcript', text: 'Another trip' }); await flush();
     expect(s.session.stage).toBe('LISTEN'); expect(s.session.markPaid(booking.ref)).toBe(false);
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay).toEqual([{ type: 'stage', stage: 'LISTEN' }]);
+    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'LISTEN' }]);
   });
   it.each([undefined, 'demo', 'invalid'])('defaults to deterministic demo with VOILA_SCENARIO=%s and never calls H or Linkup', async (value) => {
     vi.stubEnv('VOILA_SCENARIO', value);
@@ -136,13 +156,13 @@ describe('VoilaSession', () => {
   it('replays choices after the current stage without repeating speech', async () => {
     const s = setup(); await s.start();
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay).toEqual([{ type: 'stage', stage: 'CHOOSE' }, s.events.find((e) => e.type === 'options')]);
+    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'CHOOSE' }, s.events.find((e) => e.type === 'options')]);
   });
   it('replays the pending localized confirmation after CONFIRM', async () => {
     const s = setup({ runBooking: async (input) => { await input.confirm('Original agent summary', fare); return completed; } });
     await s.start(); await s.choose();
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay).toEqual([{ type: 'stage', stage: 'CONFIRM' }, s.events.find((event) => event.type === 'confirm')]);
+    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'CONFIRM' }, s.events.find((event) => event.type === 'confirm')]);
     expect(JSON.stringify(replay)).not.toContain('Original agent summary');
   });
   it('replays payment in HANDOFF and AWAIT_PAYMENT, then the booking card in DONE', async () => {
@@ -153,16 +173,16 @@ describe('VoilaSession', () => {
     await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: '' });
     const payment = { type: 'payment_handoff', url: booking.payment_url, amount: 65, merchant: 'Shuttle' };
     let replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay).toEqual([{ type: 'stage', stage: 'HANDOFF' }, payment]);
+    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'HANDOFF' }, payment]);
     pending.resolve(completed); await flush();
     replay = []; s.session.attach((event) => replay.push(event));
-    expect(replay).toEqual([{ type: 'stage', stage: 'AWAIT_PAYMENT' }, payment]);
+    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'AWAIT_PAYMENT' }, payment]);
     s.session.markPaid(booking.ref);
     replay = []; s.session.attach((event) => replay.push(event));
-    expect(replay).toEqual([{ type: 'stage', stage: 'DONE' }, { type: 'booking_card', booking }]);
+    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'DONE' }, { type: 'booking_card', booking }]);
     s.session.handle({ type: 'stop' });
     replay = []; s.session.attach((event) => replay.push(event));
-    expect(replay).toEqual([{ type: 'stage', stage: 'LISTEN' }]);
+    expect(replay.filter((event) => event.type !== 'activity')).toEqual([{ type: 'stage', stage: 'LISTEN' }]);
   });
   it.each(['EXECUTE', 'HANDOFF'])('remembers payment during %s and finishes only when the matching booking arrives', async (stage) => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();

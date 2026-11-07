@@ -21,7 +21,7 @@ function setup(overrides: Partial<SessionPorts> = {}) {
     linkup: vi.fn<SessionPorts['linkup']>().mockResolvedValue({ corroboration: [], extraOptions: [] }),
     runBooking: vi.fn<SessionPorts['runBooking']>().mockImplementation(() => new Promise(() => {})), logger: { error: vi.fn() }, shuttlePublicUrl: () => 'https://shuttle.example', ...overrides,
   };
-  const session = new VoilaSession((event) => events.push(event), ports); sessions.push(session);
+  const session = new VoilaSession((event) => { if (event.type !== 'activity') events.push(event); }, ports); sessions.push(session);
   const start = async (language = 'fr') => { session.handle({ type: 'hello', profile: { ...profile, language }, gps: null, scenario: 'live' }); session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); };
   const reply = async (text: string) => { session.handle({ type: 'user_reply', text }); await flush(); };
   return { session, ports, events, start, reply };

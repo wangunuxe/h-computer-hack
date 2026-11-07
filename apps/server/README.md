@@ -59,16 +59,19 @@ and prices are illustrative estimates, not live availability or quotations. The
 replacement bus must be confirmed with station staff. Taxi guide-dog acceptance
 reflects the legal requirement, not a reservation confirmation from a driver.
 
-`adapters/prim.ts` accepts an explicit API key and injectable fetch; it never needs
-a key for recorded mode. The configured URL is
+`adapters/prim.ts` exposes the live `getRerBDisruption` adapter with an explicit API
+key and injectable fetch, plus the key-free `getDemoDisruption` fixture loader.
+The configured live URL is
 `https://prim.iledefrance-mobilites.fr/marketplace/general-message?LineRef=STIF:Line::C01743:`
 with an `apikey` header. Attempts to read PRIM's public general-message page and
 FAQ returned HTTP 403. The endpoint, line identifier, header, and SIRI-Lite response
 shape therefore remain assumptions to verify with official API access; tests
 verify our request contract against a fake only.
 
-On missing keys, network/HTTP/parse errors, empty messages, timeout or caller abort,
-the adapter loads `scripts/fixtures/prim-rer-b.json` and sets `recorded: true`.
+The live adapter throws on missing keys, network/HTTP/parse errors, timeout or
+caller abort so the session can attempt H rather than silently use demo data.
+A successful delivery with no current alerts is normal. The demo loader alone
+reads `scripts/fixtures/prim-rer-b.json` and sets `recorded: true`.
 That fixture is explicitly synthetic demo data, not an actual captured service
 response. Keep this file available alongside the repo when running built code.
 `narrate.ts` exports typed `say(key, params, language)` templates; option arrival

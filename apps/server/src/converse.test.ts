@@ -6,6 +6,12 @@ const input: TurnInput = { transcript: 'le moins cher', stage: 'CHOOSE', languag
 const result = { intent: 'choose', option_id: 'gare-du-nord-taxi', reply: 'Le taxi de la gare est le moins cher parmi les taxis.', confidence: .95 };
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 describe('Gemini turn interpreter', () => {
+  it('does not expose a self-introduced name after an honorific in the SDK request', async () => {
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify(result) });
+    const text = 'my name is Dr. Anna Lee, from Gare du Nord to CDG 2E';
+    await converse({ ...input, transcript: text, history: [{ role: 'user', text }] }, { models: { generateContent } });
+    const payload = JSON.stringify(generateContent.mock.calls[0]![0]); expect(payload).not.toMatch(/Anna|Lee/); expect(payload).toContain('from Gare du Nord to CDG 2E');
+  });
   it('redacts spoken contacts from both the transcript and history in the actual SDK payload', async () => {
     const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify(result) });
     const text = "I'm Marie, from Gare du Nord to CDG 2E. Call me on zero 6 twelve 34 five six seventy eight. My email is marie at gmail dot com.";

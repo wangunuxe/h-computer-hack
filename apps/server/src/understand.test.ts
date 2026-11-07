@@ -9,6 +9,12 @@ const clientWith = (value: unknown) => ({ models: { generateContent: vi.fn<Under
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe('understand', () => {
+  it('redacts UK and US international phones from the actual Gemini payload', async () => {
+    const client = clientWith({ trip: {} });
+    await understand({ transcript: '2027-01-15 2 personnes, à 20:45 +44 7700 900123, or +1 415-555-0100, from Gare du Nord to CDG', profile, now }, client);
+    const payload = JSON.parse(String(client.models.generateContent.mock.calls[0]![0].contents));
+    expect(payload.transcript).toBe('2027-01-15 2 personnes, à 20:45 [phone], or [phone], from Gare du Nord to CDG');
+  });
   it('keeps every introduced comma-separated phone group out of Gemini without losing passenger counts', async () => {
     const client = clientWith({ trip: {} });
     await understand({ transcript: 'Mon téléphone est zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit, 2 personnes de Gare du Nord à CDG à 20:45', profile, now }, client);

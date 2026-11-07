@@ -82,7 +82,8 @@ const dateSpan = /(?<![\p{L}\d])(?<!\d[./:-])(?:\d{4}[-/.](?:0?[1-9]|1[0-2])[-/.
 const timeSpan = /(?<![\p{L}\d])(?<!\d[./:-])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?!\d|[./:-]\d)/gu;
 const numberWords = [...numbers.keys(), 'plus', 'double', 'triple'].sort((a, b) => b.length - a.length).map((word) => word.replace(/zero/g, 'z[eé]ro').replace(/ /g, '[ \\t-]+')).join('|');
 const separator = '(?:[ \\t]+|[.:-](?!\\s))?';
-const numericPhone = `(?<![\\p{L}\\d])(?:(?:\\+33|0033)${separator}\\(?[1-9]\\)?(?:${separator}\\d){8}|0${separator}[1-9](?:${separator}\\d){8}|\\d{10})(?![\\p{L}\\d])`;
+const internationalSeparator = '(?:[ \\t]+|[.-](?!\\s))?';
+const numericPhone = `(?<![\\p{L}\\d])(?:\\+\\d(?:${internationalSeparator}\\d){7,14}|(?:\\+33|0033)${separator}\\(?[1-9]\\)?(?:${separator}\\d){8}|0${separator}[1-9](?:${separator}\\d){8}|\\d{10})(?![\\p{L}\\d])`;
 const spokenToken = `(?:\\d{1,2}(?!\\d)|${numberWords})`;
 const spokenRun = `${spokenToken}(?:(?:[ \\t:-]+|\\.(?!\\s))${spokenToken})*`;
 const spokenPhoneSpan = `(?<![\\p{L}\\d])${spokenRun}(?![\\p{L}\\d])`;

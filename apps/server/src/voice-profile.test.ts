@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { parsePhone, parseEmail, VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 describe('local spoken contact parsers', () => {
+  it.each(['+44 7700 900123', '+1 415-555-0100', '+44.7700.900123', '+44-7700-900123', '+12345678', '+123456789012345'])('redacts international plus numbers without consuming surrounding trip facts: %s', (phone) => {
+    expect(redactContactText(phone)).toBe('[phone]');
+    expect(redactContactText(`2027-01-15 2 personnes, à 06:12 ${phone}, 2 personnes à CDG`)).toBe('2027-01-15 2 personnes, à 06:12 [phone], 2 personnes à CDG');
+    expect(redactContactText(`${phone}. 2 personnes`)).toBe('[phone]. 2 personnes');
+  });
+  it.each(['+1234567', '+1234567890123456', '+12 34 56 7', '2027-01-15T20:45:00+01:00'])('does not classify a short or overlong plus run or timezone as an international phone: %s', (text) => expect(redactContactText(text)).toBe(text));
   it.each(['mon numéro', 'mon téléphone est', "mon numéro c'est", 'call me on', 'my number is', 'appelez-moi au'])('joins comma-separated phone groups only after the introducer %s', (intro) => {
     const phone = 'zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit';
     expect(redactContactText(`${intro} ${phone}, 2 personnes à CDG à 20:45 le 2027-01-15`)).toBe(`${intro} [phone], 2 personnes à CDG à 20:45 le 2027-01-15`);

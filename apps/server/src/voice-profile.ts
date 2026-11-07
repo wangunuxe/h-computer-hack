@@ -55,12 +55,19 @@ export function redactContactText(text: string, profile?: TravelerProfile): stri
   for (const value of [profile?.name, profile?.phone, profile?.email]) if (value) safe = safe.replace(new RegExp(`(?<![\\p{L}\\p{N}])${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'giu'), '[contact]');
   safe = safe.replace(/[a-z\d.!#$%&'*+/=?^_`{|}~-]+@[a-z\d.-]+\.[a-z]{2,}/gi, '[email]')
     .replace(/\b[\p{L}\d_+-]+(?:(?:\.|\s+(?:point|dot|tiret bas|tiret|dash|underscore)\s+)[\p{L}\d_+-]+)*\s*(?:@|\b(?:arobase|at)\b)\s*[\p{L}\d-]+(?:(?:\s*\.\s*|\s+(?:point|dot)\s+)[\p{L}\d-]+)+\b/giu, (value) => parseEmail(value) ? '[email]' : value);
-  return safe.split(temporalSpan).map((part, index) => {
+  const parts = safe.split(temporalSpan);
+  for (let index = 1; index < parts.length; index += 2) {
+    const continuation = /^(?:[\s().,;:-]+\d+(?![\p{L}\d]))+/u.exec(parts[index + 1]!)?.[0];
+    if (continuation && (parts[index]! + continuation).replace(/\D/g, '').length >= 7) {
+      parts[index - 1] += parts[index]! + parts[index + 1]!;
+      parts.splice(index, 2); index -= 2;
+    }
+  }
+  return parts.map((part, index) => {
     if (index % 2) return part;
-    const text = part.replace(/(?:\+\d(?:[\s().-]*\d){7,14}|\b\d(?:[\s().-]*\d){9}\b)/g, '[phone]');
-    return text.replace(spokenPhoneSpan, (value: string, offset: number) => {
+    return part.replace(spokenPhoneSpan, (value: string, offset: number) => {
       const digits = phoneDigits(value)?.digits;
-      const introduced = /\b(?:call me(?: on| at)?|reach me(?: on| at)?|(?:my )?(?:phone(?: number)?|number)(?: is| s)?|(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:appelez|contactez)(?: moi)?(?: au)?)$/.test(normal(text.slice(0, offset)));
+      const introduced = /\b(?:call me(?: on| at)?|reach me(?: on| at)?|(?:my )?(?:phone(?: number)?|number)(?: is| s)?|(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:appelez|contactez)(?: moi)?(?: au)?)$/.test(normal(part.slice(0, offset)));
       return digits && (digits.length >= 7 || introduced) ? '[phone]' : value;
     });
   }).join('');

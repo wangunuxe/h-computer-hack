@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { parsePhone, parseEmail, VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 describe('local spoken contact parsers', () => {
+  it.each(['06:12 34 56 78', '06:12:34 56 78', '2027-01-15 12 34'])('does not protect a temporal prefix of a phone-length sequence: %s', (phone) => {
+    expect(redactContactText(phone)).toBe('[phone]');
+    expect(redactContactText(`Call me on ${phone}, from Gare du Nord to CDG 2E`)).toBe('Call me on [phone], from Gare du Nord to CDG 2E');
+  });
+  it.each(['20:45', 'à 20:45 depuis gare du Nord', '2027-01-15 20:45', '20:45 2E', '2027-01-15 2E', '2027-01-15 à 20:45 pour 2 personnes'])('keeps a real temporal value intact: %s', (text) => expect(redactContactText(text)).toBe(text));
   it.each(["c'est pour demain", "c'est pour aller à CDG", "c'est urgent", "c'est demain", "c'est aujourd'hui", "c'est ce soir", "c'est à la gare", "c'est la gare du Nord", "c'est le train", "c'est un taxi", "c'est Marie"])("does not infer a name from ambiguous trip speech: %s", (text) => expect(redactContactText(text)).toBe(text));
   it('still removes explicit name introductions and known saved names', () => {
     for (const text of ["mon nom c'est Marie, pour aller à CDG", "je m'appelle Marie, pour aller à CDG", 'my name is Marie, to CDG']) {

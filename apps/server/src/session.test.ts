@@ -8,7 +8,7 @@ import { readRerBTraffic, type TrafficClient } from './adapters/traffic-h.js';
 const profile = { name: 'Karim', email: 'karim@example.com', phone: '+33612345678', language: 'en', guide_dog: true };
 const trip: Trip = { origin: 'Gare du Nord', destination: 'CDG 2E', deadline: '2027-01-15T16:00:00+01:00', passengers: 1, luggage: 1, guide_dog: true };
 const booking = { ref: 'PAS-123', pickup_time: '2027-01-15T11:00:00+01:00', pickup_point: 'Gare du Nord', price: 65, operator_phone: '+33123456789', guide_dog_status: 'accepted' as const, payment_url: 'https://checkout.stripe.com/test' };
-const disruption = { status: 'disrupted' as const, mode: 'live-prim' as const, summary: 'RER B interrupted', cause: 'Signal failure.', source: 'https://www.rerb-leblog.fr/incident', recorded: false };
+const disruption = { status: 'disrupted' as const, mode: 'live' as const, summary: 'RER B interrupted', cause: 'Signal failure.', source: 'https://www.rerb-leblog.fr/incident', recorded: false };
 const completed = { booking, metrics: { steps: 2, durationMs: 100, costUsd: 0 }, agentViewUrl: undefined };
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((r, j) => { resolve = r; reject = j; }); return { promise, resolve, reject }; }
 async function flush() { for (let i = 0; i < 60; i++) await Promise.resolve(); }
@@ -17,8 +17,7 @@ function setup(overrides: Partial<SessionPorts> = {}) {
   const events: ServerEvent[] = [];
   const ports = {
     understand: vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip, missing: [] }),
-    prim: vi.fn<SessionPorts['prim']>().mockResolvedValue(disruption),
-    trafficH: vi.fn<SessionPorts['trafficH']>().mockRejectedValue(new Error('H unavailable')),
+    trafficH: vi.fn<SessionPorts['trafficH']>().mockResolvedValue(disruption),
     linkup: vi.fn<SessionPorts['linkup']>().mockResolvedValue({ corroboration: [], extraOptions: [] }),
     runBooking: vi.fn<SessionPorts['runBooking']>().mockResolvedValue(completed),
     logger: { error: vi.fn() }, shuttlePublicUrl: () => 'https://shuttle.example', ...overrides,
@@ -34,13 +33,13 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
-  it.each([undefined, 'demo', 'invalid'])('defaults to deterministic demo with VOILA_SCENARIO=%s and never calls PRIM, H or Linkup', async (value) => {
+  it.each([undefined, 'demo', 'invalid'])('defaults to deterministic demo with VOILA_SCENARIO=%s and never calls H or Linkup', async (value) => {
     vi.stubEnv('VOILA_SCENARIO', value);
     const s = setup();
     s.session.handle({ type: 'hello', profile, gps: null });
     s.session.handle({ type: 'final_transcript', text: 'Gare du Nord CDG' });
     await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE'));
-    expect(s.ports.prim).not.toHaveBeenCalled(); expect(s.ports.trafficH).not.toHaveBeenCalled(); expect(s.ports.linkup).not.toHaveBeenCalled();
+    expect(s.ports.trafficH).not.toHaveBeenCalled(); expect(s.ports.linkup).not.toHaveBeenCalled();
     expect(s.events).toContainEqual(expect.objectContaining({ type: 'feed', mode: 'demo', status: 'disrupted', text: expect.stringContaining('incident de signalisation') }));
     expect(s.events).toContainEqual(expect.objectContaining({ type: 'say', text: expect.stringContaining('Demo mode. Recorded data, not live:') }));
   });
@@ -49,38 +48,38 @@ describe('VoilaSession', () => {
     const s = setup(); s.session.handle({ type: 'hello', profile, gps: null, scenario: 'demo' });
     s.session.handle({ type: 'final_transcript', text: 'CDG' });
     await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE'));
-    expect(s.ports.prim).not.toHaveBeenCalled(); expect(s.ports.trafficH).not.toHaveBeenCalled();
+    expect(s.ports.trafficH).not.toHaveBeenCalled();
   });
-  it('uses live PRIM from the environment without invoking H', async () => {
+  it('uses only the H traffic reader for live traffic selected by the environment', async () => {
     vi.stubEnv('VOILA_SCENARIO', 'live');
     const s = setup(); s.session.handle({ type: 'hello', profile, gps: null });
     s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush();
-    expect(s.session.stage).toBe('CHOOSE'); expect(s.ports.prim).toHaveBeenCalledOnce(); expect(s.ports.trafficH).not.toHaveBeenCalled();
-    expect(s.events).toContainEqual(expect.objectContaining({ type: 'feed', mode: 'live-prim', status: 'disrupted' }));
+    expect(s.session.stage).toBe('CHOOSE'); expect(s.ports.trafficH).toHaveBeenCalledOnce();
+    expect(s.events).toContainEqual(expect.objectContaining({ type: 'feed', mode: 'live', status: 'disrupted' }));
   });
-  it('falls back from failed PRIM to H and still offers options when traffic is normal', async () => {
-    const s = setup({ prim: vi.fn().mockRejectedValue(new Error('No key')), trafficH: vi.fn().mockResolvedValue({ ...disruption, status: 'normal', mode: 'live-h', cause: '' }) });
+  it('still offers options when H reports normal traffic', async () => {
+    const s = setup({ trafficH: vi.fn().mockResolvedValue({ ...disruption, status: 'normal', mode: 'live', cause: '' }) });
     await s.start();
     expect(s.session.stage).toBe('CHOOSE'); expect(s.ports.trafficH).toHaveBeenCalledOnce();
-    expect(s.events).toContainEqual(expect.objectContaining({ type: 'feed', mode: 'live-h', status: 'normal' }));
+    expect(s.events).toContainEqual(expect.objectContaining({ type: 'feed', mode: 'live', status: 'normal' }));
     expect(s.events).toContainEqual(expect.objectContaining({ type: 'say', text: expect.stringContaining('The RER B is running normally.') }));
     expect(s.events.find((e) => e.type === 'options')?.items.length).toBeGreaterThan(0);
   });
-  it('speaks unknown status and continues with alternatives if both live sources fail', async () => {
-    const s = setup({ prim: vi.fn().mockRejectedValue(new Error('offline')) }); await s.start();
+  it('speaks unknown status and continues with alternatives if the live reader fails', async () => {
+    const s = setup({ trafficH: vi.fn().mockRejectedValue(new Error('offline')) }); await s.start();
     expect(s.session.stage).toBe('CHOOSE');
-    expect(s.events).toContainEqual(expect.objectContaining({ type: 'feed', mode: 'live-h', status: 'unknown' }));
+    expect(s.events).toContainEqual(expect.objectContaining({ type: 'feed', mode: 'live', status: 'unknown' }));
     expect(s.events).toContainEqual(expect.objectContaining({ type: 'say', text: expect.stringContaining('Its status is unknown.') }));
     expect(s.events.find((e) => e.type === 'options')?.items.length).toBeGreaterThan(0);
   });
   it('stop cancels the actual H text reader session and ignores late traffic results', async () => {
     const cancel = vi.fn(async () => {});
     const client = { startSession: vi.fn(async () => ({ cancel, waitForCompletion: () => new Promise(() => {}) })) } as unknown as TrafficClient;
-    const s = setup({ prim: vi.fn().mockRejectedValue(new Error('offline')), trafficH: (input) => readRerBTraffic(input, client) });
+    const s = setup({ trafficH: (input) => readRerBTraffic(input, client) });
     await s.start(); expect(client.startSession).toHaveBeenCalledOnce();
     s.session.handle({ type: 'stop' }); await flush();
     expect(cancel).toHaveBeenCalledOnce(); expect(s.session.stage).toBe('LISTEN');
-    expect(s.events.some((e) => e.type === 'options' || (e.type === 'feed' && e.mode === 'live-h'))).toBe(false);
+    expect(s.events.some((e) => e.type === 'options' || (e.type === 'feed' && e.mode === 'live'))).toBe(false);
   });
   it('replays choices after the current stage without repeating speech', async () => {
     const s = setup(); await s.start();
@@ -135,7 +134,7 @@ describe('VoilaSession', () => {
     s.session.markPaid(booking.ref); expect(s.session.stage).toBe('DONE');
   });
   it('emits the exact happy-path event and stage sequence through paid', async () => {
-    const prim = deferred<Awaited<ReturnType<SessionPorts['prim']>>>();
+    const traffic = deferred<Awaited<ReturnType<SessionPorts['trafficH']>>>();
     const linkup = deferred<Awaited<ReturnType<SessionPorts['linkup']>>>();
     const runner = vi.fn<SessionPorts['runBooking']>(async (input) => {
       input.onProgress('Opening booking form');
@@ -144,10 +143,10 @@ describe('VoilaSession', () => {
       await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: 'Ready' });
       return completed;
     });
-    const s = setup({ prim: () => prim.promise, linkup: () => linkup.promise, runBooking: runner });
+    const s = setup({ trafficH: () => traffic.promise, linkup: () => linkup.promise, runBooking: runner });
     await s.start();
     expect(s.session.stage).toBe('RESEARCH');
-    prim.resolve(disruption); await flush();
+    traffic.resolve(disruption); await flush();
     linkup.resolve({ corroboration: [{ text: 'Service interrupted', sources: ['https://example.com/traffic'] }], extraOptions: [] }); await flush();
     await s.choose();
     expect(s.session.stage).toBe('CONFIRM');
@@ -162,24 +161,24 @@ describe('VoilaSession', () => {
       'stage:DONE', 'booking_card', 'say',
     ]);
     expect(s.events).toContainEqual({ type: 'booking_card', booking });
-    expect(s.events).toContainEqual({ type: 'feed', kind: 'prim', text: 'live-prim — RER B interrupted', source: disruption.source, mode: 'live-prim', status: 'disrupted' });
+    expect(s.events).toContainEqual({ type: 'feed', kind: 'traffic', text: 'live — RER B interrupted', source: disruption.source, mode: 'live', status: 'disrupted' });
     expect(s.session.markPaid('PAS-123')).toBe(true);
     expect(s.events.filter((e) => e.type === 'booking_card')).toHaveLength(1);
   });
   it('runs research while clarifying and merges the reply without restarting research', async () => {
-    const pending = deferred<Awaited<ReturnType<SessionPorts['prim']>>>();
+    const pending = deferred<Awaited<ReturnType<SessionPorts['trafficH']>>>();
     const understanding = vi.fn<SessionPorts['understand']>().mockResolvedValueOnce({ trip: { origin: trip.origin, destination: trip.destination }, missing: ['deadline'] }).mockResolvedValueOnce({ trip, missing: [] });
-    const s = setup({ understand: understanding, prim: vi.fn(() => pending.promise) });
+    const s = setup({ understand: understanding, trafficH: vi.fn(() => pending.promise) });
     await s.start();
     expect(s.session.stage).toBe('CLARIFY');
-    expect(s.ports.prim).toHaveBeenCalled(); expect(s.ports.linkup).toHaveBeenCalled();
+    expect(s.ports.trafficH).toHaveBeenCalled(); expect(s.ports.linkup).toHaveBeenCalled();
     pending.resolve(disruption); await flush();
     expect(s.session.stage).toBe('CLARIFY');
     expect(s.events.some((e) => e.type === 'options')).toBe(false);
     await s.choose('My flight is at 21h');
     expect(understanding.mock.calls[1]![0].previous).toMatchObject({ origin: trip.origin, destination: trip.destination, luggage: 0 });
     expect(s.session.stage).toBe('CHOOSE');
-    expect(s.ports.prim).toHaveBeenCalledTimes(1);
+    expect(s.ports.trafficH).toHaveBeenCalledTimes(1);
   });
   it('uses GPS origin when text has none, without asking for luggage or passenger count', async () => {
     const s = setup({ understand: vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip: { destination: trip.destination, deadline: trip.deadline }, missing: ['origin'] }) });
@@ -209,11 +208,11 @@ describe('VoilaSession', () => {
     expect(s.events).toContainEqual({ type: 'options', items: [extra] });
   });
   it('times out research ports that ignore their signals', async () => {
-    const s = setup({ prim: () => new Promise(() => {}), linkup: () => new Promise(() => {}) });
+    const s = setup({ trafficH: () => new Promise(() => {}), linkup: () => new Promise(() => {}) });
     await s.start();
-    await vi.advanceTimersByTimeAsync(9000); await flush();
+    await vi.advanceTimersByTimeAsync(46_000); await flush();
     expect(s.session.stage).toBe('CHOOSE');
-    expect(s.events).toContainEqual(expect.objectContaining({ type: 'feed', mode: 'live-h', status: 'unknown' }));
+    expect(s.events).toContainEqual(expect.objectContaining({ type: 'feed', mode: 'live', status: 'unknown' }));
   });
   it('presents no feasible options and reads rejection reasons', async () => {
     const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { ...trip, deadline: '2027-01-15T10:00:00+01:00' }, missing: [] }),
@@ -272,7 +271,7 @@ describe('VoilaSession', () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['understand']>>>();
     let signal: AbortSignal | undefined;
     let understandingSignal: AbortSignal | undefined;
-    const s = setup({ understand: (input) => { understandingSignal = input.signal; return pending.promise; }, prim: async (input) => { signal = input?.signal; return new Promise(() => {}); } });
+    const s = setup({ understand: (input) => { understandingSignal = input.signal; return pending.promise; }, trafficH: async (input) => { signal = input?.signal; return new Promise(() => {}); } });
     await s.start(); s.session.handle({ type: 'stop' });
     expect(signal?.aborted).toBe(true);
     expect(understandingSignal?.aborted).toBe(true);

@@ -53,7 +53,7 @@ export type Scenario = z.infer<typeof ScenarioSchema>;
 export const ServerEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('stage'), stage: StageSchema }),
   z.object({ type: z.literal('say'), text }),
-  z.object({ type: z.literal('feed'), kind: text, text, source: z.url().optional(), mode: z.enum(['demo', 'live-prim', 'live-h']).optional(), status: z.enum(['normal', 'disrupted', 'unknown']).optional() }),
+  z.object({ type: z.literal('feed'), kind: text, text, source: z.url().optional(), mode: z.enum(['demo', 'live']).optional(), status: z.enum(['normal', 'disrupted', 'unknown']).optional() }),
   z.object({ type: z.literal('clarify'), question: text }),
   z.object({ type: z.literal('options'), items: z.array(OptionSchema) }),
   z.object({ type: z.literal('confirm'), summary: text }),

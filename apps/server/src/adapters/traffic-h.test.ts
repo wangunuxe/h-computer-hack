@@ -10,7 +10,7 @@ function setup() {
 describe('H text traffic reader', () => {
   it.each(['normal', 'disrupted'])('uses read-only text mode and validates a structured %s answer, then cancels', async (status) => {
     const s = setup(); s.session.waitForCompletion.mockResolvedValue({ status: 'completed', answer: { ...answer, status } });
-    expect(await readRerBTraffic({}, s.client)).toMatchObject({ ...answer, status, mode: 'live-h', recorded: false });
+    expect(await readRerBTraffic({}, s.client)).toMatchObject({ ...answer, status, mode: 'live', recorded: false });
     expect(s.startSession).toHaveBeenCalledWith(expect.objectContaining({ answerSchema: TrafficAnswerSchema, maxTimeS: 45, queue: false, agent: expect.objectContaining({ environments: [expect.objectContaining({ kind: 'web', startUrl: rerBTrafficPage, mode: { type: 'text' } })] }) }));
     expect(s.session.cancel).toHaveBeenCalledOnce();
   });

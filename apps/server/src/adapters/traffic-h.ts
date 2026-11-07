@@ -1,8 +1,8 @@
 import { HaiAgentsClient, type SessionHandle } from 'hai-agents';
 import { z } from 'zod';
-import type { Disruption } from './prim.js';
+import { rerBTrafficPage, type Disruption } from './disruption.js';
 
-export const rerBTrafficPage = 'https://www.ratp.fr/infos-trafic/rer/b';
+export { rerBTrafficPage } from './disruption.js';
 export const TrafficAnswerSchema = z.object({
   status: z.enum(['normal', 'disrupted']), summary: z.string().min(1), cause: z.string(),
   source: z.url().refine((value) => {
@@ -47,7 +47,7 @@ export async function readRerBTraffic({ signal, timeoutMs = 45_000, now = new Da
       if (!['completed', 'idle'].includes(result.status)) throw new Error('Traffic session did not complete');
       const raw = result.answer ?? result.finalChanges?.answer ?? (await session.get()).latestAnswer;
       const answer = TrafficAnswerSchema.parse(typeof raw === 'string' ? JSON.parse(raw) : raw);
-      return { ...answer, mode: 'live-h' as const, recorded: false };
+      return { ...answer, mode: 'live' as const, recorded: false };
     } finally { await cancel(); }
   };
   try { return await Promise.race([work(), interrupted]); }

@@ -6,9 +6,9 @@ const confirmation = { trip: { origin: 'Gare du Nord', destination: 'CDG', deadl
 
 describe('say', () => {
   it.each(['fr', 'en'])('clearly announces normal and unknown live status in %s', (language) => {
-    const normal = say('disruption', { mode: 'live-prim', status: 'normal', cause: '', recorded: false }, language);
-    expect(normal).toContain('PRIM'); expect(normal).toContain(language === 'fr' ? 'circule normalement' : 'running normally');
-    const unknown = say('disruption', { mode: 'live-h', status: 'unknown', cause: '', recorded: false }, language);
+    const normal = say('disruption', { mode: 'live', status: 'normal', cause: '', recorded: false }, language);
+    expect(normal).toContain('H'); expect(normal).toContain(language === 'fr' ? 'circule normalement' : 'running normally');
+    const unknown = say('disruption', { mode: 'live', status: 'unknown', cause: '', recorded: false }, language);
     expect(unknown).toContain(language === 'fr' ? 'Statut inconnu' : 'status is unknown');
     expect(unknown).not.toContain('Recorded');
   });

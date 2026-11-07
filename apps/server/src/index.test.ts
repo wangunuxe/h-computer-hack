@@ -10,7 +10,7 @@ const booking = { ref: 'PAS-123', pickup_time: '2027-01-15T11:00:00+01:00', pick
 const ports: Partial<SessionPorts> = {
   clock: () => new Date('2027-01-15T10:00:00+01:00'),
   understand: async () => ({ trip: { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T16:00:00+01:00', passengers: 1, luggage: 0, guide_dog: true }, missing: [] }),
-  prim: async () => ({ status: 'disrupted', mode: 'live-prim', summary: 'Signal failure', cause: 'Incident.', source: 'https://example.com/traffic', recorded: false }),
+  trafficH: async () => ({ status: 'disrupted', mode: 'live', summary: 'Signal failure', cause: 'Incident.', source: 'https://example.com/traffic', recorded: false }),
   linkup: async () => ({ corroboration: [], extraOptions: [] }),
   runBooking: async (input) => {
     await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: 'Shuttle' });

@@ -44,6 +44,16 @@ beforeEach(() => { vi.useFakeTimers(); Socket.instances = []; Worklet.instances 
 afterEach(() => { for (const recorder of active.splice(0)) recorder.cancel(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('recorder audio startup and finalization', () => {
+  it('finishes normally at 180 seconds and delivers all final utterances', async () => {
+    const s = setup(); const limit = vi.fn(), elapsed = vi.fn();
+    const recorder = new Recorder(s.transcript, s.error, s.done, limit, elapsed); active.push(recorder);
+    await recorder.start(credentials); const socket = Socket.instances[0]!; socket.open();
+    vi.advanceTimersByTime(179_000); expect(socket.send).not.toHaveBeenCalled(); expect(elapsed).toHaveBeenLastCalledWith(179);
+    vi.advanceTimersByTime(1000); expect(socket.send).toHaveBeenCalledExactlyOnceWith(stopRecording);
+    expect(limit).toHaveBeenCalledOnce(); expect(s.done).not.toHaveBeenCalled(); expect(s.error).not.toHaveBeenCalled();
+    socket.finish('Bonjour '.repeat(430).trim());
+    expect(s.transcript).toHaveBeenCalledExactlyOnceWith('Bonjour '.repeat(430).trim()); expect(s.error).not.toHaveBeenCalled();
+  });
   it('captures while fetching the URL and flushes ordered PCM followed by stop after an early release', async () => {
     const s = setup(); const request = deferred<Response>(); s.fetcher.mockReturnValue(request.promise);
     const starting = s.recorder.start(credentials); await flush();

@@ -17,7 +17,7 @@ const extractionSchema = z.object({
   departure: z.iso.datetime({ offset: true }).optional(),
 });
 
-function parisIso(date: Date): string {
+export function parisIso(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'longOffset',
@@ -48,9 +48,9 @@ export async function understand({ transcript, profile, now, previous = {}, sign
     });
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        reject(new UnderstandError('timeout', 'Gemini trip understanding timed out after 8000 ms.'));
+        reject(new UnderstandError('timeout', 'Gemini trip understanding timed out after 20000 ms.'));
         controller.abort();
-      }, 8000);
+      }, 20_000);
     });
     const response = await Promise.race([sdk.models.generateContent({
       model,

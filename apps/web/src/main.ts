@@ -117,7 +117,11 @@ function recordingLabel() {
 function start() {
   if (recorder || !credentials || socket?.readyState !== WebSocket.OPEN) return;
   unlock(); cue(); releasing = false;
-  const current = new Recorder(sendTranscript, () => announce(t().microphone, true), () => { if (recorder === current) { recorder = undefined; releasing = false; recordingLabel(); } });
+  const current = new Recorder(sendTranscript, () => announce(t().microphone, true), () => { if (recorder === current) { recorder = undefined; releasing = false; $('elapsed').hidden = true; recordingLabel(); } }, () => {
+    releasing = true; cue(true); recordingLabel();
+    const text = language === 'fr' ? 'Trois minutes atteintes. Je termine la transcription.' : 'Three-minute limit reached. Finishing the transcript.';
+    announce(text); if (profile?.tts_enabled) voice.enqueue(text);
+  }, (seconds) => { $('elapsed').hidden = false; $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; });
   recorder = current; recordingLabel(); void current.start(credentials);
 }
 function release() { if (!recorder || releasing) return; releasing = true; cue(true); recordingLabel(); recorder.stop(); }

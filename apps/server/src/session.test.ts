@@ -17,6 +17,7 @@ function setup(overrides: Partial<SessionPorts> = {}) {
   const events: ServerEvent[] = [];
   const ports = {
     understand: vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip, missing: [] }),
+    converse: vi.fn<SessionPorts['converse']>().mockRejectedValue(new Error('offline')),
     trafficH: vi.fn<SessionPorts['trafficH']>().mockResolvedValue(disruption),
     linkup: vi.fn<SessionPorts['linkup']>().mockResolvedValue({ corroboration: [], extraOptions: [] }),
     runBooking: vi.fn<SessionPorts['runBooking']>().mockResolvedValue(completed),
@@ -243,8 +244,9 @@ describe('VoilaSession', () => {
   });
   it('runs research while clarifying and merges the reply without restarting research', async () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['trafficH']>>>();
-    const understanding = vi.fn<SessionPorts['understand']>().mockResolvedValueOnce({ trip: { origin: trip.origin, destination: trip.destination }, missing: ['deadline'] }).mockResolvedValueOnce({ trip, missing: [] });
-    const s = setup({ understand: understanding, trafficH: vi.fn(() => pending.promise) });
+    const understanding = vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip: { origin: trip.origin, destination: trip.destination }, missing: ['deadline'] });
+    const converse = vi.fn<SessionPorts['converse']>().mockResolvedValueOnce({ intent: 'unclear', confidence: .1, reply: 'What time is your flight?' }).mockResolvedValueOnce({ intent: 'provide_info', confidence: .95, trip_patch: { deadline: trip.deadline }, reply: 'Thank you.' });
+    const s = setup({ understand: understanding, converse, trafficH: vi.fn(() => pending.promise) });
     await s.start();
     expect(s.session.stage).toBe('CLARIFY');
     expect(s.ports.trafficH).toHaveBeenCalled(); expect(s.ports.linkup).toHaveBeenCalled();
@@ -252,7 +254,7 @@ describe('VoilaSession', () => {
     expect(s.session.stage).toBe('CLARIFY');
     expect(s.events.some((e) => e.type === 'options')).toBe(false);
     await s.choose('My flight is at 21h');
-    expect(understanding.mock.calls[1]![0].previous).toMatchObject({ origin: trip.origin, destination: trip.destination, luggage: 0 });
+    expect(converse.mock.calls[1]![0].trip).toMatchObject({ origin: trip.origin, destination: trip.destination, luggage: 0 });
     expect(s.session.stage).toBe('CHOOSE');
     expect(s.ports.trafficH).toHaveBeenCalledTimes(1);
   });
@@ -403,12 +405,14 @@ describe('VoilaSession', () => {
   it('backs off EXECUTE heartbeats to fifteen seconds after the first at four seconds', async () => {
     const s = setup({ runBooking: () => new Promise(() => {}) });
     await s.start(); await s.choose();
-    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text === 'Still working. One moment.');
+    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text.includes('Still working. One moment.'));
     await vi.advanceTimersByTimeAsync(3999); expect(heartbeats()).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1); expect(heartbeats()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(14_999); expect(heartbeats()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1); expect(heartbeats()).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(15_000); expect(heartbeats()).toHaveLength(3);
+    const spoken = heartbeats().map((event) => event.type === 'say' ? event.text : '');
+    expect(spoken[0]).not.toBe(spoken[1]); expect(spoken[1]).not.toBe(spoken[2]);
     s.session.handle({ type: 'stop' });
     s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
     await vi.advanceTimersByTimeAsync(4000); expect(heartbeats()).toHaveLength(4);
@@ -417,7 +421,7 @@ describe('VoilaSession', () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['linkup']>>>();
     const s = setup({ linkup: () => pending.promise, runBooking: () => new Promise(() => {}) });
     await s.start(); expect(s.session.stage).toBe('RESEARCH');
-    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text === 'Still working. One moment.');
+    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text.includes('Still working. One moment.'));
     await vi.advanceTimersByTimeAsync(4000); expect(heartbeats()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1000);
     pending.resolve({ corroboration: [], extraOptions: [] }); await flush(); await s.choose();

@@ -12,6 +12,14 @@ reuse the token and do not resend `hello`; the server replays stage-specific UI.
 Editing a profile stops the previous trip before opening a new session.
 
 Voice is the only request input; there is no text field or text-input toggle.
+Recordings finish normally after 180 seconds, retaining final utterances and
+announcing the limit. The elapsed counter is visual only (`aria-hidden`).
+Gladia permits live sessions up to three hours; its 5–60 second maximum utterance
+duration is segmentation, not a session cap. We retain 30-second segmentation
+and assemble all final utterances. See the official [limits](https://docs.gladia.io/chapters/limits-and-specifications/concurrency)
+and [endpointing](https://docs.gladia.io/chapters/live-stt/features/endpointing) docs.
+Three-minute transcripts fit the existing shared text schema and 64 KiB WebSocket
+limit; trip extraction allows 20 seconds for Gemini.
 The circular microphone defaults to tap-to-toggle: activate once to start and
 again to finish, including with VoiceOver/TalkBack or keyboard activation.
 The profile also offers hold-to-talk (hold Space/Enter or press and hold).

@@ -25,8 +25,10 @@ needed for the local stub path. No H key is needed for the mocked unit tests.
 Import `runBooking` from `src/booking.ts` for orchestration; pass shared Trip/Profile,
 a direct draft route URL, progress/confirmation/payment callbacks, and optionally an
 AbortSignal. The result contains a shared Booking, metrics, and optional Agent View
-URL. Rejection/no handoff/failed completion throws; sessions are cancelled on errors
-or abort. Confirmation rules are agent instructions, not a server-side transaction
+URL. Completed or idle sessions with an answer are accepted; answers fall back from
+the completion result to final changes to a fresh session envelope's latest answer.
+Rejection/no handoff/failed completion throws; sessions are cancelled on success,
+errors or abort. Confirmation rules are agent instructions, not a server-side transaction
 gate: a live H run is still required to verify real browser compliance.
 
 SDK checked: `hai-agents` 1.3.2. Public properties use camelCase, including

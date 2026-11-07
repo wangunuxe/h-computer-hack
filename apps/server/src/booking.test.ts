@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import type { Tool, HaiAgents } from 'hai-agents';
-import { runBooking, type BookingClient, type BookingInput } from './booking.js';
+import { bookingErrorMessage, runBooking, type BookingClient, type BookingInput } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
 
 const answer = { ref: 'PAS-123', pickup_time: '2027-01-15T12:15:00+01:00', pickup_point: 'Gare du Nord', price: 65, operator_phone: '+33184800000', guide_dog_status: 'unknown' };
@@ -19,9 +19,9 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }) {
   const cancel = vi.fn(async () => {});
   const handle = {
-    get: vi.fn(async () => ({ agentViewUrl: 'https://h.example/view/123' })),
+    get: vi.fn(async (): Promise<{ agentViewUrl: string; latestAnswer?: unknown }> => ({ agentViewUrl: 'https://h.example/view/123' })),
     stream: vi.fn(({ tools }: { tools: readonly Tool[] }) => scenario(tools)),
-    waitForCompletion: vi.fn(async () => ({ status: 'completed', answer, finalChanges: { metrics: { steps: 12, totalCost: 0.03 } } })),
+    waitForCompletion: vi.fn(async (): Promise<{ status: string; answer?: unknown; finalChanges?: { answer?: unknown; metrics?: { steps: number; totalCost: number } } }> => ({ status: 'completed', answer, finalChanges: { metrics: { steps: 12, totalCost: 0.03 } } })),
     cancel,
   };
   const startSession = vi.fn(async () => handle);
@@ -50,7 +50,47 @@ describe('H booking runner', () => {
     expect(result.booking).toEqual({ ...answer, payment_url: stub });
     expect(result.metrics).toEqual({ steps: 12, costUsd: 0.03, durationMs: expect.any(Number) });
     expect(result.agentViewUrl).toBe('https://h.example/view/123');
-    expect(mock.cancel).not.toHaveBeenCalled();
+    expect(mock.cancel).toHaveBeenCalledOnce();
+  });
+
+  it.each(['result', 'changes', 'envelope'])('accepts an idle answer from %s and releases the session', async (source) => {
+    const mock = setup();
+    mock.handle.waitForCompletion.mockResolvedValue({ status: 'idle', ...(source === 'result' ? { answer } : source === 'changes' ? { finalChanges: { answer: JSON.stringify(answer) } } : {}) });
+    if (source === 'envelope') mock.handle.get.mockResolvedValue({ agentViewUrl: 'https://h.example/view/123', latestAnswer: answer });
+    expect((await runBooking(mock.input, mock.client)).booking.ref).toBe(answer.ref);
+    expect(mock.cancel).toHaveBeenCalledOnce();
+  });
+
+  it.each(['completed', 'idle'])('rejects %s without an answer and releases its slot', async (status) => {
+    const mock = setup();
+    mock.handle.waitForCompletion.mockResolvedValue({ status });
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow('no booking answer returned');
+    expect(mock.cancel).toHaveBeenCalledOnce();
+  });
+
+  it('does not accept an answer on a failed session', async () => {
+    const mock = setup();
+    mock.handle.waitForCompletion.mockResolvedValue({ status: 'failed', answer });
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow('H booking failed');
+    expect(mock.cancel).toHaveBeenCalledOnce();
+  });
+
+  it('releases the session on an invalid answer', async () => {
+    const mock = setup();
+    mock.handle.waitForCompletion.mockResolvedValue({ status: 'idle', answer: {} });
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow();
+    expect(mock.cancel).toHaveBeenCalledOnce();
+  });
+
+  it('reports cancellation failure without cancelling twice', async () => {
+    const mock = setup();
+    mock.cancel.mockRejectedValue(new Error('cancel failed'));
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow('cancel failed');
+    expect(mock.cancel).toHaveBeenCalledOnce();
+  });
+
+  it.each([undefined, null, '', 'undefined', new Error('')])('has a useful CLI error for %s', (error) => {
+    expect(bookingErrorMessage(error)).toBe('Booking failed: unknown error.');
   });
 
   it.each([stub, stripe])('uses only the observed payment URL: %s', async (url) => {

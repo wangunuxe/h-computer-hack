@@ -5,6 +5,10 @@ import { z } from 'zod';
 
 export const BookingAnswerSchema = BookingSchema.omit({ payment_url: true });
 type Answer = z.infer<typeof BookingAnswerSchema>;
+export function bookingErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return message.trim() && message !== 'undefined' ? message : 'Booking failed: unknown error.';
+}
 export type BookingClient = Pick<HaiAgentsClient, 'startSession' | 'sessions'>;
 export interface BookingInput {
   trip: Trip;
@@ -25,6 +29,12 @@ export async function runBooking(input: BookingInput, client: BookingClient = ne
   if (quota.available <= 0) throw new Error('No H session quota available. Cancel unused sessions and retry.');
   input.signal?.throwIfAborted();
   let session: SessionHandle<Answer> | undefined;
+  let closing = false;
+  const close = async () => {
+    if (!session || closing) return;
+    closing = true;
+    await session.cancel();
+  };
   let observedUrl: string | undefined;
   let paymentUrl: string | undefined;
   let approved = false;
@@ -118,19 +128,24 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
         }
       }
       const result = await handle.waitForCompletion({ timeoutMs: 30_000 });
-      if (result.status !== 'completed') throw new Error(`H booking ${result.status}: ${result.error ?? 'not completed'}`);
+      if (result.status !== 'completed' && result.status !== 'idle') throw new Error(`H booking ${result.status}: ${result.error || 'session did not finish successfully'}`);
       if (!paymentUrl) throw new Error('Booking failed: agent finished without payment handoff.');
-      const booking: Booking = BookingSchema.parse({ ...BookingAnswerSchema.parse(result.answer), payment_url: paymentUrl });
+      const rawAnswer = result.answer ?? result.finalChanges?.answer ?? (await handle.get()).latestAnswer;
+      if (rawAnswer == null) throw new Error(`H booking ${result.status}: no booking answer returned.`);
+      const parsedAnswer = typeof rawAnswer === 'string' ? JSON.parse(rawAnswer) as unknown : rawAnswer;
+      const booking: Booking = BookingSchema.parse({ ...BookingAnswerSchema.parse(parsedAnswer), payment_url: paymentUrl });
       return {
         booking,
         metrics: { steps: result.finalChanges?.metrics?.steps ?? steps, durationMs: Date.now() - started, costUsd: result.finalChanges?.metrics?.totalCost ?? costUsd },
         agentViewUrl: envelope.agentViewUrl ?? undefined,
       };
     };
-    return await Promise.race([work(), failure]);
+    const result = await Promise.race([work(), failure]);
+    await close();
+    return result;
   } catch (error) {
     if (session) {
-      try { await session.cancel(); } catch (cancelError) { throw new AggregateError([error, cancelError], 'Booking failed and H session cancellation failed'); }
+      try { await close(); } catch (cancelError) { throw new AggregateError([error, cancelError], 'Booking failed and H session cancellation failed'); }
     }
     throw error;
   } finally {

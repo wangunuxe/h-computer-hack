@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline/promises';
 import { pathToFileURL } from 'node:url';
-import { runBooking } from './booking.js';
+import { bookingErrorMessage, runBooking } from './booking.js';
 
 export function publicShuttleUrl(value: string | undefined): URL {
   if (!value) throw new Error('Set SHUTTLE_PUBLIC_URL to the public shuttle-clone URL; the H cloud browser cannot reach localhost.');
@@ -54,5 +54,5 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error: unknown) => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; });
+  main().catch((error: unknown) => { console.error(bookingErrorMessage(error)); process.exitCode = 1; });
 }

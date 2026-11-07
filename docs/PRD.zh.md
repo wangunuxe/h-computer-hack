@@ -283,7 +283,7 @@ v0.1 在 12 步仿真药房下单上的实测（2026-11-07）：
 2. 托管 Checkout 无需注册域名或 Apple 开发者账号，Stripe 处理商户验证；Safari + Dashboard 启用 Apple Pay + 测试密钥 + iPhone Wallet 真实卡可测试且不扣款，测试卡不能加入 Wallet（[Stripe](https://docs.stripe.com/apple-pay)）。
 3. PRIM 账号 →「Mes jetons d'authentification」→ `apikey` 请求头，默认 5 次/s、1000 次/日；RER B 为 C01743，优先 Messages Info Trafic v2 / Navitia `line_reports`（`line:IDFM:C01743`），备用 `GET /general-message?LineRef=STIF:Line::C01743:`；北站–CDG 由 SNCF 运营，其实时 API 不含 SNCF 媒体发布的信息，必须用 Linkup 交叉核实（[PRIM](https://prim.iledefrance-mobilites.fr/)）。
 4. 无公开车站噪音基准，须录音实测；Gladia live v2 用 `pre_processing.audio_enhancer: true`、`speech_threshold: 0.7`（默认 0.6，测试 0.5–0.8）、`custom_vocabulary`（CDG、2E、Gare du Nord、RER B、G7）、法语；客户端先只开浏览器 `noiseSuppression`（[Gladia](https://docs.gladia.io/api-reference/v2/live/init)）。
-5. agent 可看地址栏，但 API 文档无后端可读的当前 URL 字段，Stripe 长 `#…` 易抄错；demo 由 `handoff_payment` 传预订号、后端查 Checkout URL，真实站传 `payment_url` 并校验域名（[H Agents API](https://docs.hcompany.ai/)）。
+5. agent 可看地址栏，但 API 文档无后端可读的当前 URL 字段，Stripe 长 `#…` 易抄错；demo 由 `handoff_payment` 传预订号、后端查 Checkout URL，真实站传 `payment_url` 并校验域名（[H Agents API](https://hub.hcompany.ai/agents-api/browser/configuration.md)）。
 6. Loi n°87-588 art. 88 保障 CMI 持有者携导盲犬进入交通工具及公共场所且不加价；拒绝按 CASF R241-23 属三级违警，个人最高 €450、法人 €2,250（[Service Public](https://www.service-public.gouv.fr/particuliers/vosdroits/F35787)）；MLD-2013-88 记录巴黎出租车 13/30 拒载；Légifrance 原文抓取受阻，不作逐字引用。
 7. **已定：用户付费（B2C）**（[商业模式](#14-商业模式)）。
 

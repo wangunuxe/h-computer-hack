@@ -92,6 +92,9 @@ export function createApp({
     if (Number(parsed.data.passengers) > draft.vehicle.capacity) {
       return c.html(infoPage(draft, `Selected vehicle allows at most ${draft.vehicle.capacity} passengers. Choose a larger vehicle or reduce the passenger count.`, values), 400);
     }
+    if (Number(parsed.data.luggage) > draft.vehicle.luggageCapacity) {
+      return c.html(infoPage(draft, `Selected vehicle allows at most ${draft.vehicle.luggageCapacity} suitcases. Choose a larger vehicle or reduce the luggage count.`, values), 400);
+    }
     draft.info = parsed.data;
     const id = randomUUID();
     const order: Order = {

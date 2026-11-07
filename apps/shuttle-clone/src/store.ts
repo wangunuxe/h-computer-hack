@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
 export const vehicles = [
-  { id: 'sedan', text: 'Private Sedan — up to 3 passengers, 2 suitcases — 65 EUR', price: 65, capacity: 3 },
-  { id: 'estate', text: 'Comfort Estate — up to 4 passengers, 4 suitcases — 85 EUR', price: 85, capacity: 4 },
-  { id: 'van', text: 'Private Minivan — up to 8 passengers, 8 suitcases — 110 EUR', price: 110, capacity: 8 },
+  { id: 'sedan', text: 'Private Sedan — up to 3 passengers, 2 suitcases — 65 EUR', price: 65, capacity: 3, luggageCapacity: 2 },
+  { id: 'estate', text: 'Comfort Estate — up to 4 passengers, 4 suitcases — 85 EUR', price: 85, capacity: 4, luggageCapacity: 4 },
+  { id: 'van', text: 'Private Minivan — up to 8 passengers, 8 suitcases — 110 EUR', price: 110, capacity: 8, luggageCapacity: 8 },
 ] as const;
 export const passengerOptions = Array.from({ length: 8 }, (_, i) => ({
   value: String(i + 1), text: `${i + 1} passenger${i === 0 ? '' : 's'} — including children and infants`,

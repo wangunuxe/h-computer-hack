@@ -41,6 +41,32 @@ async function complete(app: App, easy = false) {
 }
 
 describe('four-step booking', () => {
+  it.each(vehicles)('enforces advertised luggage capacity for $id', async (vehicle) => {
+    const { app, store } = setup();
+    const base = await start(app);
+    await post(app, base + '/route', route);
+    await post(app, base + '/vehicle', { vehicle: vehicle.id });
+    if (vehicle.luggageCapacity < 8) {
+      const response = await post(app, base + '/info', { ...info, luggage: '8' });
+      expect(response.status).toBe(400);
+      const body = await response.text();
+      expect(body).toContain(`Selected vehicle allows at most ${vehicle.luggageCapacity} suitcases.`);
+      expect(body).toContain('Step 3 — Passenger information');
+      expect(body).toContain('<option value="8" selected>');
+      expect(store.orders.size).toBe(0);
+    }
+    expect((await post(app, base + '/info', { ...info, luggage: String(vehicle.luggageCapacity) })).status).toBe(303);
+    expect([...store.orders.values()][0]!.info.luggage).toBe(String(vehicle.luggageCapacity));
+  });
+  it('accepts no luggage and rejects a missing luggage selection', async () => {
+    const { app, store } = setup();
+    const base = await start(app);
+    await post(app, base + '/route', route);
+    await post(app, base + '/vehicle', { vehicle: 'sedan' });
+    expect((await post(app, base + '/info', { ...info, luggage: '' })).status).toBe(400);
+    expect(store.orders.size).toBe(0);
+    expect((await post(app, base + '/info', { ...info, luggage: '0' })).status).toBe(303);
+  });
   it('renders the same Paris date minimum for both date controls across a timezone boundary', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-07T23:30:00Z'));

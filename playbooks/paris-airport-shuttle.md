@@ -55,6 +55,9 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
 - Passenger count must fit the selected vehicle: Sedan 3, Estate 4, Minivan 8.
   Otherwise step 3 stays open with “Selected vehicle allows at most N passengers.”
   Reduce the count or return to the vehicle step and choose a larger vehicle.
+- Luggage must also fit: Sedan 2 suitcases, Estate 4, Minivan 8. An excess
+  re-renders step 3 with “Selected vehicle allows at most N suitcases.” Reduce
+  luggage or return to the vehicle step to choose a larger vehicle.
 - Notes are collapsed on page load; click the summary to reveal the textarea.
 - Refreshing step 4 or resubmitting info returns the existing order, not a new one.
 

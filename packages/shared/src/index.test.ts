@@ -6,6 +6,11 @@ const option = { id: 'shuttle', name: 'Airport shuttle', pickup_wait_minutes: 5,
 const booking = { ref: 'DEMO-1', pickup_time: '2026-11-07T12:00:00+01:00', pickup_point: 'Gare du Nord', price: 65, operator_phone: '+33123456789', payment_url: 'https://checkout.stripe.com/example', guide_dog_status: 'unknown' };
 
 describe('server events', () => {
+  it('accepts a three-minute transcript within the server WebSocket size limit', () => {
+    const event = { type: 'final_transcript', text: 'é'.repeat(3000) };
+    expect(WebEventSchema.parse(event)).toEqual(event);
+    expect(new TextEncoder().encode(JSON.stringify(event)).byteLength).toBeLessThan(64 * 1024);
+  });
   const events = [
     { type: 'stage', stage: 'LISTEN' },
     { type: 'say', text: 'Bonjour' },

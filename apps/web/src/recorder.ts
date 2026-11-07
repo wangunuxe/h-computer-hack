@@ -6,10 +6,13 @@ export class Recorder {
   private context?: AudioContext; private stream?: MediaStream; private socket?: WebSocket; private node?: AudioWorkletNode;
   private controller = new AbortController(); private timer?: ReturnType<typeof setTimeout>; private final = new Map<string, string>(); private stopping = false;
   private buffered: ArrayBuffer[] = []; private bufferedBytes = 0;
-  constructor(private transcript: (text: string) => void, private error: () => void, private done: () => void) {}
+  private ticker?: ReturnType<typeof setInterval>;
+  constructor(private transcript: (text: string) => void, private error: () => void, private done: () => void, private limit: () => void = () => {}, private elapsed: (seconds: number) => void = () => {}) {}
   async start(credentials: Credentials) {
     try {
-      this.timer = setTimeout(() => { this.error(); this.cancel(); }, 60_000);
+      const started = Date.now(); this.elapsed(0);
+      this.ticker = setInterval(() => this.elapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+      this.timer = setTimeout(() => { if (!this.stopping) { this.stop(); this.limit(); } }, 180_000);
       this.context = new AudioContext();
       const resumed = this.context.resume();
       await Promise.all([resumed, this.capture(resumed), this.connect(credentials)]);
@@ -54,6 +57,8 @@ export class Recorder {
   }
   stop() {
     if (this.stopping) return;
+    clearTimeout(this.timer); clearInterval(this.ticker);
+    this.timer = setTimeout(() => { this.error(); this.cancel(); }, 10_000);
     this.stopping = true; this.node?.disconnect(); this.stream?.getTracks().forEach((track) => track.stop());
     if (this.socket?.readyState === WebSocket.OPEN) this.sendStop();
   }
@@ -63,7 +68,7 @@ export class Recorder {
   }
   cancel() {
     if (this.controller.signal.aborted) return;
-    this.controller.abort(); clearTimeout(this.timer); this.stream?.getTracks().forEach((track) => track.stop()); this.node?.disconnect();
+    this.controller.abort(); clearTimeout(this.timer); clearInterval(this.ticker); this.stream?.getTracks().forEach((track) => track.stop()); this.node?.disconnect();
     this.buffered = []; this.bufferedBytes = 0;
     this.socket?.close(); void this.context?.close(); this.done();
   }

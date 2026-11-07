@@ -73,13 +73,13 @@ describe('understand', () => {
       await expect(understand({ transcript: 'travel', profile, now }, client)).rejects.toMatchObject({ code: 'invalid_output' });
     }
   });
-  it('throws typed timeout after eight seconds and aborts the SDK request', async () => {
+  it('throws typed timeout after twenty seconds and aborts the SDK request', async () => {
     vi.useFakeTimers();
     const client = clientWith({});
     client.models.generateContent.mockImplementation(() => new Promise(() => {}));
     const pending = understand({ transcript: 'travel', profile, now }, client);
     const assertion = expect(pending).rejects.toMatchObject({ name: 'UnderstandError', code: 'timeout' });
-    await vi.advanceTimersByTimeAsync(8000);
+    await vi.advanceTimersByTimeAsync(20_000);
     await assertion;
     expect(client.models.generateContent.mock.calls[0]![0].config?.abortSignal?.aborted).toBe(true);
   });

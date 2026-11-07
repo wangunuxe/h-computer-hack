@@ -48,9 +48,9 @@ export async function understand({ transcript, profile, now, previous = {}, sign
     });
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        reject(new UnderstandError('timeout', 'Gemini trip understanding timed out after 8000 ms.'));
+        reject(new UnderstandError('timeout', 'Gemini trip understanding timed out after 20000 ms.'));
         controller.abort();
-      }, 8000);
+      }, 20_000);
     });
     const response = await Promise.race([sdk.models.generateContent({
       model,

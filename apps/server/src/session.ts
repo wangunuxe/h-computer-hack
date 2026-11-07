@@ -211,7 +211,7 @@ export class VoilaSession {
   }
   private async interpret(transcript: string, generation: number) {
     try {
-      const result = await this.limited((signal) => this.ports.understand({ transcript, profile: this.profile!, now: this.ports.clock(), previous: this.trip, signal }), 8500, this.flow.signal);
+      const result = await this.limited((signal) => this.ports.understand({ transcript, profile: this.profile!, now: this.ports.clock(), previous: this.trip, signal }), 20_500, this.flow.signal);
       if (!this.active(generation)) return;
       this.trip = { passengers: 1, luggage: 0, guide_dog: this.profile!.guide_dog, ...this.trip, ...result.trip };
       const missing = (['origin', 'destination', 'deadline'] as const).filter((key) => !this.trip[key]);

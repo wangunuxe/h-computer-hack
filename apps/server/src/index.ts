@@ -1,26 +1,24 @@
 import { serve } from '@hono/node-server';
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { Hono } from 'hono';
 import { WebSocket, WebSocketServer } from 'ws';
 import { WebEventSchema, type ServerEvent } from '@voila/shared';
 import { z } from 'zod';
 import { VoilaSession, type SessionPorts } from './session.js';
+import { SessionRegistry, secureEqual } from './session-registry.js';
 
 const paymentSchema = z.object({ order_id: z.string().min(1), ref: z.string().min(1), status: z.literal('paid') });
-const secureEqual = (a: string, b: string) => timingSafeEqual(createHash('sha256').update(a).digest(), createHash('sha256').update(b).digest());
 
-export function createApp({ sessions = new Map<string, VoilaSession>(), credentials = new Map<string, string>(), token = process.env.INTERNAL_CALLBACK_TOKEN }: {
-  sessions?: Map<string, VoilaSession>; credentials?: Map<string, string>; token?: string;
+export function createApp({ sessions = new Map<string, VoilaSession>(), registry = new SessionRegistry(sessions), token = process.env.INTERNAL_CALLBACK_TOKEN }: {
+  sessions?: Map<string, VoilaSession>; registry?: SessionRegistry; token?: string;
 } = {}) {
   const app = new Hono();
   app.get('/health', (c) => c.json({ status: 'ok' }));
   app.post('/session', (c) => {
-    const id = randomBytes(24).toString('base64url');
-    const resume_token = randomBytes(32).toString('base64url');
-    credentials.set(id, resume_token);
     c.header('Cache-Control', 'no-store');
-    return c.json({ id, resume_token }, 201);
+    const issued = registry.issue();
+    if (!issued) return c.json({ error: 'Session capacity reached' }, 503);
+    return c.json(issued, 201);
   });
   app.get('/ws/session/:id', (c) => c.text('WebSocket upgrade required', 426));
   app.post('/internal/payment-completed', async (c) => {
@@ -45,8 +43,8 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
 } = {}) {
   const sessions = new Map<string, VoilaSession>();
   const clients = new Map<string, WebSocket>();
-  const resumeTokens = new Map<string, string>();
-  const app = createApp({ sessions, credentials: resumeTokens, token });
+  const registry = new SessionRegistry(sessions, ports?.timers);
+  const app = createApp({ sessions, registry, token });
   const server = serve({ fetch: app.fetch, port, hostname });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   server.on('upgrade', (request, socket, head) => {
@@ -58,8 +56,7 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
     sockets.handleUpgrade(request, socket, head, (ws) => {
       ws.on('error', () => (ports?.logger ?? console).error('Session WebSocket error.'));
       const existing = sessions.get(id);
-      const resumeToken = resumeTokens.get(id);
-      if (!resumeToken || !secureEqual(url.searchParams.get('token') ?? '', resumeToken)) {
+      if (!registry.connect(id, url.searchParams.get('token') ?? '')) {
         ws.close(4401, 'Invalid resume token');
         return;
       }
@@ -71,7 +68,10 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
       const session = existing ?? new VoilaSession(emit, ports);
       sessions.set(id, session);
       const detach = session.attach(emit);
-      ws.on('close', () => { detach(); if (clients.get(id) === ws) clients.delete(id); });
+      ws.on('close', () => {
+        detach();
+        if (clients.get(id) === ws) { clients.delete(id); registry.disconnect(id); }
+      });
       ws.on('message', (data, binary) => {
         if (clients.get(id) !== ws) return;
         let value: unknown;
@@ -82,7 +82,7 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
     });
   });
   const close = async () => {
-    for (const session of sessions.values()) session.dispose();
+    registry.dispose();
     for (const client of sockets.clients) client.terminate();
     await new Promise<void>((resolve) => sockets.close(() => resolve()));
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

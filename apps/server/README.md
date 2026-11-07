@@ -171,7 +171,11 @@ without replacing the existing socket. Authorized reconnects replay the current
 stage plus pending confirmation, payment handoff, choices or completed booking
 card, without restarting work or repeating speech. Send `hello` once
 with the shared profile/GPS shape; subsequent messages use `WebEventSchema`.
-Sessions are retained until process shutdown, with no persistence or expiry yet.
+Unclaimed session credentials expire after two minutes. Disconnected sessions
+expire after thirty minutes idle and are disposed, cancelling pending H work.
+Reconnecting resets the idle deadline. At most 100 issued sessions (including
+unclaimed reservations) are held; `POST /session` returns 503 at capacity.
+Session timers are injectable for offline tests. There is no persistence.
 Payment callbacks arriving before the runner finishes are remembered; a matching
 booking reference completes directly in DONE, without waiting for another callback.
 Embedding code can use `createSessionServer({ port: 0, ports })` and `close()`.

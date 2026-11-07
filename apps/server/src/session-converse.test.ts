@@ -26,6 +26,15 @@ function setup(overrides: Partial<SessionPorts> = {}) {
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00+01:00')); });
 afterEach(() => { sessions.splice(0).forEach((session) => session.dispose()); vi.useRealTimers(); });
 describe('contextual conversation routing', () => {
+  it('keeps the raw confirmation on screen but passes only structured fields to the interpreter', async () => {
+    const summary = `Private summary: ${profile.name}, ${profile.phone}, ${profile.email}`;
+    const s = setup({ runBooking: async (input) => { await input.confirm(summary, { pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR' }); return new Promise(() => {}); } });
+    await s.start(); await s.reply('shuttle'); await s.reply('quel est le prix ?');
+    expect(s.events).toContainEqual({ type: 'confirm', summary });
+    const context = s.ports.converse.mock.calls[0]![0];
+    expect(context.confirmation).toEqual({ pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR', option_name: 'Paris Airport Shuttle', guide_dog_status: 'unknown' });
+    for (const value of [profile.name, profile.phone, profile.email, summary]) expect(JSON.stringify(context)).not.toContain(value);
+  });
   it('keeps ordinal selection instant without calling Gemini', async () => {
     const s = setup(); await s.start(); await s.reply('2'); expect(s.session.stage).toBe('DONE'); expect(s.ports.converse).not.toHaveBeenCalled();
   });

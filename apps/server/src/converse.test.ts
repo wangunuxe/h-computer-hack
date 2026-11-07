@@ -6,6 +6,16 @@ const input: TurnInput = { transcript: 'le moins cher', stage: 'CHOOSE', languag
 const result = { intent: 'choose', option_id: 'gare-du-nord-taxi', reply: 'Le taxi de la gare est le moins cher parmi les taxis.', confidence: .95 };
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 describe('Gemini turn interpreter', () => {
+  it('whitelists Gemini context and excludes profile contacts and free-text booking summaries', async () => {
+    const profile = { name: 'Private Person', phone: '+33987654321', email: 'private@example.com' };
+    const summary = `Private booking summary: ${profile.name}, ${profile.phone}, ${profile.email}`;
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify(result) });
+    const context = { ...input, profile, summary, confirmation: { pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR' as const, option_name: 'Shuttle', guide_dog_status: 'accepted' as const, summary, profile } };
+    await converse(context, { models: { generateContent } });
+    const payload = JSON.stringify(generateContent.mock.calls[0]![0]);
+    for (const value of [profile.name, profile.phone, profile.email, summary]) expect(payload).not.toContain(value);
+    expect(JSON.parse(generateContent.mock.calls[0]![0].contents).confirmation).toEqual({ pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR', option_name: 'Shuttle', guide_dog_status: 'accepted' });
+  });
   it('uses minimal-thinking structured Gemini with Paris time and at most ten history turns', async () => {
     const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify(result) });
     expect(await converse({ ...input, transcript: 'é'.repeat(3000), history: Array.from({ length: 12 }, (_, i) => ({ role: 'user', text: String(i) })) }, { models: { generateContent } })).toEqual(result);

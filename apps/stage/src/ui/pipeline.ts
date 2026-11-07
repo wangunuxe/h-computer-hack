@@ -142,7 +142,7 @@ export function mountPipeline(root: HTMLElement, bus: Bus) {
   };
   const hide = () => {
     clearTimers();
-    scene.classList.remove("is-on");
+    scene.classList.remove("is-on", "is-front");
   };
   const renderStatic = () => {
     show(false);
@@ -205,5 +205,5 @@ export function mountPipeline(root: HTMLElement, bus: Bus) {
     if (a.kind === "done") clearInterval(tick);
   });
 
-  return { show, hide, renderStatic, toggle: () => (scene.classList.contains("is-on") ? hide() : show(false)) };
+  return { show, hide, renderStatic, toggle: () => (scene.classList.contains("is-on") ? hide() : (show(false), scene.classList.add("is-front"))) };
 }

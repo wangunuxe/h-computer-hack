@@ -93,3 +93,4 @@
 .is-static-pipeline .ov-pipe { z-index: 40; }
 .is-static-pipeline .hud { display: none; }
 .is-static-pipeline .pp-meter { visibility: hidden; }
+.ov-pipe.is-front { z-index: 35; }

@@ -209,6 +209,10 @@ Cancelling Stripe returns to the payment URL with `?cancelled=1`. It shows
 **Payment cancelled. Your order remains unpaid.** There is NO countdown or
 automatic redirect on this return; **Pay via Credit Card** remains a manual retry.
 
+An already-paid order shows **Payment already received. No further payment is
+required.** instead of the form/countdown. A completed Stripe session returns to
+confirmation, never a second payment. Only expired sessions can be replaced.
+
 Stop agent interaction at handoff; never enter card details or pay.
 Confirmation: `/fr/reservation/confirmation/<order-id>` shows reference, pickup,
 time, price, operator phone (+33 1 84 80 00 00), paid/unpaid status, notes.

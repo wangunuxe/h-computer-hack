@@ -178,6 +178,22 @@ describe('four-step booking', () => {
 });
 
 describe('payments', () => {
+  it('shows no payment form or countdown for a paid order and redirects checkout to confirmation', async () => {
+    const store = createStore();
+    const checkout = vi.fn();
+    const app = createApp({ store, env: {}, payments: { checkout, verify: vi.fn() } });
+    const { paymentPath } = await complete(app);
+    const order = [...store.orders.values()][0]!;
+    order.paid = true;
+    const body = await (await app.request(paymentPath)).text();
+    expect(body).toContain('Payment already received.');
+    expect(body).not.toContain('id="countdown"');
+    expect(body).not.toContain('id="checkout-form"');
+    const response = await app.request('/checkout/' + order.id, { method: 'POST' });
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe('/fr/reservation/confirmation/' + order.id);
+    expect(checkout).not.toHaveBeenCalled();
+  });
   it('ignores forged request origins and Host headers when building Stripe redirects', async () => {
     const stripe = new Stripe('sk_test_mock');
     const create = vi.spyOn(stripe.checkout.sessions, 'create').mockResolvedValue({

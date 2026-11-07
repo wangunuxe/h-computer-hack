@@ -28,9 +28,9 @@ describe('Stripe session lifecycle', () => {
     expect(retrieve).toHaveBeenCalledWith('cs_old');
     expect(create).not.toHaveBeenCalled();
   });
-  it.each(['expired', 'complete'])('replaces a %s session with a distinct idempotency key', async (status) => {
+  it('replaces an expired session with a distinct idempotency key', async () => {
     const { retrieve, create, order, payments } = fixture();
-    retrieve.mockResolvedValue({ id: 'cs_old', status, url: null } as Stripe.Response<Stripe.Checkout.Session>);
+    retrieve.mockResolvedValue({ id: 'cs_old', status: 'expired', url: null } as Stripe.Response<Stripe.Checkout.Session>);
     expect(await payments.checkout(order, 'https://shuttle.example')).toBe('https://checkout.stripe.com/new');
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ mode: 'payment' }), { idempotencyKey: 'checkout-order-1-cs_old' });
     expect(order.checkoutSessionId).toBe('cs_new');
@@ -43,6 +43,27 @@ describe('Stripe session lifecycle', () => {
     const { retrieve, create, order, payments } = fixture();
     retrieve.mockRejectedValue(new Error('Stripe offline'));
     await expect(payments.checkout(order, 'https://shuttle.example')).rejects.toThrow('Stripe offline');
+    expect(create).not.toHaveBeenCalled();
+  });
+  it('redirects completed sessions to confirmation without creating another session', async () => {
+    const { retrieve, create, order, payments } = fixture();
+    retrieve.mockResolvedValue({ id: 'cs_old', status: 'complete', url: null } as Stripe.Response<Stripe.Checkout.Session>);
+    expect(await payments.checkout(order, 'https://shuttle.example')).toBe('https://shuttle.example/fr/reservation/confirmation/order-1');
+    expect(create).not.toHaveBeenCalled();
+    expect(order.paid).toBe(false);
+  });
+  it('never creates or retrieves a session for a paid order', async () => {
+    const { retrieve, create, order, payments } = fixture();
+    order.paid = true;
+    expect(await payments.checkout(order, 'https://shuttle.example')).toBe('https://shuttle.example/fr/reservation/confirmation/order-1');
+    expect(create).not.toHaveBeenCalled();
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(await createPayments({}).checkout(order, 'http://localhost:3001')).toBe('http://localhost:3001/fr/reservation/confirmation/order-1');
+  });
+  it('does not replace an open session with a missing URL', async () => {
+    const { retrieve, create, order, payments } = fixture();
+    retrieve.mockResolvedValue({ id: 'cs_old', status: 'open', url: null } as Stripe.Response<Stripe.Checkout.Session>);
+    await expect(payments.checkout(order, 'https://shuttle.example')).rejects.toThrow('Open Stripe session has no Checkout URL');
     expect(create).not.toHaveBeenCalled();
   });
   it('does not retrieve Stripe sessions in no-key stub mode', async () => {

@@ -67,6 +67,11 @@ function summary(order: Order) {
     <dt>Notes</dt><dd>${order.info.notes || 'None'}</dd></dl>`;
 }
 export function paymentPage(order: Order, cancelled = false) {
+  if (order.paid) {
+    return page('Step 4 — Payment', html`${summary(order)}
+      <p>Payment already received. No further payment is required.</p>
+      <p><a href="/fr/reservation/confirmation/${order.id}">View booking confirmation</a></p>`);
+  }
   return page('Step 4 — Payment', html`${summary(order)}
     <p>Your order has already been created. It remains unpaid until payment is confirmed.</p>
     ${cancelled

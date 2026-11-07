@@ -9,11 +9,18 @@ export function createPayments(env: NodeJS.ProcessEnv = process.env, client?: St
   const stripe = client ?? (env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : undefined);
   return {
     async checkout(order, baseUrl) {
+      const confirmationUrl = `${baseUrl}/fr/reservation/confirmation/${order.id}`;
+      if (order.paid) return confirmationUrl;
       if (!stripe) return `${baseUrl}/stub-payment/${order.id}?mode=no-stripe-key`;
       const previousSessionId = order.checkoutSessionId;
       if (previousSessionId) {
         const cached = await stripe.checkout.sessions.retrieve(previousSessionId);
-        if (cached.status === 'open' && cached.url) return cached.url;
+        if (cached.status === 'complete') return confirmationUrl;
+        if (cached.status === 'open') {
+          if (!cached.url) throw new Error('Open Stripe session has no Checkout URL');
+          return cached.url;
+        }
+        if (cached.status !== 'expired') throw new Error('Unexpected Stripe session status');
       }
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',

@@ -25,9 +25,12 @@ Environment:
 After the info POST, an unpaid order exists and step 4 counts down two seconds,
 then submits `POST /checkout/:orderId`. This returns HTTP 303 to Checkout or the
 stub. Stripe sessions are retrieved before reuse; only open sessions are reused.
-Expired or completed sessions are replaced with a new idempotency key, while
+Only expired sessions are replaced with a new idempotency key, while
 retries for the same replacement share a key. Confirmation never trusts its URL to mark an order paid:
 only a signed `checkout.session.completed` with `payment_status: paid` does that.
 Callbacks may repeat on webhook retries; consumers should deduplicate by order id.
+
+Paid orders and completed Checkout sessions redirect to confirmation, never to a
+new payment. Paid orders show no payment form or countdown on step 4.
 
 See `../../playbooks/paris-airport-shuttle.md` for exact widget operation.

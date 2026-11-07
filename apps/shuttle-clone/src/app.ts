@@ -109,6 +109,7 @@ export function createApp({
   app.post('/checkout/:orderId', async (c) => {
     const order = store.orders.get(c.req.param('orderId'));
     if (!order) return c.text('Order not found', 404);
+    if (order.paid) return c.redirect(`/fr/reservation/confirmation/${order.id}`, 303);
     try {
       const baseUrl = (env.SHUTTLE_PUBLIC_URL || `http://localhost:${env.PORT || 3001}`).replace(/\/$/, '');
       order.checkoutUrl = await payments.checkout(order, baseUrl);

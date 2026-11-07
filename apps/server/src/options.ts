@@ -1,4 +1,9 @@
-import type { Option } from '@voila/shared';
+import type { Option, Trip } from '@voila/shared';
+
+export function matchesPresetRoute(trip: Pick<Trip, 'origin' | 'destination'>): boolean {
+  const normalize = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+  return /\bgare du nord\b/.test(normalize(trip.origin)) && /\b(cdg|roissy|charles de gaulle)\b/.test(normalize(trip.destination));
+}
 
 export const presetOptions: readonly Option[] = [
   { id: 'gare-du-nord-taxi', name: 'Gare du Nord taxi rank', pickup_wait_minutes: 10, journey_minutes: 45, price: 56, guide_dog_status: 'accepted', source: 'https://www.garesetconnexions.sncf/fr/gares-services/paris-gare-du-nord' },

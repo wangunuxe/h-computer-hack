@@ -115,6 +115,19 @@ describe('VoilaSession', () => {
     expect(s.events.find((e) => e.type === 'options')).toMatchObject({ items: expect.any(Array) });
     expect(s.events.some((e) => e.type === 'error')).toBe(false);
   });
+  it('does not offer Gare du Nord–CDG presets for another route and speaks a safe fallback', async () => {
+    const s = setup({ understand: async () => ({ trip: { ...trip, origin: 'Gare de Lyon', destination: 'Orly' }, missing: [] }) });
+    s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'Gare de Lyon vers Orly' }); await flush();
+    expect(s.events).toContainEqual({ type: 'options', items: [] });
+    expect(s.events).toContainEqual({ type: 'say', text: 'Je ne connais pas d’option pour ce trajet. Demandez de l’aide aux agents de la gare ou appelez un taxi.' });
+    expect(s.ports.linkup.mock.calls[0]?.[0].query).not.toContain('Gare du Nord to CDG');
+  });
+  it('uses only researched extra options for an unsupported preset route', async () => {
+    const extra = { ...presetOptions[1]!, name: 'G7 to Orly', source: 'https://www.g7.fr/orly' };
+    const s = setup({ understand: async () => ({ trip: { ...trip, destination: 'Orly' }, missing: [] }), linkup: async () => ({ corroboration: [], extraOptions: [extra] }) });
+    await s.start();
+    expect(s.events).toContainEqual({ type: 'options', items: [extra] });
+  });
   it('times out research ports that ignore their signals', async () => {
     const s = setup({ prim: () => new Promise(() => {}), linkup: () => new Promise(() => {}) });
     await s.start();

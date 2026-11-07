@@ -27,6 +27,7 @@ export interface NarrationParams {
   'booking-page': { page: BookingPage };
   'manual-instructions': { id: string; instructions: string };
   'no-feasible-options': { rejected: { id?: string; name: string; reason: 'too_late' | 'guide_dog_refused' }[] };
+  'no-known-options': Empty;
 }
 
 function confirmationDetails(summary: string) {
@@ -108,6 +109,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
       'rer-b-replacement-bus': 'Demandez aux agents si un bus de remplacement dessert CDG et où monter. Confirmez le terminal, l’accessibilité et le départ.',
     } as Record<string, string>)[id] ?? instructions) : instructions,
     'no-feasible-options': ({ rejected }) => [fr ? 'Aucune option réalisable.' : 'No feasible options.', ...rejected.map((option) => `${optionName(option)}: ${option.reason === 'too_late' ? (fr ? 'arrivée trop tardive' : 'arrival too late') : (fr ? 'chien guide refusé' : 'guide dog refused')}.`)].join(' '),
+    'no-known-options': () => fr ? 'Je ne connais pas d’option pour ce trajet. Demandez de l’aide aux agents de la gare ou appelez un taxi.' : 'No known options for this route. Ask station staff for help or call a taxi.',
   };
   return templates[key](params);
 }

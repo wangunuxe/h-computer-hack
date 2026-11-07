@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { OptionSchema, type Option, type Trip } from '@voila/shared';
 import { assessOptions } from './feasibility.js';
-import { bookingMethods, mergeOptions, presetOptions } from './options.js';
+import { bookingMethods, matchesPresetRoute, mergeOptions, presetOptions } from './options.js';
 import { chooseOption } from './choose.js';
 
 const trip: Trip = { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T12:00:00+01:00', passengers: 1, luggage: 1, guide_dog: true };
@@ -42,6 +42,13 @@ describe('assessOptions', () => {
 });
 
 describe('preset options and merge', () => {
+  it.each(['CDG 2E', 'ROISSY', 'Aéroport Charles-de-Gaulle'])('recognizes the supported airport route to %s', (destination) => {
+    expect(matchesPresetRoute({ origin: 'GARE DU NÖRD, Paris', destination })).toBe(true);
+  });
+  it.each([
+    { origin: 'Gare de Lyon', destination: 'CDG' }, { origin: 'Gare du Nord', destination: 'Orly' },
+    { origin: '', destination: 'CDG' }, { origin: 'Gare du Nord', destination: 'ABCDG' },
+  ])('rejects a different or unknown preset route: %j', (route) => { expect(matchesPresetRoute(route)).toBe(false); });
   it('has four valid sourced options and a booking method for each', () => {
     expect(presetOptions).toHaveLength(4);
     for (const o of presetOptions) {

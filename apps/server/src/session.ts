@@ -5,7 +5,7 @@ import { searchDisruptionAndAlternatives } from './adapters/linkup.js';
 import { runBooking } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
 import { assessOptions } from './feasibility.js';
-import { bookingMethods, mergeOptions, presetOptions } from './options.js';
+import { bookingMethods, matchesPresetRoute, mergeOptions, presetOptions } from './options.js';
 import { chooseOption } from './choose.js';
 import { say, type NarrationParams } from './narrate.js';
 
@@ -173,7 +173,7 @@ export class VoilaSession {
       return disruption;
     });
     const linkup = this.limited((signal) => this.ports.linkup({
-      query: `RER B disruption and Gare du Nord to CDG alternatives today ${this.ports.clock().toISOString()}. ${transcript}`, signal,
+      query: `Transport disruption and alternatives for this request today ${this.ports.clock().toISOString()}. ${transcript}`, signal,
     }), 9000, this.flow.signal).then((result) => {
       if (this.active(generation)) for (const item of result.corroboration) {
         for (const source of item.sources) this.send({ type: 'feed', kind: 'research', text: item.text, source });
@@ -201,12 +201,14 @@ export class VoilaSession {
       this.transition('RESEARCH');
       const research = await this.research!;
       if (!this.active(generation)) return;
-      const assessed = assessOptions(mergeOptions(presetOptions, research.extraOptions), trip, this.ports.clock());
+      const catalogue = mergeOptions(matchesPresetRoute(trip) ? presetOptions : [], research.extraOptions);
+      const assessed = assessOptions(catalogue, trip, this.ports.clock());
       this.options = assessed.feasible;
       this.transition('PRESENT');
       this.send({ type: 'options', items: this.options });
       this.speak('disruption', research.disruption);
       if (this.options.length) this.speak('present-options', { options: this.options, now: this.ports.clock() });
+      else if (!catalogue.length) this.speak('no-known-options', {});
       else this.speak('no-feasible-options', { rejected: assessed.rejected.map(({ option, reason }) => ({ id: option.id, name: option.name, reason })) });
       this.transition('CHOOSE');
     } catch {

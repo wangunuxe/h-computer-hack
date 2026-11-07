@@ -48,6 +48,9 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
   coordinates in easy mode. All other controls and steps remain unchanged.
 - Time, vehicle, passengers and luggage are native selects. Use full option text
   below. Time defaults to 00:00; set it explicitly. Times are Paris local time.
+- Passenger count must fit the selected vehicle: Sedan 3, Estate 4, Minivan 8.
+  Otherwise step 3 stays open with “Selected vehicle allows at most N passengers.”
+  Reduce the count or return to the vehicle step and choose a larger vehicle.
 - Notes are collapsed on page load; click the summary to reveal the textarea.
 - Refreshing step 4 or resubmitting info returns the existing order, not a new one.
 

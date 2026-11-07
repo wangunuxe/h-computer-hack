@@ -85,6 +85,9 @@ export function createApp({
     const values = Object.fromEntries(Object.entries(await c.req.parseBody()).map(([k, v]) => [k, String(v)]));
     const parsed = infoSchema.safeParse({ ...values, notes: values.notes ?? '' });
     if (!parsed.success) return c.html(infoPage(draft, 'Please complete valid passenger information.', values), 400);
+    if (Number(parsed.data.passengers) > draft.vehicle.capacity) {
+      return c.html(infoPage(draft, `Selected vehicle allows at most ${draft.vehicle.capacity} passengers. Choose a larger vehicle or reduce the passenger count.`, values), 400);
+    }
     draft.info = parsed.data;
     const id = randomUUID();
     const order: Order = {

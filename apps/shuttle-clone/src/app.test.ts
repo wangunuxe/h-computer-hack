@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import Stripe from 'stripe';
 import { createApp } from './app.js';
-import { createStore } from './store.js';
+import { createStore, vehicles } from './store.js';
 import { createPayments } from './payments.js';
 
 const route = {
@@ -40,6 +40,20 @@ async function complete(app: App, easy = false) {
 }
 
 describe('four-step booking', () => {
+  it.each(vehicles)('enforces advertised capacity for $id', async (vehicle) => {
+    const { app, store } = setup();
+    const base = await start(app);
+    await post(app, base + '/route', route);
+    await post(app, base + '/vehicle', { vehicle: vehicle.id });
+    if (vehicle.capacity < 8) {
+      const response = await post(app, base + '/info', { ...info, passengers: String(vehicle.capacity + 1) });
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain(`Selected vehicle allows at most ${vehicle.capacity} passengers.`);
+      expect(store.orders.size).toBe(0);
+    }
+    expect((await post(app, base + '/info', { ...info, passengers: String(vehicle.capacity) })).status).toBe(303);
+    expect(store.orders.size).toBe(1);
+  });
   it('shows a manual payment retry without a countdown after cancellation', async () => {
     const { app } = setup();
     const { paymentPath } = await complete(app);

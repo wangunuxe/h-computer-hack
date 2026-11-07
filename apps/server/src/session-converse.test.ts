@@ -26,6 +26,16 @@ function setup(overrides: Partial<SessionPorts> = {}) {
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00+01:00')); });
 afterEach(() => { sessions.splice(0).forEach((session) => session.dispose()); vi.useRealTimers(); });
 describe('contextual conversation routing', () => {
+  it.each(['the shuttle is fine', "la navette c'est bien"])('selects affirmative speech without Gemini: %s', async (text) => {
+    const s = setup(); await s.start(); await s.reply(text);
+    expect(s.ports.converse).not.toHaveBeenCalled(); expect(s.ports.runBooking).toHaveBeenCalledOnce();
+    expect(s.session.stage).toBe('EXECUTE');
+  });
+  it.each(['is the shuttle ok', 'la navette accepte le chien ?'])('answers option questions without booking: %s', async (text) => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question' })) }); await s.start(); await s.reply(text);
+    expect(s.ports.converse).toHaveBeenCalledOnce(); expect(s.ports.runBooking).not.toHaveBeenCalled();
+    expect(s.session.stage).toBe('CHOOSE');
+  });
   it('keeps the raw confirmation on screen but passes only structured fields to the interpreter', async () => {
     const summary = `Private summary: ${profile.name}, ${profile.phone}, ${profile.email}`;
     const s = setup({ runBooking: async (input) => { await input.confirm(summary, { pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR' }); return new Promise(() => {}); } });

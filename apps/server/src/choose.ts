@@ -9,8 +9,10 @@ const ordinals: Record<string, number> = {
 };
 
 export function chooseOption(reply: string, options: readonly Option[]): string | null {
-  if (/\?|\b(?:combien|accept[a-z]*|does|do|is|are|can|what|how|when|where|demain|tomorrow|instead|moins|plus|cheapest|fastest|cher|rapide|pourquoi|why|stop[a-z]*|arret[a-z]*|annul[a-z]*|cancel[a-z]*|no|non|pas|not|est|peut|prend|quand|comment|quel[a-z]*|chien[a-z]*|dog[a-z]*)\b/.test(normalize(reply))) return null;
-  const words = normalize(reply).match(/[a-z0-9]+/g) ?? [];
+  const text = normalize(reply).trim();
+  if (/\?/.test(text) || /^(?:est[ -]ce\b|qu['’]est[ -]ce\b|combien\b|quel[a-z]*\b|quand\b|comment\b|pourquoi\b|ou\b|is\b|are\b|does\b|do\b|can\b|how\b|what\b|which\b|when\b|where\b|why\b|[a-z]+(?:-t)?-(?:il|elle|on|ils|elles|vous|tu|nous)\b)/.test(text)) return null;
+  if (/\b(?:demain|tomorrow|instead|moins|plus|cheapest|fastest|cher|rapide|stop[a-z]*|arret[a-z]*|annul[a-z]*|cancel[a-z]*|no|non|pas|not)\b/.test(text)) return null;
+  const words = text.match(/[a-z0-9]+/g) ?? [];
   const matches = new Set<string>();
   for (const word of words) {
     const index = ordinals[word] ?? (/^\d+$/.test(word) ? Number(word) : undefined);

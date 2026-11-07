@@ -70,6 +70,15 @@ describe('preset options and merge', () => {
 });
 
 describe('chooseOption', () => {
+  it.each(['the shuttle is fine', "la navette c'est bien"])('accepts affirmative selection: %s', (reply) => {
+    expect(chooseOption(reply, presetOptions)).toBe('paris-airport-shuttle');
+  });
+  it.each(['is the shuttle ok', 'la navette accepte le chien ?', 'est-ce que la navette convient', 'combien coûte la navette', 'quelle navette', 'quand arrive le bus', 'comment réserver le shuttle', 'pourquoi prendre le bus', 'are shuttles available', 'does the shuttle accept dogs', 'do shuttles run', 'can I take the shuttle', 'how long is the shuttle journey', 'what is the shuttle price', 'which shuttle', 'accepte-t-elle les chiens, la navette'])('defers questions to Gemini: %s', (reply) => {
+    expect(chooseOption(reply, presetOptions)).toBeNull();
+  });
+  it.each(['stop the shuttle', 'annuler la navette', 'not the shuttle', 'le shuttle demain', 'le moins cher', 'the fastest shuttle'])('still defers cancellation, corrections and preferences: %s', (reply) => {
+    expect(chooseOption(reply, presetOptions)).toBeNull();
+  });
   it('selects either feasible taxi by ordinal even when the taxi-rank name is ambiguous', () => {
     const options = assessOptions(presetOptions, trip, now).feasible;
     for (const id of ['gare-du-nord-taxi', 'g7-phone']) {

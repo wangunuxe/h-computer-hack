@@ -1,0 +1,590 @@
+<title>Voilà Agent Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one stage canvas (the "living map") with HUD overlays, a side panel for what Nicolas hears, controls underneath. Light, high-contrast, Atkinson Hyperlegible body: the page itself follows the accessibility it talks about. */
+:root{
+  --bg:#FFFFFF; --panel:#F6F8FB; --line:#E2E7EF; --fg:#141B2B; --muted:#5E6B82;
+  --core:#7C889E; --warn:#E5484D; --ok:#1FAE6A; --sr:#D99A00;
+  --display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body:"Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme:light;
+}
+html,body{background:var(--bg);color:var(--fg)}
+body{font-family:var(--body);font-size:15px;line-height:1.5;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 32px}
+.wrap{max-width:1240px;margin:0 auto;display:grid;gap:14px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 20px}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(24px,3.2vw,34px);letter-spacing:-.01em;margin:0}
+h1 span{color:var(--muted);font-weight:500}
+.sub{color:var(--muted);margin:0;max-width:60ch}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:500 12px/1 var(--mono);letter-spacing:.04em;padding:7px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
+.chip[data-state="done"]{color:var(--fg);border-color:var(--c)}
+.chip[data-state="active"]{color:#fff;background:var(--c);border-color:var(--c)}
+.chip:focus-visible,button:focus-visible,select:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.main{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px}
+@media (max-width:860px){.main{grid-template-columns:minmax(0,1fr)}}
+.stage{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#FFFFFF;min-width:0}
+canvas{display:block;width:100%;height:clamp(380px,58vw,600px);cursor:default}
+.hud{position:absolute;top:12px;left:12px;right:12px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;pointer-events:none}
+.pill{font:500 12px/1.2 var(--mono);background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-variant-numeric:tabular-nums}
+.pill b{font-family:var(--display);font-size:18px;font-weight:700;display:block;color:var(--fg)}
+.pill.budget b{color:var(--warn)}
+.counters{display:flex;gap:8px;flex-wrap:wrap}
+.caption{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);width:min(88%,720px);text-align:center;font-family:var(--body);font-weight:700;font-size:clamp(15px,1.7vw,20px);line-height:1.35;background:#1C2333;color:#FFFFFF;border:0;border-radius:12px;box-shadow:0 6px 20px rgba(20,27,43,.18);padding:12px 16px;text-wrap:balance}
+.legend{position:absolute;left:12px;bottom:84px;font:12px/1.5 var(--mono);color:var(--muted);background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:8px;padding:8px 10px;pointer-events:none}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.tip{position:absolute;pointer-events:none;background:#FFFFFF;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;max-width:240px;box-shadow:0 8px 24px rgba(20,27,43,.12)}
+.tip strong{font-family:var(--display);display:block;font-size:15px}
+.tip span{color:var(--muted);font-family:var(--mono);font-size:12px}
+aside{display:grid;gap:14px;align-content:start;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;min-width:0}
+.label{font:500 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+.hear{font-size:17px;line-height:1.45;min-height:5.6em}
+.hear .who{display:block;font:500 12px var(--mono);color:var(--muted);margin-bottom:4px}
+.hear.sr{color:var(--sr)}
+.wave{display:flex;gap:3px;height:18px;align-items:center;margin-top:8px}
+.wave span{width:3px;border-radius:2px;background:var(--muted);height:4px;transition:height .15s}
+.log{font:12px/1.55 var(--mono);color:var(--muted);height:210px;overflow:auto;margin:0;padding:0;list-style:none}
+.log li{white-space:pre-wrap;word-break:break-word}
+.log li b{color:var(--fg);font-weight:500}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+button,select{font:500 14px var(--body);color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 14px;cursor:pointer}
+button.primary{background:var(--fg);color:var(--bg);border-color:var(--fg);font-weight:700;min-width:96px}
+label.tg{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:14px;cursor:pointer}
+.note{color:var(--muted);font-size:13px;margin:0;max-width:90ch}
+.note code{font-family:var(--mono);color:var(--fg);font-size:12px}
+
+/* ---- Iridescent glass theme ---- */
+:root{--glass:rgba(255,255,255,.58);--glass-edge:rgba(255,255,255,.95);--iri:linear-gradient(90deg,#7ED6FF 0%,#B99BFF 32%,#FF9BD2 62%,#FFC48C 100%);
+  --lift:0 1px 0 rgba(255,255,255,.9) inset,0 -1px 0 rgba(150,140,200,.12) inset,0 6px 0 -3px rgba(255,255,255,.75),0 12px 0 -6px rgba(255,255,255,.5),0 30px 50px -28px rgba(96,86,160,.45)}
+html,body{background:#EEF0F7}
+body{background:radial-gradient(circle,rgba(118,126,160,.32) 1.1px,transparent 1.6px) 0 0/26px 26px,radial-gradient(1200px 600px at 20% 0%,#FBF8FF 0%,transparent 60%),radial-gradient(900px 500px at 90% 100%,#F3EEFA 0%,transparent 60%),linear-gradient(180deg,#F4F5FA,#E8EAF3);background-attachment:fixed}
+h1 span{background:var(--iri);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:#5B6280}
+.stage,.card{position:relative;background:var(--glass);-webkit-backdrop-filter:blur(22px) saturate(1.5);backdrop-filter:blur(22px) saturate(1.5);border:1px solid var(--glass-edge);border-radius:28px;box-shadow:var(--lift);overflow:visible}
+.stage{overflow:hidden}
+.stage::after,.card::after{content:"";position:absolute;left:24px;right:24px;bottom:-1px;height:3px;border-radius:3px;background:var(--iri);filter:blur(1.5px);opacity:.85;pointer-events:none}
+.stage::before{content:"";position:absolute;inset:0;border-radius:inherit;background:radial-gradient(600px 220px at 15% 0%,rgba(185,155,255,.14),transparent 70%),radial-gradient(500px 240px at 95% 100%,rgba(255,196,140,.14),transparent 70%);pointer-events:none}
+.card{padding:18px 20px}
+.label{color:#7A809C}
+.pill,.legend,.tip{background:rgba(255,255,255,.7);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border:1px solid var(--glass-edge);border-radius:16px;box-shadow:0 1px 0 #fff inset,0 10px 24px -14px rgba(96,86,160,.4)}
+.chip{background:rgba(255,255,255,.55);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border:1px solid var(--glass-edge);color:#6A7090;box-shadow:0 1px 0 #fff inset,0 6px 14px -10px rgba(96,86,160,.5)}
+.chip[data-state="done"]{color:#2A2F45;border-color:#fff;box-shadow:0 1px 0 #fff inset,inset 0 -2px 0 color-mix(in srgb,var(--c) 55%,transparent),0 6px 14px -10px rgba(96,86,160,.5)}
+.chip[data-state="active"]{color:#fff;border-color:rgba(255,255,255,.8);background:linear-gradient(100deg,color-mix(in srgb,var(--c) 92%,#fff),color-mix(in srgb,var(--c) 60%,#FF9BD2));box-shadow:0 1px 0 rgba(255,255,255,.6) inset,0 8px 20px -8px color-mix(in srgb,var(--c) 70%,transparent)}
+.caption{display:flex;align-items:center;gap:16px;text-align:left;justify-content:flex-start;color:#4A5070;font-family:var(--display);font-weight:600;background:rgba(255,255,255,.72);-webkit-backdrop-filter:blur(20px) saturate(1.6);backdrop-filter:blur(20px) saturate(1.6);border:1px solid #fff;border-radius:999px;padding:12px 26px 12px 12px;box-shadow:var(--lift)}
+.caption::before{content:"";flex:0 0 auto;width:46px;height:46px;border-radius:50%;background:radial-gradient(circle,#fff 0 10%,transparent 11%),repeating-conic-gradient(from 0deg,#F26BD6 0 6deg,#B07BFF 6deg 12deg,#7FC7FF 12deg 15deg,transparent 15deg 22.5deg),radial-gradient(circle,#F8EFFF,#EDE6FA);box-shadow:0 0 0 6px rgba(255,255,255,.7),0 6px 16px -6px rgba(176,123,255,.6);animation:orb 6s linear infinite}
+.caption::after{content:"";position:absolute;left:40px;right:40px;bottom:-1px;height:3px;border-radius:3px;background:var(--iri);filter:blur(1.5px)}
+@keyframes orb{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.caption::before{animation:none}}
+.wave span{background:var(--iri);background-size:28px 100%}
+button,select{background:rgba(255,255,255,.62);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border:1px solid #fff;border-radius:999px;padding:10px 18px;box-shadow:0 1px 0 #fff inset,0 8px 18px -12px rgba(96,86,160,.55)}
+button.primary{background:var(--iri);color:#24283D;border-color:rgba(255,255,255,.9);box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 10px 24px -10px rgba(185,120,255,.7)}
+.note{color:#6A7090}
+
+/* ---- Agent browser card ---- */
+.log{height:150px}
+.bwhint{float:right;letter-spacing:.02em;text-transform:none;color:#8A90AC}
+.bwbox{display:block;width:100%;border-radius:12px;cursor:zoom-in;box-shadow:0 0 0 1px #fff,0 10px 24px -14px rgba(96,86,160,.6)}
+.bwbox:focus-visible{outline:2px solid var(--fg);outline-offset:3px}
+.bwbox:hover{box-shadow:0 0 0 1px #fff,0 0 0 4px rgba(185,155,255,.35),0 12px 28px -14px rgba(96,86,160,.7)}
+.bwfit{position:relative;width:100%;height:calc(460px*var(--k,.42));overflow:hidden;border-radius:12px;margin:0 auto}
+.bw{position:absolute;left:0;top:0;width:640px;height:460px;transform:scale(var(--k,.42));transform-origin:0 0;background:#fff;font:13px/1.3 Arial,Helvetica,sans-serif;color:#222;text-align:left}
+.bwchrome{height:34px;display:flex;align-items:center;gap:7px;padding:0 10px;background:#EEF0F6;border-bottom:1px solid #DDE1EA}
+.bwchrome>i{width:11px;height:11px;border-radius:50%;background:#FF6159}.bwchrome>i+i{background:#FFBD2E}.bwchrome>i+i+i{background:#28C840}
+.bwurl{flex:1;margin-left:6px;height:22px;border-radius:11px;background:#fff;display:flex;align-items:center;padding:0 10px;font:12px var(--mono);color:#4A5070;white-space:nowrap;overflow:hidden}
+.bwbadge{font:600 11px var(--mono);color:#fff;background:linear-gradient(90deg,#F07F1B,#F26BD6);padding:4px 9px;border-radius:999px;white-space:nowrap}
+.bwpage{position:relative;height:426px;overflow:hidden}
+.pv{position:absolute;inset:0;display:none}.pv.on{display:block}
+#pvIdle.on{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#8A90AC;font:15px var(--body);background:#FAFAFD}
+#pvIdle .orb{width:54px;height:54px;border-radius:50%;background:conic-gradient(#7ED6FF,#B99BFF,#FF9BD2,#FFC48C,#7ED6FF);opacity:.5;animation:orb 4s linear infinite}
+.site-top{display:flex;justify-content:space-between;align-items:center;background:#173A5E;color:#fff;padding:9px 14px}
+.logo{font:800 13px Arial;letter-spacing:.06em}
+.nav i{font-style:normal;margin-left:12px;font-size:12px;opacity:.85}
+.site-body{padding:12px 16px}
+.site-body h4{margin:0 0 2px;font:700 18px Arial;color:#173A5E}
+.steps{font-size:11px;color:#9A9AA8;margin-bottom:10px}
+.g{display:grid;grid-template-columns:repeat(4,1fr);gap:9px 8px}
+.f{border:1px solid #CCD;border-radius:3px;height:38px;padding:3px 7px;background:#FAFAFC;overflow:hidden;white-space:nowrap}
+.f small{display:block;font-size:9px;color:#AAB}
+.f span{font-size:12.5px;color:#222}
+.f.wide{grid-column:span 2}
+.veh{border:1px solid #CCD;border-radius:3px;height:38px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#556}
+.veh.sel{border-color:#F07F1B;background:#FFF3E8;font-weight:700;color:#222}
+.lnk{color:#2A6BD1;font-size:12px;align-self:center;text-decoration:underline}
+#f-notes.hid{visibility:hidden}
+.chk{font-size:12px;align-self:center;grid-column:span 2}
+.btn{grid-column:span 2;height:40px;border-radius:3px;background:#F2A33A;color:#fff;font:700 14px Arial;display:flex;align-items:center;justify-content:center}
+.tgt{outline:2px solid #F07F1B;outline-offset:1px}
+.pop{position:absolute;display:none;background:#fff;border:1px solid #BBC;box-shadow:0 6px 16px rgba(0,0,0,.15);border-radius:3px;font-size:12px;z-index:2;width:220px}
+.pop.on{display:block}.pop>div{padding:6px 9px}.pop>div+div{border-top:1px solid #EEE}
+.pop.cal.on{display:grid}.cal{grid-template-columns:repeat(7,1fr);gap:2px;padding:6px}.cal span{text-align:center;padding:3px 0;font-size:11px;color:#556}
+#p-day{background:#173A5E;color:#fff;border-radius:3px}
+#bwCur{position:absolute;left:24px;top:60px;z-index:5;display:flex;align-items:flex-start;gap:2px;pointer-events:none;transition:left .32s cubic-bezier(.3,.7,.2,1),top .32s cubic-bezier(.3,.7,.2,1)}
+#bwCur svg{width:20px;height:24px;filter:drop-shadow(0 2px 2px rgba(0,0,0,.3))}
+#bwCur b{margin-top:16px;font:700 10px var(--mono);color:#fff;background:#F07F1B;border-radius:4px;padding:2px 5px}
+#bwRip{position:absolute;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;border:3px solid #F07F1B;opacity:0;z-index:4;pointer-events:none}
+#bwRip.go{animation:rip .55s ease-out .26s}
+@keyframes rip{from{opacity:.95;transform:scale(.3)}to{opacity:0;transform:scale(1.5)}}
+#bwRing{position:absolute;border:3px solid #D99A00;border-radius:4px;z-index:4;display:none;pointer-events:none}
+#bwBanner{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:6;display:none;font:700 14px var(--body);padding:9px 16px;border-radius:999px;background:rgba(20,27,43,.92);color:#fff;white-space:nowrap;box-shadow:0 8px 20px rgba(0,0,0,.2)}
+.stripe{display:grid;grid-template-columns:1fr 1fr;height:100%}
+.stripe .sl{background:#F6F7FB;padding:34px 30px;font-family:system-ui,sans-serif}
+.stripe .sl small{color:#667;font-size:13px}.stripe .sl b{display:block;font-size:34px;margin:6px 0 8px;color:#1A1F36}.stripe .sl p{margin:0;color:#556;font-size:13px}
+.tm{display:inline-block;margin-top:14px;font:700 10px var(--mono);background:#FFE8B3;color:#8A5A00;padding:3px 6px;border-radius:3px}
+.stripe .sr{padding:34px 30px;display:grid;gap:10px;align-content:start;font-family:system-ui,sans-serif}
+.ap{height:40px;border-radius:6px;background:#000;color:#fff;display:flex;align-items:center;justify-content:center;font:600 15px system-ui}
+.or{text-align:center;font-size:11px;color:#99A}
+.cf{height:34px;border:1px solid #DDE;border-radius:6px;background:repeating-linear-gradient(135deg,#F7F7FA 0 6px,#FFF 6px 12px)}
+.paid{display:none;padding:10px 12px;border-radius:6px;background:#E8F8EF;color:#137A47;font-weight:700;font-size:13px}.paid.on{display:block}
+.done-card{margin-top:10px;border:1px solid #DDE;border-radius:6px;font-size:13px}
+.done-card div{display:flex;justify-content:space-between;padding:9px 12px}.done-card div+div{border-top:1px solid #EEE}
+.done-card em{font-style:normal;color:#B06A00;font-weight:700}
+.bwstat{font:12px/1.4 var(--mono);color:var(--muted);margin-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bwstat b{color:#F07F1B;font-weight:500}
+dialog#bwDlg{width:min(1040px,94vw);max-height:94vh;border:1px solid #fff;border-radius:24px;padding:16px 18px 14px;background:rgba(255,255,255,.82);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px);box-shadow:var(--lift);color:var(--fg)}
+dialog#bwDlg::backdrop{background:rgba(60,56,100,.28);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+#bwDlg .bwfit{width:min(100%,calc((94vh - 120px)*640/460))}
+.bwdlghead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font:500 12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.bwdlghead button{padding:7px 14px}
+@media (prefers-reduced-motion:reduce){#bwCur{transition:none}#bwRip.go,#pvIdle .orb{animation:none}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Voilà <span>agent map</span></h1>
+      <p class="sub">RER B is down. Nicolas is blind, at Gare du Nord with his guide dog, and his flight leaves CDG 2E in 3 hours.</p>
+      <p class="sub" style="font-size:12px;margin-top:8px"><a href="/?client=phone" style="color:inherit">Open phone client</a> · On your phone: <span id="phone-client-url"></span></p>
+    </div>
+    <nav class="chips" id="chips" aria-label="Stages"></nav>
+  </header>
+
+  <div class="main">
+    <div class="stage" id="stage">
+      <canvas id="cv" aria-label="Animated map of the Voilà agent flow"></canvas>
+      <div class="hud">
+        <div class="pill budget">Time budget left<b id="budget">10:00</b></div>
+        <div class="counters">
+          <div class="pill" id="srBox" hidden>Screen reader<b id="srCount">0 / 312</b></div>
+          <div class="pill" id="agBox" hidden>H agent steps<b id="agCount">0 / 23</b></div>
+        </div>
+      </div>
+      <div class="legend" id="legend" hidden>
+        <div><i style="background:#8C98AD"></i>page element</div>
+        <div><i style="background:transparent;border:1.5px solid var(--warn)"></i>no label (screen reader can't name it)</div>
+        <div><i style="background:var(--sr)"></i>screen reader cursor</div>
+        <div><i style="background:#F07F1B"></i>agent path</div>
+      </div>
+      <div class="caption" id="caption" aria-live="polite">Press Play.</div>
+      <div class="tip" id="tip" hidden></div>
+    </div>
+
+    <aside>
+      <div class="card">
+        <p class="label">What Nicolas hears</p>
+        <div class="hear" id="hear"><span class="who">Voilà</span>…</div>
+        <div class="wave" id="wave" aria-hidden="true"></div>
+      </div>
+      <div class="card">
+        <p class="label">Event stream</p>
+        <ul class="log" id="log"></ul>
+      </div>
+      <div class="card">
+        <p class="label">Agent browser <span class="bwhint">⤢ click to enlarge</span></p>
+        <div class="bwbox" id="bwBox" role="button" tabindex="0" aria-label="Enlarge the agent browser">
+          <div class="bwfit" id="bwFit">
+            <div class="bw" id="bw" aria-hidden="true">
+              <div class="bwchrome"><i></i><i></i><i></i><div class="bwurl" id="bwUrl">about:blank</div><span class="bwbadge">H · holo4 · cloud browser</span></div>
+              <div class="bwpage" id="bwPage">
+                <div class="pv on" id="pvIdle"><div class="orb"></div><div id="idleTxt">Waiting for Voilà’s brief…</div></div>
+                <div class="pv" id="pvForm">
+                  <div class="site-top"><b class="logo">PARIS AIRPORT SHUTTLE</b><span class="nav"><i>Accueil</i><i id="t-nav">Réservation</i><i>Tarifs</i><i>FAQ</i><i>Contact</i></span></div>
+                  <div class="site-body">
+                    <h4>Réservez votre navette</h4>
+                    <div class="steps">1 Trajet › 2 Options › 3 Coordonnées</div>
+                    <div class="g">
+                      <div class="f" id="f-from"><small>De</small><span></span></div>
+                      <div class="f" id="f-to"><small>Vers</small><span></span></div>
+                      <div class="f wide" id="f-addr"><small>Adresse</small><span></span></div>
+                      <div class="f" id="f-date"><small>Date</small><span></span></div>
+                      <div class="f" id="f-time"><small>Heure</small><span></span></div>
+                      <div class="veh" id="f-sedan">Berline · 3 pl.</div>
+                      <div class="veh" id="f-van">Van · 7 pl.</div>
+                      <div class="f" id="f-bags"><small>Bagages</small><span></span></div>
+                      <div class="f" id="f-pax"><small>Passagers</small><span></span></div>
+                      <div class="lnk" id="f-notesbtn">+ ajouter une remarque</div>
+                      <div class="f" id="f-notes"><small>Remarque</small><span></span></div>
+                      <div class="f" id="f-name"><small>Nom</small><span></span></div>
+                      <div class="f" id="f-phone"><small>Téléphone</small><span></span></div>
+                      <div class="f wide" id="f-email"><small>E-mail</small><span></span></div>
+                      <div class="chk" id="f-cgv">☐ J’accepte les conditions générales</div>
+                      <div class="btn" id="f-submit">Réserver →</div>
+                    </div>
+                  </div>
+                  <div class="pop" id="p-addr"><div id="p-addr1">18 Rue de Dunkerque, 75010 Paris</div><div>Gare du Nord — parvis, 75010</div><div>Rue de Dunkerque, Lille</div></div>
+                  <div class="pop cal" id="p-date"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span id="p-day">7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span></div>
+                  <div class="pop" id="p-time"><div>14:00</div><div id="p-1420">14:20</div><div>14:40</div><div>15:00</div></div>
+                </div>
+                <div class="pv" id="pvPay"><div class="stripe"><div class="sl"><small>Paris Airport Shuttle</small><b>65,00 €</b><p>Navette · Gare du Nord → CDG 2E</p><span class="tm">TEST MODE</span></div><div class="sr"><div class="ap">Pay</div><div class="or">ou payer par carte</div><div class="cf"></div><div class="cf"></div><div class="cf"></div><div class="paid" id="paidMsg">✓ Payé avec Apple Pay sur le téléphone de Nicolas</div></div></div></div>
+                <div class="pv" id="pvDone">
+                  <div class="site-top"><b class="logo">PARIS AIRPORT SHUTTLE</b><span class="nav"><i>Accueil</i><i>Réservation</i><i>Tarifs</i><i>FAQ</i><i>Contact</i></span></div>
+                  <div class="site-body"><h4>Réservation confirmée ✓</h4><div class="steps">Un e-mail de confirmation vous a été envoyé.</div>
+                    <div class="done-card"><div><span>Référence</span><b>PAS-4821</b></div><div><span>Prise en charge</span><b>14:20 · Gare du Nord, sortie Dunkerque</b></div><div><span>Véhicule</span><b>Van · 2 valises</b></div><div><span>Chien guide</span><em>remarque transmise · non confirmé</em></div><div><span>Total</span><b>65,00 € · payé</b></div></div></div>
+                </div>
+                <div id="bwRing"></div><div id="bwRip"></div>
+                <div id="bwCur"><svg viewBox="0 0 18 22"><path d="M1.5 1.5l14 10.6-6.2 1.1 3.4 6.8-2.8 1.3-3.3-6.9-5.1 4.2z" fill="#141B2B" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg><b>H</b></div>
+                <div id="bwBanner"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="bwstat" id="bwStat">idle</div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="play">Play</button>
+    <button id="prev" aria-label="Previous stage">◀ Stage</button>
+    <button id="next" aria-label="Next stage">Stage ▶</button>
+    <button id="restart">Restart</button>
+    <label class="tg"><input type="checkbox" id="cmp" checked> Show screen-reader comparison</label>
+    <label class="tg">Speed
+      <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+    </label>
+  </div>
+  <p class="note">Prototype with sample data and simulated events. In the live demo each node lights up from real events: Gladia transcripts, PRIM and Linkup results, and the H Agents API <code>changes</code> stream. Element counts describe the clone of the shuttle booking site and are illustrative. Keys: Space play/pause, ← → stages. Hover a node for its tech, click it to jump. The agent browser card replays the same sample run; live, it would show the H agent’s own screenshots.</p>
+</div>
+
+<dialog id="bwDlg" aria-label="Agent browser, enlarged">
+  <div class="bwdlghead"><span>Agent browser · H Agents API · holo4 · 1280×800 visual mode</span><button id="bwClose">Close</button></div>
+  <div class="bwfit" id="bwFitBig"></div>
+  <div class="bwstat" id="bwStatBig"></div>
+</dialog>
+<script>
+document.getElementById('phone-client-url').textContent = location.origin + '/?client=phone';
+(()=>{
+const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const R = rng(7);
+
+const STAGES=[
+ {name:'Listen',tech:'Gladia live STT · audio enhancer',c:'#2F6FEB',n:7,sim:15,dur:3600,
+  cap:'Nicolas holds the button. Gladia transcribes him through station alarms.',
+  hear:['Nicolas','RER B est en panne ! Mon vol pour New York part dans 3 heures… réserve-moi une voiture pour CDG 2E, avec mon chien guide !'],
+  log:['gladia.live  audio_enhancer=on  lang=fr','partial  "RER B est en panne…"','final    "…CDG 2E, avec mon chien guide"']},
+ {name:'Understand',tech:'LLM + saved profile',c:'#6E5BEA',n:6,sim:5,dur:2600,
+  cap:'Voilà turns it into a trip: Gare du Nord → CDG 2E, deadline, guide dog, luggage.',
+  hear:['Voilà','Compris : Gare du Nord vers CDG 2E, avec votre chien guide. Je vérifie la situation.'],
+  log:['trip  {origin:"Gare du Nord", dest:"CDG 2E",','       guide_dog:true, uber:excluded}']},
+ {name:'Research',tech:'IDFM PRIM + Linkup, with sources',c:'#12A594',n:9,sim:25,dur:4600,
+  cap:'Disruption confirmed with sources. Options that miss the deadline are dropped.',
+  hear:['Voilà','Le RER B est interrompu, source IDFM. Deux options tiennent : taxi en gare, environ 60 €, ou navette, prise en charge dans 15 minutes, 65 €.'],
+  log:['prim  line:IDFM:C01743  status=disrupted','linkup "navette CDG chien guide"  4 sources','filter  bus 351 → dropped (arrives too late)']},
+ {name:'Decide',tech:'Voice choice',c:'#E09A00',n:4,sim:5,dur:2200,
+  cap:'Nicolas picks by voice.',
+  hear:['Nicolas','La navette.'],log:['choice  option=2  shuttle']},
+ {name:'Execute',tech:'H Agents API · holo4 · cloud browser',c:'#F07F1B',n:10,sim:150,exec:true,
+  cap:'The H agent opens a booking site that was never built for screen readers.',
+  hear:['Voilà','J’ouvre le site de réservation…'],log:['h.session  start_url=/fr/reservation  max_steps=60']},
+ {name:'Confirm',tech:'confirm_with_user',c:'#E5484D',n:5,sim:10,dur:3600,
+  cap:'Before anything is submitted, Voilà reads it back and waits for a spoken yes.',
+  hear:['Voilà','Prise en charge à 14 h 20, Gare du Nord sortie Dunkerque, 65 €, chien guide noté. Je réserve ? — Nicolas : Oui.'],
+  log:['tool  confirm_with_user(summary)','user  "oui"']},
+ {name:'Pay',tech:'handoff_payment → Stripe Checkout · Apple Pay',c:'#1FAE6A',n:6,sim:30,dur:4000,
+  cap:'The agent stops at checkout. Nicolas pays on his own phone. Voilà never sees the card.',
+  hear:['Voilà','Votre navette est réservée. Payez 65 € avec Apple Pay. — ding'],
+  log:['tool  handoff_payment(ref="PAS-4821")','stripe  checkout.session.completed  (test mode)']},
+ {name:'Follow-up',tech:'Booking card · honest status',c:'#C94CB0',n:5,sim:10,dur:4200,
+  cap:'Done. And honest about what is not confirmed yet.',
+  hear:['Voilà','Réservé, référence PAS-4821. Le chauffeur vous attend sortie Dunkerque à 14 h 20. Le chien guide n’est pas encore confirmé par la société : je leur ai écrit.'],
+  log:['card  ref=PAS-4821  pickup=14:20','guide_dog_status = pending  (email sent)']},
+];
+STAGES.forEach((s,i)=>{const a=(i*45-90)*Math.PI/180;s.a=a;s.w={x:Math.cos(a)*.9,y:Math.sin(a)*.48,z:0};
+  s.sat=[...Array(s.n)].map(()=>{const r=.04+R()*.06,t=R()*6.283;return{w:{x:s.w.x+Math.cos(t)*r,y:s.w.y+Math.sin(t)*r,z:0}}})});
+const CORE={w:{x:0,y:0,z:0}};
+let rot=0.35,tilt=0.42,rotT=null,dragging=false,dragMoved=0;
+function project(p){p.x=p.w.x;p.y=p.w.y;p.f=1;p.d=0;return p}
+function projectAll(){project(CORE);STAGES.forEach(s=>{project(s);s.sat.forEach(project)});MAZE.forEach(m=>{m.x=EX.x+m.ox;m.y=EX.y+m.oy})}
+const depA=()=>1;
+const EX=STAGES[4];
+
+// background cloud
+const BG=[...Array(460)].map(()=>{const t=R()*6.283,r=Math.sqrt(R());return{x:Math.cos(t)*r*1.0,y:Math.sin(t)*r*.64,a:.15+R()*.35}});
+const BGL=[];for(let k=0;k<220;k++){const a=BG[(R()*BG.length)|0];let b=BG[(R()*BG.length)|0];BGL.push([a,b,(R()-.5)*.4])}
+
+// maze: 312 page elements around Execute node
+const COLS=24,ROWS=13,MW=.58,MH=.31;
+const MAZE=[];for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){MAZE.push({ox:-MW/2+(c+.5)/COLS*MW+(R()-.5)*.012,oy:-MH/2+(r+.5)/ROWS*MH+(R()-.5)*.012,red:R()<.25})}
+const STEP_LABEL={1:'Route · from Gare du Nord',3:'Address autocomplete → hidden coords',6:'Custom date picker · today',8:'Time picker · 14:20',11:'Vehicle · van, 2 bags',14:'Passengers · 1 + guide dog',17:'Hidden notes · « chien guide »',20:'Contact · from profile',22:'Stop → confirm_with_user'};
+const STEP_TTS={1:'Je remplis l’itinéraire…',3:'J’indique l’adresse de départ…',6:'Je choisis la date…',8:'Heure : 14 h 20…',11:'Un van, pour vos bagages…',14:'J’ajoute votre chien guide…',17:'Je laisse une note pour le chauffeur…',20:'Vos coordonnées…',22:'Tout est prêt, je vous lis le récapitulatif.'};
+const PATH=[];for(let j=0;j<23;j++){let i=Math.floor((j+.5)/23*MAZE.length)+Math.floor((R()-.5)*8);i=Math.max(0,Math.min(MAZE.length-1,i));if(STEP_LABEL[j]&&j>2&&j<20)MAZE[i].red=true;PATH.push(i)}
+const UNLAB=MAZE.filter(m=>m.red).length;
+const SR_SAY=['lien, Accueil','lien, Réservation','lien, Tarifs','bouton','image','zone de texte, sans libellé','bouton','lien','zone de texte, sans libellé','bouton, réduit','texte, Étape 1','zone de texte, sans libellé','lien, PayPal','bouton','image'];
+const SR_N=48;
+
+// execute sub-phases
+function execPhases(){const p=[['in',1000]];if(cmpEl.checked)p.push(['sr',5600],['gap',1500]);p.push(['ag',23*380],['hold',900],['out',1000]);return p}
+
+// ---- state
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const $=id=>document.getElementById(id);
+const capEl=$('caption'),hearEl=$('hear'),logEl=$('log'),cmpEl=$('cmp'),tip=$('tip');
+let W=0,H=0,S=1,dpr=1;
+let si=-1,te=0,playing=false,speed=1,last=performance.now();
+let cam={x:0,y:0,z:1},camT={x:0,y:0,z:1};
+let execState={ph:null,pt:0,k:0,j:0,lastSay:-1,lastStep:-1};
+let mazeA=0,clock=0,started=false,focusExec=false;
+
+function resize(){dpr=Math.min(2,devicePixelRatio||1);const r=cv.getBoundingClientRect();W=r.width;H=r.height;cv.width=W*dpr;cv.height=H*dpr;S=Math.min(W/2.15,H/1.42)}
+addEventListener('resize',resize);
+const toS=(x,y)=>[W/2+(x-cam.x)*S*cam.z,H*.44+(y-cam.y)*S*cam.z];
+
+// chips
+const chips=$('chips');
+STAGES.forEach((s,i)=>{const b=document.createElement('button');b.className='chip';b.textContent=s.name;b.style.setProperty('--c',s.c);b.onclick=()=>jump(i);chips.appendChild(b)});
+function paintChips(){[...chips.children].forEach((b,i)=>b.dataset.state=i<si?'done':i===si?'active':'')}
+
+// wave
+const wave=$('wave');for(let i=0;i<28;i++)wave.appendChild(document.createElement('span'));
+let speaking=0;
+
+function log(t,strong){const li=document.createElement('li');const ts=fmt(simElapsed());li.innerHTML=`<b>${ts}</b>  `+t.replace(/</g,'&lt;');logEl.appendChild(li);logEl.scrollTop=logEl.scrollHeight}
+function say(who,text,sr){hearEl.className='hear'+(sr?' sr':'');hearEl.innerHTML=`<span class="who">${who}</span>`;hearEl.appendChild(document.createTextNode(text));speaking=1.6}
+function fmt(s){s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}
+
+function stageDur(s){return s.exec?execPhases().reduce((a,p)=>a+p[1],0):s.dur}
+function simElapsed(){let t=0;for(let i=0;i<Math.max(0,si);i++)t+=STAGES[i].sim;if(si>=0&&si<STAGES.length){t+=STAGES[si].sim*Math.min(1,te/stageDur(STAGES[si]))}else if(si>=STAGES.length)t=STAGES.reduce((a,s)=>a+s.sim,0);return t}
+
+function enter(i){
+  si=i;te=0;paintChips();
+  if(i>=STAGES.length){capEl.textContent='From one sentence to a paid booking in about 4 minutes. Nicolas never touched the website.';camT={x:0,y:0,z:1};playing=false;$('play').textContent='Replay';return}
+  const s=STAGES[i];capEl.textContent=s.cap;say(s.hear[0],s.hear[1]);s.log.forEach(l=>log(l));
+  if(s.exec){execState={ph:null,pt:0,k:0,j:0,lastSay:-1,lastStep:-1}}
+  if(!s.exec){camT={x:0,y:0,z:1};focusExec=false}
+  $('srBox').hidden=true;$('agBox').hidden=true;$('legend').hidden=true;
+}
+function jump(i){started=true;logEl.innerHTML='';enter(i);if(!playing)togglePlay(true)}
+
+function updExec(dt){
+  const ph=execPhases();let acc=0,cur=null,pt=0;
+  for(const p of ph){if(te<acc+p[1]){cur=p[0];pt=te-acc;break}acc+=p[1]}
+  if(!cur){cur='done'}
+  const E=execState;
+  if(cur!==E.ph){E.ph=cur;
+    if(cur==='in'){focusExec=true;capEl.textContent=`The booking page as an agent sees it: ${MAZE.length} elements, ${UNLAB} with no label.`;$('legend').hidden=false}
+    if(cur==='sr'){$('srBox').hidden=false;capEl.textContent='A screen reader walks them one by one…';log('compare  VoiceOver reading order (illustrative)')}
+    if(cur==='gap'){capEl.textContent=`…${SR_N} elements in, Nicolas still hasn't reached the date picker.`}
+    if(cur==='ag'){$('agBox').hidden=false;capEl.textContent='The H agent looks at the screen and goes straight to the 23 steps it needs.'}
+    if(cur==='hold'){capEl.textContent='Form filled in 23 steps. Nothing submitted yet.'}
+    if(cur==='out'){focusExec=false;camT={x:0,y:0,z:1};$('legend').hidden=true}
+  }
+  if(cur==='sr'){const k=Math.min(SR_N,Math.floor(pt/(5600/SR_N)));E.k=k;$('srCount').textContent=k+' / '+MAZE.length;
+    const si2=Math.floor(k/3);if(si2!==E.lastSay){E.lastSay=si2;say('VoiceOver',SR_SAY[si2%SR_SAY.length],true)}}
+  if(cur==='ag'||cur==='hold'||cur==='out'){const j=cur==='ag'?Math.min(23,Math.floor(pt/380)+1):23;
+    if(j!==E.j){for(let q=E.j;q<j;q++){if(STEP_LABEL[q]){log('policy_event  '+STEP_LABEL[q]);say('Voilà',STEP_TTS[q])}}E.j=j}
+    $('agCount').textContent=j+' / 23'}
+  mazeA+=((cur==='in'||cur==='sr'||cur==='gap'||cur==='ag'||cur==='hold')?1:-1)*dt/600;mazeA=Math.max(0,Math.min(1,mazeA));
+  return cur==='done';
+}
+
+function tick(now){
+  const dt=Math.min(64,now-last);last=now;clock+=dt;
+  if(playing&&si<STAGES.length){te+=dt*speed;const s=STAGES[si];
+    if(s.exec){if(updExec(dt*speed))enter(si+1)}else if(te>=s.dur)enter(si+1)}
+  if(!(si>=0&&STAGES[si]&&STAGES[si].exec)){mazeA=Math.max(0,mazeA-dt/600)}
+ 
+  projectAll();if(focusExec)camT={x:EX.x,y:EX.y,z:2.55};
+  const k=RM?1:Math.min(1,dt/260);cam.x+=(camT.x-cam.x)*k;cam.y+=(camT.y-cam.y)*k;cam.z+=(camT.z-cam.z)*k;
+  $('budget').textContent=fmt(600-simElapsed());
+  speaking=Math.max(0,speaking-dt/1000);[...wave.children].forEach((b,i)=>b.style.height=(speaking>0?4+Math.abs(Math.sin(clock/120+i*.7))*14*Math.min(1,speaking):4)+'px');
+  bwSync();draw();requestAnimationFrame(tick);
+}
+
+function arc(a,b,col,alpha,w,bend){const[x1,y1]=toS(a.x,a.y),[x2,y2]=toS(b.x,b.y);const m=project({w:{x:(a.w.x+b.w.x)/2*bend,y:(a.w.y+b.w.y)/2*bend-.06,z:(a.w.z+b.w.z)/2*bend}});const[cx,cy]=toS(m.x,m.y);alpha*=depA(Math.min(a.d,b.d)+.3);ctx.strokeStyle=col;ctx.globalAlpha=alpha;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x1,y1);ctx.quadraticCurveTo(cx,cy,x2,y2);ctx.stroke();ctx.globalAlpha=1;return[x1,y1,cx,cy,x2,y2]}
+function qpt(p,t){const u=1-t;return[u*u*p[0]+2*u*t*p[2]+t*t*p[4],u*u*p[1]+2*u*t*p[3]+t*t*p[5]]}
+
+function draw(){
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
+  const fadeBG=1-mazeA*.75;
+  ctx.globalAlpha=1;
+  const C=CORE;
+  // faint loops between all stages
+  // spokes to core
+  STAGES.forEach((s,i)=>arc(C,s,'#7C889E',(i<=si?.18:.06)*fadeBG,1,1));
+  // flow arcs
+  for(let i=0;i<STAGES.length;i++){const from=i===0?C:STAGES[i-1],s=STAGES[i];
+    if(i<si||(i===si)){const p=arc(from,s,s.c,(i===si?.95:.6)*fadeBG,i===si?2.4:1.6,.35);
+      if(i===si&&!RM&&te<1100){const[x,y]=qpt(p,Math.min(1,te/900));ctx.fillStyle=s.c;ctx.beginPath();ctx.arc(x,y,4.5,0,6.283);ctx.fill();ctx.shadowBlur=0}}}
+  // core rings
+  const[cx,cy]=toS(CORE.x,CORE.y);ctx.strokeStyle='#7C889E';ctx.lineWidth=1;
+  ctx.globalAlpha=.3*fadeBG;ctx.beginPath();ctx.arc(cx,cy,26*Math.min(cam.z,1.6),0,6.283);ctx.stroke();
+  ctx.globalAlpha=fadeBG;ctx.fillStyle='#5E6B82';ctx.beginPath();ctx.arc(cx,cy,13*Math.min(cam.z,1.6),0,6.283);ctx.fill();
+  label('Nicolas',cx,cy+44,'#141B2B',14,true,true);
+  ctx.globalAlpha=1;
+  // satellites + nodes
+  STAGES.map((s,i)=>[s,i]).sort((A,B)=>A[0].d-B[0].d).forEach(([s,i])=>{const on=i<=si,act=i===si;const vis=(s.exec?1-mazeA:fadeBG)*depA(s.d),sz=s.f;if(vis<.02)return;
+    s.sat.forEach((p,k)=>{const[x,y]=toS(p.x,p.y);const appear=act?Math.min(1,(te-k*120)/300):on?1:0;
+      ctx.globalAlpha=(on?.85*Math.max(0,appear):.25)*vis;ctx.fillStyle=on?s.c:'#8C98AD';ctx.beginPath();ctx.arc(x,y,2.4*p.f,0,6.283);ctx.fill();});
+    const[x,y]=toS(s.x,s.y);ctx.globalAlpha=vis;
+    if(act&&!RM){ctx.strokeStyle=s.c;ctx.globalAlpha=.5*vis*(1-(clock%1400)/1400);ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,10+(clock%1400)/1400*16,0,6.283);ctx.stroke();ctx.globalAlpha=vis}
+    ctx.fillStyle=on?s.c:'#CDD4E0';
+    ctx.beginPath();ctx.arc(x,y,(act?10:8)*sz,0,6.283);ctx.fill();ctx.shadowBlur=0;
+    if(!(s.exec&&mazeA>.3)){const below=Math.abs(Math.sin(s.a))<.5;label(s.name,below?x:x+14,below?y+28:y+5,on?'#141B2B':'#5E6B82',14,true,below)}
+    ctx.globalAlpha=1});
+  if(mazeA>0)drawMaze();
+}
+function label(t,x,y,col,size,bold,center){ctx.font=`${bold?'700 ':''}${size}px ${bold?'"Bricolage Grotesque"':'"IBM Plex Mono"'}, system-ui, sans-serif`;ctx.fillStyle=col;
+  const w=ctx.measureText(t).width;if(center)x=Math.max(8,Math.min(W-8-w,x-w/2));else if(x+w>W-8)x=x-w-28;ctx.fillText(t,x,y)}
+
+function drawMaze(){
+  const A=mazeA,E=execState;
+  ctx.globalAlpha=A;
+  // page frame
+  const[fx,fy]=toS(EX.x-MW/2-.02,EX.y-MH/2-.03),[gx,gy]=toS(EX.x+MW/2+.02,EX.y+MH/2+.02);
+  ctx.strokeStyle='#D5DCE7';ctx.lineWidth=1;ctx.strokeRect(fx,fy,gx-fx,gy-fy);
+  ctx.fillStyle='#5E6B82';ctx.font='11px "IBM Plex Mono", monospace';ctx.fillText('clone · paris-airport-shuttle /fr/reservation',fx+6,fy-6);
+  const rr=Math.max(2,1.4*cam.z);
+  MAZE.forEach(m=>{const[x,y]=toS(m.x,m.y);if(m.red){ctx.strokeStyle='#E5484D';ctx.lineWidth=1.4;ctx.beginPath();ctx.arc(x,y,rr+1,0,6.283);ctx.stroke()}else{ctx.fillStyle='#8C98AD';ctx.beginPath();ctx.arc(x,y,rr,0,6.283);ctx.fill()}});
+  // screen reader crawl
+  if(E.k>0&&(E.ph==='sr'||E.ph==='gap'||E.ph==='ag'||E.ph==='hold')){const fade=E.ph==='sr'||E.ph==='gap'?1:.25;
+    ctx.strokeStyle='#D99A00';ctx.globalAlpha=A*.5*fade;ctx.setLineDash([3,4]);ctx.lineWidth=1;ctx.beginPath();
+    for(let i=0;i<E.k;i++){const[x,y]=toS(MAZE[i].x,MAZE[i].y);i?ctx.lineTo(x,y):ctx.moveTo(x,y)}ctx.stroke();ctx.setLineDash([]);
+    for(let i=0;i<E.k;i++){const[x,y]=toS(MAZE[i].x,MAZE[i].y);ctx.globalAlpha=A*fade*(i===E.k-1?1:.6);ctx.fillStyle='#D99A00';ctx.beginPath();ctx.arc(x,y,i===E.k-1?rr+3:rr,0,6.283);ctx.fill()}}
+  // agent path
+  if(E.j>0){ctx.globalAlpha=A;ctx.strokeStyle='#F07F1B';ctx.lineWidth=2.6;ctx.beginPath();
+    const [sx,sy]=toS(EX.x-MW/2-.03,EX.y-MH/2-.02);ctx.moveTo(sx,sy);
+    for(let q=0;q<E.j;q++){const m=MAZE[PATH[q]];const[x,y]=toS(m.x,m.y);ctx.lineTo(x,y)}ctx.stroke();ctx.shadowBlur=0;
+    for(let q=0;q<E.j;q++){const m=MAZE[PATH[q]];const[x,y]=toS(m.x,m.y);ctx.fillStyle='#F07F1B';ctx.beginPath();ctx.arc(x,y,rr+1.5,0,6.283);ctx.fill()}
+    const cur=E.j-1,m=MAZE[PATH[cur]],[x,y]=toS(m.x,m.y);
+    if(!RM){ctx.strokeStyle='#F07F1B';ctx.globalAlpha=A*(1-(clock%900)/900);ctx.beginPath();ctx.arc(x,y,6+(clock%900)/900*14,0,6.283);ctx.stroke();ctx.globalAlpha=A}
+    let lab=null;for(let q=cur;q>=Math.max(0,cur-2);q--)if(STEP_LABEL[q]){lab=[q,STEP_LABEL[q]];break}
+    if(lab){const mm=MAZE[PATH[lab[0]]];const[lx,ly]=toS(mm.x,mm.y);ctx.font='700 13px "Atkinson Hyperlegible", sans-serif';const w=ctx.measureText(lab[1]).width+16;
+      let bx=lx+12,by=ly-30;if(bx+w>W-8)bx=lx-w-12;if(by<50)by=ly+14;
+      ctx.fillStyle='#FFFFFF';ctx.strokeStyle='#F07F1B';ctx.lineWidth=1;ctx.beginPath();ctx.roundRect?ctx.roundRect(bx,by,w,24,6):ctx.rect(bx,by,w,24);ctx.fill();ctx.stroke();
+      ctx.fillStyle='#141B2B';ctx.fillText(lab[1],bx+8,by+16)}}
+  ctx.globalAlpha=1;
+}
+
+// hover / click
+function hit(e){const r=cv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;let best=-1,bd=22;
+  STAGES.forEach((s,i)=>{const[x,y]=toS(s.x,s.y);const d=Math.hypot(mx-x,my-y);if(d<bd){bd=d;best=i}});return[best,mx,my]}
+let dx0=0,dy0=0;
+cv.addEventListener('pointerdown',e=>{return;dragging=true;dragMoved=0;dx0=e.clientX;dy0=e.clientY;cv.setPointerCapture(e.pointerId)});
+cv.addEventListener('pointermove',e=>{if(!dragging)return;const ddx=e.clientX-dx0,ddy=e.clientY-dy0;dx0=e.clientX;dy0=e.clientY;dragMoved+=Math.abs(ddx)+Math.abs(ddy);rot-=ddx*.008;tilt=Math.max(.05,Math.min(1.1,tilt+ddy*.005));cv.style.cursor='grabbing';tip.hidden=true});
+cv.addEventListener('pointerup',()=>{dragging=false;cv.style.cursor='default'});
+cv.addEventListener('mousemove',e=>{if(dragging)return;const[i,mx,my]=hit(e);if(i<0||mazeA>.3){tip.hidden=true;cv.style.cursor='default';return}
+  const s=STAGES[i];cv.style.cursor='pointer';tip.innerHTML=`<strong style="color:${s.c}">${s.name}</strong><span>${s.tech}</span><div>${s.cap}</div>`;tip.hidden=false;
+  const tw=tip.offsetWidth;tip.style.left=Math.min(mx+14,W-tw-8)+'px';tip.style.top=(my+14)+'px'});
+cv.addEventListener('mouseleave',()=>tip.hidden=true);
+cv.addEventListener('click',e=>{if(dragMoved>5)return;const[i]=hit(e);if(i>=0&&mazeA<.3)jump(i)});
+
+function togglePlay(force){
+  if(!started||si>=STAGES.length||si<0){started=true;logEl.innerHTML='';mazeA=0;enter(0)}
+  playing=force===undefined?!playing:force;$('play').textContent=playing?'Pause':'Play'}
+$('play').onclick=()=>togglePlay();
+$('next').onclick=()=>enter(Math.min(STAGES.length,si+1));
+$('prev').onclick=()=>enter(Math.max(0,si-1));
+$('restart').onclick=()=>{started=true;focusExec=false;logEl.innerHTML='';mazeA=0;cam={x:0,y:0,z:1};enter(0);togglePlay(true)};
+$('speed').onchange=e=>speed=+e.target.value;
+addEventListener('keydown',e=>{if(e.target.tagName==='SELECT'||(dlg.open&&e.code==='Space'))return;if(e.code==='Space'){e.preventDefault();togglePlay()}if(e.key==='ArrowRight')$('next').click();if(e.key==='ArrowLeft')$('prev').click()});
+
+
+// ---- agent browser card
+const BWS=[
+ {t:'t-nav',op:'click',d:'nav « Réservation »'},
+ {t:'f-from',op:'type',v:'Paris — Gare du Nord',d:'De'},
+ {t:'f-to',op:'type',v:'Aéroport CDG · Terminal 2E',d:'Vers'},
+ {t:'f-addr',op:'type',v:'18 rue de Dunk',d:'Adresse (autocomplete)'},
+ {t:'p-addr1',op:'pick',a:'f-addr',v:'18 Rue de Dunkerque, 75010 Paris',d:'suggestion 1'},
+ {t:'f-date',op:'open',a:'p-date',d:'custom date picker'},
+ {t:'p-day',op:'pick',a:'f-date',v:'Aujourd’hui · sam. 7',d:'today'},
+ {t:'f-time',op:'open',a:'p-time',d:'time picker'},
+ {t:'p-1420',op:'pick',a:'f-time',v:'14:20',d:'14:20'},
+ {t:'f-sedan',op:'move',d:'compare vehicles'},
+ {t:'f-van',op:'sel',d:'Van (2 bags)'},
+ {t:'f-bags',op:'type',v:'2 valises',d:'Bagages'},
+ {t:'f-pax',op:'click',d:'Passagers'},
+ {t:'f-pax',op:'type',v:'1 adulte',d:'Passagers'},
+ {t:'f-pax',op:'type',v:'1 adulte + chien guide',d:'Passagers'},
+ {t:'f-notesbtn',op:'click',d:'hidden notes field'},
+ {t:'f-notes',op:'click',d:'Remarque'},
+ {t:'f-notes',op:'type',v:'Chien guide d’assistance — merci',d:'Remarque'},
+ {t:'f-name',op:'type',v:'Nicolas M.',d:'Nom (profile)'},
+ {t:'f-phone',op:'type',v:'+33 6 •• •• 21 48',d:'Téléphone (profile)'},
+ {t:'f-email',op:'type',v:'nicolas.m@•••.fr',d:'E-mail (profile)'},
+ {t:'f-cgv',op:'check',d:'CGV'},
+ {t:'f-submit',op:'stop',d:'Réserver → stop, confirm_with_user'},
+];
+const VERB={click:'click',open:'click',pick:'select',move:'move',sel:'click',type:'type',check:'click',stop:'stop'};
+const SITE='paris-airport-shuttle.fr';
+const bw={el:$('bw'),page:$('bwPage'),cur:$('bwCur'),rip:$('bwRip'),ring:$('bwRing'),ban:$('bwBanner'),key:'',typ:null,ringK:-1};
+const FIELDS=[...document.querySelectorAll('#pvForm .f')];
+const SR_ELS=[...document.querySelectorAll('#pvForm .nav i,#pvForm .site-body h4,#pvForm .steps,#pvForm .g>*')];
+const sp=id=>$(id).querySelector('span');
+function bwPos(el){let x=0,y=0,e=el;while(e&&e!==bw.page){x+=e.offsetLeft;y+=e.offsetTop;e=e.offsetParent}return[x,y]}
+function bwPoint(el,ripple){const[x,y]=bwPos(el),px=x+Math.min(el.offsetWidth*.5,60),py=y+el.offsetHeight*.55;
+  bw.cur.style.left=px+'px';bw.cur.style.top=py+'px';
+  if(ripple){bw.rip.style.left=px+'px';bw.rip.style.top=py+'px';bw.rip.classList.remove('go');void bw.rip.offsetWidth;bw.rip.classList.add('go')}}
+function bwPop(id,anchor){const p=$(id),[x,y]=bwPos($(anchor));p.classList.add('on');p.style.left=x+'px';p.style.top=(y+$(anchor).offsetHeight+3)+'px'}
+function bwForm(j,anim){
+  FIELDS.forEach(f=>f.querySelector('span').textContent='');
+  document.querySelectorAll('#pvForm .sel,#pvForm .tgt,#pvForm .pop.on').forEach(e=>e.classList.remove('sel','tgt','on'));
+  $('f-notes').classList.add('hid');$('f-cgv').textContent='☐ J’accepte les conditions générales';
+  const apply=st=>{if(st.op==='type')sp(st.t).textContent=st.v;if(st.op==='pick')sp(st.a).textContent=st.v;if(st.op==='sel')$(st.t).classList.add('sel');
+    if(st.op==='check')$('f-cgv').textContent='☑ J’accepte les conditions générales';if(st.t==='f-notesbtn')$('f-notes').classList.remove('hid')};
+  for(let q=0;q<j-1;q++)apply(BWS[q]);
+  bw.typ=null;if(j<1)return;
+  const st=BWS[j-1],from=st.op==='type'?sp(st.t).textContent:'';apply(st);
+  if(st.op==='open')bwPop(st.a,st.t);
+  if(st.op==='pick')bwPop($(st.t).closest('.pop').id,st.a);
+  $(st.t).classList.add('tgt');bwPoint($(st.t),anim&&st.op!=='move'&&st.op!=='stop');
+  if(st.op==='type'&&anim){sp(st.t).textContent=from;bw.typ={el:sp(st.t),from,to:st.v,t0:clock}}
+}
+function bwStatus(html){$('bwStat').innerHTML=html;$('bwStatBig').innerHTML=html}
+function bwSync(){
+  let view='idle',url='about:blank',stat='idle · no H session yet',ban='',j=0,mode='',sub=0,cursor=false;
+  const E=execState;
+  if(si===3){stat='choice made · briefing the H agent…'}
+  if(si===4){view='form';url=SITE+'/fr/reservation';cursor=true;
+    if(!E.ph||E.ph==='in'){mode='load';stat='h.session started · <b>observation_event</b> 1280×800'}
+    else if(E.ph==='sr'||E.ph==='gap'){mode='sr';cursor=false;stat=`VoiceOver · element ${E.k} / ${MAZE.length} · still in the header`}
+    else{mode='ag';j=E.j;const st=BWS[Math.max(0,j-1)];stat=`step ${j}/23 · <b>${VERB[st.op]}</b> — ${st.d}`;if(j>=23)ban='⏸ Form filled · nothing submitted'}}
+  if(si===5){view='form';url=SITE+'/fr/reservation';cursor=true;mode='confirm';j=23;sub=te>STAGES[5].dur*.6?1:0;
+    ban=sub?'✓ Nicolas: « Oui » · submitting':'⏸ confirm_with_user · waiting for Nicolas';stat=sub?'user approved · <b>click</b> — Réserver':'tool <b>confirm_with_user</b>(summary)'}
+  if(si===6){view='pay';url='checkout.stripe.com/c/pay/cs_test_a1…';sub=te>STAGES[6].dur*.5?1:0;
+    ban=sub?'':'⏹ Agent stopped · handoff_payment → Nicolas’s phone';stat=sub?'stripe · checkout.session.completed (test mode)':'tool <b>handoff_payment</b>(65 EUR) · agent never pays'}
+  if(si>=7){view='done';url=SITE+'/fr/reservation/confirmation?ref=PAS-4821';stat='final answer → booking card · guide_dog_status = pending'}
+  const key=[view,mode,j,sub].join('|');
+  if(key!==bw.key){bw.key=key;
+    ['Idle','Form','Pay','Done'].forEach(v=>$('pv'+v).classList.toggle('on',v.toLowerCase()===view));
+    $('bwUrl').textContent=url;bwStatus(stat);bw.ban.textContent=ban;bw.ban.style.display=ban?'block':'none';
+    bw.cur.style.display=cursor?'flex':'none';$('paidMsg').classList.toggle('on',view==='pay'&&sub===1);
+    if(view==='form'){if(mode==='load'||mode==='sr'){bwForm(0);bw.cur.style.left='24px';bw.cur.style.top='60px'}
+      else if(mode==='ag')bwForm(j,true);
+      else{bwForm(23,false);if(sub)bwPoint($('f-submit'),true)}}
+    bw.ringK=-1;bw.ring.style.display='none'}
+  if(mode==='sr'){bwStatus(stat);const k=E.k%SR_ELS.length;if(k!==bw.ringK){bw.ringK=k;const el=SR_ELS[k],[x,y]=bwPos(el);
+    Object.assign(bw.ring.style,{display:'block',left:x-4+'px',top:y-4+'px',width:el.offsetWidth+8+'px',height:el.offsetHeight+8+'px'})}}
+  if(bw.typ){const T=bw.typ,f=Math.min(1,(clock-T.t0)*speed/280);T.el.textContent=T.to.slice(0,T.from.length+Math.ceil((T.to.length-T.from.length)*f));if(f>=1)bw.typ=null}
+}
+const dlg=$('bwDlg'),fitS=$('bwFit'),fitB=$('bwFitBig');
+const fitK=f=>f.style.setProperty('--k',f.clientWidth/640);
+new ResizeObserver(()=>{fitK(fitS);fitK(fitB)}).observe(document.body);
+function openBw(){fitB.appendChild(bw.el);dlg.showModal();fitK(fitB)}
+$('bwBox').addEventListener('click',openBw);
+$('bwBox').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();openBw()}});
+$('bwClose').onclick=()=>dlg.close();
+dlg.addEventListener('click',e=>{if(e.target===dlg)dlg.close()});
+dlg.addEventListener('close',()=>{fitS.appendChild(bw.el);fitK(fitS);$('bwBox').focus()});
+
+resize();projectAll();paintChips();
+// resting frame: show the map mid-flight so the first view is complete
+si=2;te=2000;paintChips();capEl.textContent='One sentence in a noisy station → a booked, paid ride. Press Play to run it.';
+say('Nicolas','RER B est en panne ! … réserve-moi une voiture pour CDG 2E, avec mon chien guide !');speaking=0;
+requestAnimationFrame(t=>{last=t;tick(t)});
+})();
+</script>

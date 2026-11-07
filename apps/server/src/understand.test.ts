@@ -25,8 +25,8 @@ describe('understand', () => {
   });
   it('leaves unknown destination and deadline missing instead of inventing facts', async () => {
     const result = await understand({ transcript: 'I need the airport, RER B is down', profile, now }, clientWith({ trip: {} }));
-    expect(result.trip).toEqual({ passengers: 1, guide_dog: true });
-    expect(result.missing).toEqual(['origin', 'destination', 'deadline', 'luggage']);
+    expect(result.trip).toEqual({ passengers: 1, luggage: 0, guide_dog: true });
+    expect(result.missing).toEqual(['origin', 'destination', 'deadline']);
   });
   it('preserves and canonicalizes previous cutoff when the reply supplies another field', async () => {
     const result = await understand({ transcript: 'one bag', profile, now, previous: { deadline: '2026-11-07T19:00:00Z' } }, clientWith({ trip: { luggage: 1 } }));

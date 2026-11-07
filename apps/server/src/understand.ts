@@ -69,9 +69,9 @@ Do not copy defaults or previous facts into the output. Missing facts must be om
       facts.deadline = parisIso(new Date(Date.parse(extracted.departure) - 60 * 60_000));
       notes = 'Check-in cutoff derived as flight departure minus 60 minutes.';
     } else if (facts.deadline) facts.deadline = parisIso(new Date(facts.deadline));
-    const trip = TripSchema.partial().parse({ passengers: 1, guide_dog: profile.guide_dog, ...parsedPrevious.data, ...facts });
+    const trip = TripSchema.partial().parse({ passengers: 1, luggage: 0, guide_dog: profile.guide_dog, ...parsedPrevious.data, ...facts });
     if (trip.deadline) trip.deadline = parisIso(new Date(trip.deadline));
-    const missing = (Object.keys(TripSchema.shape) as (keyof Trip)[]).filter((key) => trip[key] === undefined);
+    const missing = (['origin', 'destination', 'deadline'] as const).filter((key) => trip[key] === undefined);
     return { trip, missing, ...(notes ? { notes } : {}) };
   } catch (error) {
     if (error instanceof UnderstandError) throw error;

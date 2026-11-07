@@ -79,9 +79,9 @@ explicitly labelled. Unsupported languages fall back to English.
 
 `understand({ transcript, profile, now, previous? }, client?)` uses the official
 `@google/genai` SDK and `GEMINI_API_KEY`. `previous` is the earlier `result.trip`.
-It returns `{ trip, missing, notes? }`; passengers default to 1 and guide-dog
-status defaults to the profile, while unknown origin/destination/deadline/luggage
-remain missing. An unspecified “airport” is not silently turned into CDG.
+It returns `{ trip, missing, notes? }`; passengers default to 1, luggage to 0 and
+guide-dog status to the profile. Only unknown origin, destination and deadline
+require clarification. An unspecified “airport” is not silently turned into CDG.
 Flight departure is extracted separately; code subtracts 60 elapsed minutes to
 derive check-in cutoff and labels that assumption in `notes`. Times are serialized
 with Europe/Paris's seasonal offset. The profile's contact details are not sent
@@ -119,3 +119,43 @@ pnpm exec tsx apps/server/src/smoke-adapters.ts linkup
 The search smoke uses a 15-second timeout, prints only the first three snippets
 (400 characters each), and includes the Paris date in its query. No state machine,
 HTTP routes, or live H browser sessions are added by these adapters.
+
+## M4 session orchestration
+
+`VoilaSession(emit, ports?)` accepts validated web events through `handle`, emits
+shared server events, and exposes `stage`, `attach(emit)`, `markPaid(ref)` and
+`dispose()`. All service ports, the clock, timers and logger can be replaced in
+tests. Research begins with the first transcript, alongside understanding, and
+continues during clarification; presentation waits for a complete trip. GPS is
+used as a coordinate origin when no spoken origin is available. PRIM and Linkup
+have independent deadlines; failures retain preset options rather than blocking
+the trip. PRIM recorded-mode feed entries explicitly say “recorded data”.
+
+`stop` aborts research and the H runner, resolves pending confirmation negatively,
+and invalidates callbacks from older operations. Heartbeats run after four silent
+seconds in UNDERSTAND, RESEARCH and EXECUTE. Agent progress remains in the feed;
+its spoken updates are throttled to eight seconds. Confirmation replies accept
+French/English yes/no phrases; unclear replies do not approve a booking.
+
+Run `pnpm --filter @voila/server dev` (PORT defaults to 3000). `/ws/session/:id`
+creates an in-memory session. Reconnecting to the same id replaces its active
+socket and replays the current stage without restarting work. Send `hello` once
+with the shared profile/GPS shape; subsequent messages use `WebEventSchema`.
+Sessions are retained until process shutdown, with no persistence or expiry yet.
+Embedding code can use `createSessionServer({ port: 0, ports })` and `close()`.
+
+Set `SHUTTLE_PUBLIC_URL` to a public clone URL for H bookings (private/local URLs
+are rejected). A bare origin starts at `/fr/reservation/`, letting the clone
+initialize the browser's draft; a configured route URL is preserved. Set
+`HAI_API_KEY` for H, optional `PRIM_API_KEY` for live traffic, and the Gemini/Linkup
+keys described above. Tests inject fakes and never start H sessions.
+
+`POST /internal/payment-completed` matches the clone's callback:
+`Authorization: Bearer <INTERNAL_CALLBACK_TOKEN>` and JSON
+`{ "order_id": "clone-order-id", "ref": "PAS-...", "status": "paid" }`.
+Configure the same nonempty token on both servers; missing/bad tokens get 401.
+Authorization compares fixed-length SHA-256 digests with `timingSafeEqual`.
+The booking reference routes the receipt to an awaiting session; duplicate
+receipts are idempotent. Unknown references return 404, malformed payloads 400.
+The demo `paid` web event also finishes the awaiting booking; it is not independent
+proof of a Stripe payment. On disconnect, work continues for reconnection.

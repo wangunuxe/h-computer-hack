@@ -32,6 +32,7 @@ describe('web static serving', () => {
     cleanup.push(() => rm(root, { recursive: true, force: true }));
     await writeFile(join(root, 'index.html'), '<!doctype html><title>Voilà</title>');
     await writeFile(join(root, 'app.js'), 'window.voila = true;');
+    await writeFile(join(root, 'showcase.html'), '<!doctype html><title>Voilà Agent Map</title>');
     const registry = new SessionRegistry(); cleanup.push(() => registry.dispose());
     const app = createApp({ webDistDir: root, registry });
     for (const path of ['/', '/unknown/nested']) {
@@ -41,6 +42,10 @@ describe('web static serving', () => {
       expect(await response.text()).toContain('<title>Voilà</title>');
     }
     expect(await (await app.request('/app.js')).text()).toBe('window.voila = true;');
+    const showcase = await app.request('/showcase.html');
+    expect(showcase.status).toBe(200);
+    expect(showcase.headers.get('content-type')).toContain('text/html');
+    expect(await showcase.text()).toContain('<title>Voilà Agent Map</title>');
     expect(await (await app.request('/health')).json()).toEqual({ status: 'ok' });
     expect((await app.request('/session', { method: 'POST' })).status).toBe(201);
     expect((await app.request('/ws/session/test')).status).toBe(426);

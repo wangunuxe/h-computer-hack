@@ -1,6 +1,6 @@
 import { ScenarioSchema, ServerEventSchema, type WebEvent } from '@voila/shared';
 import { canStop, initialState, optionEvent, reduce, transcriptEvent, type Stage } from './state.js';
-import { SpeechQueue } from './speech.js';
+import { BrowserSpeech, SpeechQueue } from './speech.js';
 import { Recorder, type Credentials } from './recorder.js';
 import { clientProfile, deviceLanguage } from './preferences.js';
 import { labels, optionNames, stages } from './labels.js';
@@ -23,32 +23,31 @@ const sessionStorage = new SessionStorage();
 const savedSession = sessionStorage.load();
 if (savedSession) { credentials = { id: savedSession.id, resume_token: savedSession.resume_token }; helloSent = savedSession.helloSent; }
 let attempt: ConnectionAttempt | undefined;
-let recorder: Recorder | undefined; let releasing = false; let audio: AudioContext | undefined;
+let recorder: Recorder | undefined; let releasing = false;
 let lastSay = ''; let pendingFocus: Stage | undefined;
+let lastCards = ''; let lastNarrated = Date.now(); let lastConnection = '';
 const t = () => labels[language];
 
 function announce(text: string, assertive = false) {
-  if (assertive) { $('errors').replaceChildren(element('p', text)); voice.enqueue(text); }
+  if (assertive) { $('errors').replaceChildren(element('p', text)); }
   else { lastSay = text; $('caption').replaceChildren(document.createTextNode(text)); }
+  lastNarrated = Date.now(); voice.enqueue(text);
 }
-function speech() {
-  return new SpeechQueue({ speak(text, lang, done) {
-    if (!window.speechSynthesis) { done(); return; }
-    const utterance = new SpeechSynthesisUtterance(text); utterance.lang = lang; utterance.onend = done; utterance.onerror = done; speechSynthesis.speak(utterance);
-  }, cancel: () => window.speechSynthesis?.cancel() }, language === 'fr' ? 'fr-FR' : 'en-GB');
-}
-const voice = speech();
+const voice = new SpeechQueue(new BrowserSpeech(() => {
+  voice.hold();
+  $('errors').textContent = language === 'fr' ? 'Touchez Activer la voix pour écouter à nouveau.' : 'Tap Enable voice to hear this again.';
+  $('errors').setAttribute('role', 'alert'); $('errors').setAttribute('aria-live', 'assertive');
+}), language === 'fr' ? 'fr-FR' : 'en-GB');
 function unlock() {
-  voice.bargeIn();
-  if (window.speechSynthesis) { const silence = new SpeechSynthesisUtterance(' '); silence.lang = language; speechSynthesis.speak(silence); }
+  for (const id of ['connection', 'errors']) { $(id).setAttribute('aria-live', 'off'); $(id).setAttribute('role', 'none'); }
   voice.unlock();
 }
 function cue(stopping = false) {
   navigator.vibrate?.(stopping ? [20, 30, 20] : 35);
   try {
-    audio ??= new AudioContext(); void audio.resume();
+    const audio = new AudioContext(); void audio.resume();
     const oscillator = audio.createOscillator(); const gain = audio.createGain(); gain.gain.value = 0.08;
-    oscillator.frequency.value = stopping ? 440 : 660; oscillator.connect(gain).connect(audio.destination); oscillator.start(); oscillator.stop(audio.currentTime + 0.08);
+    oscillator.frequency.value = stopping ? 440 : 660; oscillator.connect(gain).connect(audio.destination); oscillator.onended = () => { void audio.close(); }; oscillator.start(); oscillator.stop(audio.currentTime + 0.08);
   } catch { /* Haptics and earcons are optional. */ }
 }
 function send(event: WebEvent) {
@@ -70,6 +69,8 @@ function connection(ready: boolean) {
   connected = ready; document.body.dataset.connected = String(ready);
   if (ready && connectionFailed) { connectionFailed = false; $('errors').replaceChildren(); }
   $('connection').textContent = ready ? t().ready : connectionFailed ? t().connectionRetry : t().connecting;
+  const text = $('connection').textContent!;
+  if (text !== lastConnection) { lastConnection = text; voice.enqueue(text, 'connection'); lastNarrated = Date.now(); }
   recordingLabel();
 }
 function connectionFailure() {
@@ -120,7 +121,9 @@ async function connect() {
         if (event.type === 'profile_request') collectingProfile = true;
         if (event.type === 'stage' && state.stage !== previous) collectingProfile = false;
         if (event.type === 'stage' && state.stage !== previous) pendingFocus = ['UNDERSTAND', 'RESEARCH', 'EXECUTE'].includes(state.stage) ? undefined : state.stage;
-        if (event.type === 'say') { announce(event.text); voice.enqueue(event.text); }
+        if (event.type === 'stage' && state.stage !== previous) voice.enqueue(stages[language][state.stage], 'stage');
+        if (event.type === 'say') announce(event.text);
+        if (event.type === 'confirm') announce(event.summary);
         if (event.type === 'error') announce(event.message, true);
         if (event.type === 'clarify') announce(event.question);
         if (!['say', 'clarify', 'error', 'feed'].includes(event.type)) render();
@@ -148,6 +151,9 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pagehide', () => { if (credentials) sessionStorage.save(credentials, helloSent); });
 setInterval(() => { if (connected && credentials) sessionStorage.save(credentials, helloSent); }, 60_000);
+setInterval(() => {
+  if (!recorder && state.cancellable && voice.idle && Date.now() - lastNarrated >= 15_000) announce(language === 'fr' ? 'Je travaille toujours sur votre trajet. Vous pouvez dire stop.' : 'I am still working on your journey. You can say stop.');
+}, 5000);
 function recordingLabel() {
   const active = !!recorder && !releasing;
   const control = micControlState({ connected, failed: connectionFailed, active, releasing }, t());
@@ -161,19 +167,21 @@ function recordingLabel() {
 function start() {
   if (!connected) { retryConnection(); return; }
   if (recorder || !credentials || socket?.readyState !== WebSocket.OPEN) return;
-  unlock(); cue(); releasing = false;
+  voice.bargeIn(); voice.resume(); announce(t().listening); unlock(); voice.hold(); cue(); releasing = false;
   $('errors').replaceChildren();
   const current = new Recorder(sendTranscript, (failure) => { console.warn('Speech recording failed', recordingDiagnostic(failure)); announce(t()[recordingErrorKeys[failure.kind]], true); }, () => { if (recorder === current) { recorder = undefined; releasing = false; $('elapsed').hidden = true; recordingLabel(); } }, () => {
     releasing = true; cue(true); recordingLabel();
     const text = language === 'fr' ? 'Trois minutes atteintes. Je termine la transcription.' : 'Three-minute limit reached. Finishing the transcript.';
-    announce(text); voice.enqueue(text);
-  }, (seconds) => { $('elapsed').hidden = false; $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; });
+    announce(text);
+  }, (seconds) => { $('elapsed').hidden = false; $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }, () => voice.resume());
   recorder = current; recordingLabel(); void current.start(credentials);
 }
-function release() { if (!recorder || releasing) return; releasing = true; cue(true); recordingLabel(); recorder.stop(); }
+function release() { if (!recorder || releasing) return; releasing = true; unlock(); announce(t().processing); cue(true); recordingLabel(); recorder.stop(); }
 const talk = $<HTMLButtonElement>('talk');
 bindMicControls(talk, $('dock'), { active: () => !!recorder, start, release });
-$('stop').onclick = () => { unlock(); recorder?.cancel(); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); };
+$('stop').onclick = () => { voice.bargeIn(); voice.resume(); announce(t().stop); unlock(); recorder?.cancel(); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); };
+$('repeat').textContent = language === 'fr' ? 'Activer la voix · Répéter' : 'Enable voice · Repeat';
+$('repeat').onclick = () => { if (recorder) return; voice.bargeIn(); voice.enqueue([lastConnection, lastSay, lastCards].filter(Boolean).join('. ')); voice.resume(); unlock(); };
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) { const node = document.createElement(tag); if (text) node.textContent = text; return node; }
 function button(text: string, action: () => void) { const node = element('button', text); node.type = 'button'; node.onclick = () => { unlock(); action(); }; return node; }
@@ -221,6 +229,8 @@ function render() {
     card.append(heading, element('p', `${pickup} · ${booking.pickup_point}`), element('p', `${t().ref} ${booking.ref} · ${money(booking.price)}`)); actions.append(card);
   }
   document.body.dataset.cards = String(actions.children.length > 0);
+  const cards = Array.from(actions.children).map((node) => node.tagName === 'A' || node.tagName === 'BUTTON' ? node.getAttribute('aria-label') ?? node.textContent : node.textContent).join('. ');
+  if (cards !== lastCards) { lastCards = cards; if (cards) { voice.enqueue(cards, 'cards'); lastNarrated = Date.now(); } }
   {
     const target = document.getElementById('primary-content');
     if (pendingFocus && target) { target.focus({ preventScroll: true }); target.scrollIntoView({ block: 'center' }); pendingFocus = undefined; }
@@ -232,7 +242,7 @@ function render() {
 function localize() {
   document.documentElement.lang = language; document.title = t().title;
   $('stop').textContent = t().stop;
-  if (!lastSay) { lastSay = t().welcome; $('caption').textContent = lastSay; }
+  if (!lastSay) announce(t().welcome);
   render();
 }
 localize(); connection(false); void connect();

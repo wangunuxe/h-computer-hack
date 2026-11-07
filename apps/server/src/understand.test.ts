@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ThinkingLevel } from '@google/genai';
 import type { Profile } from '@voila/shared';
-import { understand, UnderstandError, type UnderstandingClient } from './understand.js';
+import { understand, relativeFlightTime, UnderstandError, type UnderstandingClient } from './understand.js';
 
 const profile: Profile = { name: 'Karim', email: 'karim@example.com', phone: '+33612345678', language: 'fr', guide_dog: true };
 const now = new Date('2026-11-07T12:00:00Z');
@@ -9,6 +9,31 @@ const clientWith = (value: unknown) => ({ models: { generateContent: vi.fn<Under
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe('understand', () => {
+  it.each(['my airplane is in 2 hours i need arrive cdg as soon as possible', 'my plane is in two hours, I need to get to CDG ASAP', 'mon avion part dans 2 heures, je dois arriver à CDG au plus vite', 'mon vol est dans deux heures, je pars tout de suite'])('defaults to departure now and derives the flight cutoff without another time question: %s', async (transcript) => {
+    const client = clientWith({ trip: { destination: 'CDG' } });
+    const result = await understand({ transcript, profile, now, previous: { origin: 'Gare du Nord' } }, client);
+    expect(result.trip.deadline).toBe('2026-11-07T14:00:00+01:00'); expect(result.missing).toEqual([]);
+    const request = client.models.generateContent.mock.calls[0]![0];
+    expect(JSON.parse(String(request.contents)).journey_departure).toBe('2026-11-07T13:00:00+01:00');
+    expect(JSON.stringify(request.config!.responseJsonSchema)).toContain('flight_departure');
+    expect(request.config!.systemInstruction).toContain('Never ask for a car departure time');
+  });
+  it('parses the explicitly named model flight departure and keeps an unknown origin missing', async () => {
+    const result = await understand({ transcript: 'my flight takes off at 15:00, CDG asap', profile, now }, clientWith({ trip: { destination: 'CDG' }, flight_departure: '2026-11-07T15:00:00+01:00' }));
+    expect(result.trip.deadline).toBe('2026-11-07T14:00:00+01:00'); expect(result.missing).toEqual(['origin']);
+  });
+  it('uses elapsed hours across midnight and DST without mistaking an arrival limit for flight time', () => {
+    expect(relativeFlightTime('mon avion part dans 2 heures', new Date('2027-03-28T00:30:00Z'))).toBe('2027-03-28T04:30:00+02:00');
+    expect(relativeFlightTime('my plane is in two hours', new Date('2026-11-07T22:30:00Z'))).toBe('2026-11-08T01:30:00+01:00');
+    expect(relativeFlightTime('mon vol est annulé, je dois arriver dans deux heures', now)).toBeUndefined();
+    expect(relativeFlightTime('my flight is in 2 hours two passengers', now)).toBe('2026-11-07T15:00:00+01:00');
+    expect(relativeFlightTime('mon avion part dans 2h30', now)).toBe('2026-11-07T15:30:00+01:00');
+    expect(relativeFlightTime('', now)).toBeUndefined();
+  });
+  it('keeps an explicit check-in cutoff instead of subtracting the margin twice', async () => {
+    const result = await understand({ transcript: 'my plane is in 2 hours, check-in closes in 30 minutes, CDG asap', profile, now }, clientWith({ trip: { destination: 'CDG', deadline: '2026-11-07T13:30:00+01:00' } }));
+    expect(result.trip.deadline).toBe('2026-11-07T13:30:00+01:00');
+  });
   it('redacts all comma-separated 00 international groups without hiding passenger counts', async () => {
     const client = clientWith({ trip: {} });
     await understand({ transcript: 'mon numéro, zéro zéro quatre quatre, sept sept, zéro zéro, neuf zéro, zéro un, deux trois, 2 personnes à 20:45 vers CDG', profile, now }, client);

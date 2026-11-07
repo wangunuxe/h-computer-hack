@@ -44,6 +44,14 @@ beforeEach(() => { vi.useFakeTimers(); Socket.instances = []; Worklet.instances 
 afterEach(() => { for (const recorder of active.splice(0)) recorder.cancel(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('recorder audio startup and finalization', () => {
+  it('closes the microphone context and restores playback before notifying speech to resume', async () => {
+    const s = setup(), playback = vi.fn(), audioSession = { type: 'playback' };
+    Object.assign(navigator, { audioSession });
+    const recorder = new Recorder(s.transcript, s.error, s.done, undefined, undefined, playback); active.push(recorder);
+    await recorder.start(credentials); expect(audioSession.type).toBe('play-and-record'); Socket.instances[0]!.open(); Worklet.instances[0]!.emit(new ArrayBuffer(2));
+    recorder.stop(); expect(s.track.stop).toHaveBeenCalled(); expect(playback).not.toHaveBeenCalled();
+    await flush(); expect(audioSession.type).toBe('playback'); expect(playback).toHaveBeenCalledOnce();
+  });
   it('finishes normally at 180 seconds and delivers all final utterances', async () => {
     const s = setup(); const limit = vi.fn(), elapsed = vi.fn();
     const recorder = new Recorder(s.transcript, s.error, s.done, limit, elapsed); active.push(recorder);

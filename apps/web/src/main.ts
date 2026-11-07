@@ -25,7 +25,7 @@ if (savedSession) { credentials = { id: savedSession.id, resume_token: savedSess
 let attempt: ConnectionAttempt | undefined;
 let recorder: Recorder | undefined; let releasing = false;
 let lastSay = ''; let pendingFocus: Stage | undefined;
-let lastCards = ''; let lastNarrated = Date.now(); let speechNeedsGesture = true;
+let lastCards = ''; let lastNarrated = Date.now(); let speechNeedsGesture = true; let progressCue = 0;
 const t = () => labels[language];
 
 function announce(text: string, assertive = false) {
@@ -149,7 +149,10 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', () => { if (credentials) sessionStorage.save(credentials, helloSent); });
 setInterval(() => { if (connected && credentials) sessionStorage.save(credentials, helloSent); }, 60_000);
 setInterval(() => {
-  if (!recorder && state.cancellable && voice.idle && Date.now() - lastNarrated >= 15_000) announce(language === 'fr' ? 'Je travaille toujours sur votre trajet. Vous pouvez dire stop.' : 'I am still working on your journey. You can say stop.');
+  if (!recorder && state.cancellable && voice.idle && Date.now() - lastNarrated >= 30_000) {
+    const cues = language === 'fr' ? ['Je reste en attente du serveur. Vous pouvez dire stop.', 'Votre demande est toujours en cours. Je vous informe dès que le serveur répond.'] : ['I am waiting for the server. You can say stop.', 'Your request is still in progress. I will tell you when the server responds.'];
+    announce(cues[progressCue++ % cues.length]!);
+  }
 }, 5000);
 function recordingLabel() {
   const active = !!recorder && !releasing;

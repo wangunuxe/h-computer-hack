@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Tool, HaiAgents } from 'hai-agents';
-import { bookingErrorMessage, runBooking, type BookingClient, type BookingInput } from './booking.js';
+import { bookingAction, bookingErrorMessage, runBooking, type BookingClient, type BookingInput } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
 
 const answer = { ref: 'PAS-123', pickup_time: '2027-01-15T12:15:00+01:00', pickup_point: 'Gare du Nord', price: 65, operator_phone: '+33184800000', guide_dog_status: 'unknown' };
@@ -38,6 +38,79 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  describe('stall watchdog', () => {
+    beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00Z')); });
+    const hung = async function* (): AsyncGenerator<HaiAgents.SessionEvent> { await new Promise(() => {}); };
+    const ready = async (mock: ReturnType<typeof setup>) => { await vi.waitFor(() => expect(mock.handle.stream).toHaveBeenCalled()); };
+    it('cancels a zero-step session at 45 seconds and retries only once', async () => {
+      const mock = setup(hung); mock.input.onRetry = vi.fn();
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await ready(mock);
+      await vi.advanceTimersByTimeAsync(44_000); expect(mock.cancel).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(() => expect(mock.startSession).toHaveBeenCalledTimes(2));
+      expect(mock.cancel).toHaveBeenCalledOnce(); expect(mock.input.onRetry).toHaveBeenCalledOnce();
+      const tools = (mock.startSession.mock.calls[0] as unknown as [{ tools: Tool[] }])[0].tools;
+      await expect(confirm(tools)).rejects.toThrow('no longer active'); expect(mock.input.confirm).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(await result).toBeInstanceOf(Error); expect(mock.cancel).toHaveBeenCalledTimes(2); expect(mock.startSession).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+    it('can complete the second attempt without reusing the first attempt tools or approval', async () => {
+      const mock = setup(hung), good = setup();
+      mock.startSession.mockResolvedValueOnce(mock.handle).mockResolvedValueOnce(good.handle);
+      const result = runBooking(mock.input, mock.client);
+      await ready(mock); await vi.advanceTimersByTimeAsync(45_000);
+      const completed = await result;
+      expect(completed.booking.ref).toBe(answer.ref); expect(mock.cancel).toHaveBeenCalledOnce(); expect(good.cancel).toHaveBeenCalledOnce();
+      expect(completed.metrics.durationMs).toBeGreaterThanOrEqual(45_000); expect(completed.metrics.costUsd).toBeNull();
+      expect(mock.input.confirm).toHaveBeenCalledOnce(); expect(mock.input.onPaymentHandoff).toHaveBeenCalledOnce();
+    });
+    it('waits 60 seconds after the last increasing metric, not after initial observation', async () => {
+      const mock = setup(async function* () {
+        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 1 } } };
+        await new Promise((resolve) => setTimeout(resolve, 30_000));
+        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 2 } } };
+        await new Promise(() => {});
+      });
+      const controller = new AbortController(); mock.input.signal = controller.signal;
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await ready(mock); await vi.advanceTimersByTimeAsync(89_000); expect(mock.cancel).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1000); await vi.waitFor(() => expect(mock.startSession).toHaveBeenCalledTimes(2));
+      controller.abort(); await result;
+    });
+    it('does not count waiting for the human confirmation as a stall', async () => {
+      let release!: (value: { approved: boolean; reply: string }) => void;
+      const mock = setup(); mock.input.confirm = vi.fn(() => new Promise((resolve) => { release = resolve; }));
+      const controller = new AbortController(); mock.input.signal = controller.signal;
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await vi.waitFor(() => expect(mock.input.confirm).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(180_000); expect(mock.cancel).not.toHaveBeenCalled(); expect(mock.startSession).toHaveBeenCalledOnce();
+      controller.abort(); release({ approved: false, reply: 'stop' }); await result;
+    });
+    it('never automatically rebooks after approval, even if no further step arrives', async () => {
+      const mock = setup(async function* (tools) { await confirm(tools); await new Promise(() => {}); });
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await vi.waitFor(() => expect(mock.input.confirm).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(await result).toBeInstanceOf(Error); expect(mock.startSession).toHaveBeenCalledOnce(); expect(mock.cancel).toHaveBeenCalledOnce();
+    });
+    it('does not retry if cancellation fails', async () => {
+      const mock = setup(hung); mock.cancel.mockRejectedValue(new Error('cancel failed'));
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await ready(mock); await vi.advanceTimersByTimeAsync(45_000);
+      expect(await result).toBeInstanceOf(AggregateError); expect(mock.startSession).toHaveBeenCalledOnce();
+    });
+    it('stops immediately on external cancellation without automatic retry', async () => {
+      const mock = setup(hung), controller = new AbortController(); mock.input.signal = controller.signal;
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await ready(mock); controller.abort(new Error('stop')); expect(await result).toEqual(new Error('stop')); expect(mock.startSession).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+    it.each([['Pickup address input', 'pickup'], ['Dropoff address', 'dropoff'], ['Pickup date calendar', 'date'], ['Pickup time', 'time'], ['Vehicle class', 'vehicle'], ['Email', 'passenger'], ['Notes for the driver', 'notes'], ['Unrelated private text', undefined]])('maps only known element descriptions: %s', (element, expected) => {
+      expect(bookingAction(element!)).toBe(expected);
+    });
+  });
   it('briefs H with the stated pickup instead of a station example', async () => {
     const mock = setup(); mock.input.trip.origin = 'Étoile'; await runBooking(mock.input, mock.client);
     const params = mock.startSession.mock.calls[0] as unknown as [{ agent: { instructions: string } }];
@@ -239,6 +312,14 @@ describe('H booking runner', () => {
     });
     await runBooking(mock.input, mock.client);
     expect(mock.input.onProgress).toHaveBeenCalledWith('Selecting vehicle');
+  });
+  it('reports known action categories without speaking arbitrary policy or entered values', async () => {
+    const mock = setup(async function* (tools) {
+      yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'policy_event', content: 'untrusted policy text', toolReqs: [{ toolName: 'write', args: { element: 'Pickup address input field', text: 'private address' } }, { toolName: 'unknown_tool', args: { element: 'Vehicle' } }] } };
+      await confirm(tools); yield observation(stub); await handoff(tools);
+    });
+    mock.input.onAction = vi.fn(); await runBooking(mock.input, mock.client);
+    expect(mock.input.onAction).toHaveBeenCalledExactlyOnceWith('pickup');
   });
 
   it('reports tool-only policy steps like the recorded real H stream', async () => {

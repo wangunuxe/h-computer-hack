@@ -16,6 +16,7 @@ export function page(title: string, body: ReturnType<typeof html>) {
 }
 export function routePage(draft: Draft, error = '', values?: Record<string, string>) {
   const route = values ?? draft.route;
+  const minimumDate = parisToday();
   const address = (name: 'pickup' | 'dropoff', label: string) => html`
     <div class="field address"><label>${label}</label>
     <input name="${name}" id="${name}" class="address-input" autocomplete="off" required value="${route?.[name] ?? ''}">
@@ -26,8 +27,8 @@ export function routePage(draft: Draft, error = '', values?: Record<string, stri
     <form method="post" action="/fr/reservation/${draft.id}/route">
     ${address('pickup', 'Pickup address')}${address('dropoff', 'Dropoff address')}
     <div class="field"><label>Pickup date</label>${draft.difficulty === 'easy'
-      ? html`<input type="date" name="date" min="${parisToday()}" required value="${route?.date ?? ''}">`
-      : html`<input type="text" name="date" id="pickup-date" readonly required value="${route?.date ?? ''}" placeholder="Click calendar to choose">`}</div>
+      ? html`<input type="date" name="date" min="${minimumDate}" required value="${route?.date ?? ''}">`
+      : html`<input type="text" name="date" id="pickup-date" data-min-date="${minimumDate}" readonly required value="${route?.date ?? ''}" placeholder="Click calendar to choose">`}</div>
     <div class="field"><label>Pickup time</label><select name="time">${timeOptions.map((time) =>
       html`<option value="${time}"${(route?.time ?? '00:00') === time ? html` selected` : ''}>${time}</option>`)}</select></div>
     <button type="submit">Continue to vehicles</button></form>`);

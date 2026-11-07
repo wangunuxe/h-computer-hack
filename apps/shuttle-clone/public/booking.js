@@ -1,6 +1,12 @@
 /* global jQuery */
 jQuery(function ($) {
-  $('#pickup-date').datepicker({ dateFormat: 'yy-mm-dd', minDate: 0 });
+  $('#pickup-date').each(function () {
+    const input = $(this);
+    input.datepicker({
+      dateFormat: 'yy-mm-dd',
+      minDate: $.datepicker.parseDate('yy-mm-dd', input.attr('data-min-date')),
+    });
+  });
   const addresses = [
     ['Gare du Nord, 18 Rue de Dunkerque, Paris', 48.8809, 2.3553],
     ['Gare de Lyon, Place Louis-Armand, Paris', 48.8449, 2.3735],

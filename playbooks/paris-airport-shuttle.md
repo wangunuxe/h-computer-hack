@@ -43,7 +43,8 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
   - Louvre Museum, Rue de Rivoli, Paris
 - Real-mode date: readonly text. CLICK it to open jQuery UI calendar, use the
   header's left/right arrows to change month, then click a day. Earlier days
-  are disabled. The selected format is YYYY-MM-DD; do not type into it.
+  before Europe/Paris today are disabled, regardless of browser timezone. The
+  selected format is YYYY-MM-DD; do not type into it.
 - Easy-mode date: native date input. Addresses accept nonempty free text without
   coordinates in easy mode. All other controls and steps remain unchanged.
 - Both modes reject dates before today in Europe/Paris, returning to step 1 with

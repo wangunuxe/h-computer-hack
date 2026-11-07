@@ -41,6 +41,24 @@ async function complete(app: App, easy = false) {
 }
 
 describe('four-step booking', () => {
+  it('renders the same Paris date minimum for both date controls across a timezone boundary', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-07T23:30:00Z'));
+    try {
+      const { app } = setup();
+      const hard = await start(app);
+      const easy = await start(app, true);
+      const hardHtml = await (await app.request(hard + '/route')).text();
+      const easyHtml = await (await app.request(easy + '/route')).text();
+      const expected = parisToday();
+      expect(expected).toBe('2026-11-08');
+      expect(hardHtml).toContain(`data-min-date="${expected}"`);
+      expect(easyHtml).toContain(`min="${expected}"`);
+      expect(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date())).toBe('2026-11-07');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it.each([false, true])('selects only midnight by default and preserves chosen time (easy=%s)', async (easy) => {
     const { app } = setup();
     const base = await start(app, easy);

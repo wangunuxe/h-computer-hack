@@ -4,6 +4,7 @@ import { VoilaSession, type SessionPorts } from './session.js';
 import type { BookingInput } from './booking.js';
 import { presetOptions } from './options.js';
 import { readRerBTraffic, type TrafficClient } from './adapters/traffic-h.js';
+import { understand } from './understand.js';
 
 const profile = { name: 'Karim', email: 'karim@example.com', phone: '+33612345678', language: 'en', guide_dog: true };
 const fare = { total_price: 65, currency: 'EUR' as const };
@@ -36,6 +37,13 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it('does not enter departure-time clarification for an ASAP relative flight with a known origin', async () => {
+    const client = { models: { generateContent: vi.fn(async () => ({ text: JSON.stringify({ trip: { origin: 'Gare du Nord', destination: 'CDG 2E' } }) })) } };
+    const s = setup({ understand: (input) => understand(input, client) }); s.hello();
+    s.session.handle({ type: 'final_transcript', text: 'At Gare du Nord, my airplane is in 2 hours i need arrive cdg as soon as possible' }); await flush();
+    expect(s.session.stage).toBe('CHOOSE'); expect(s.events).not.toContainEqual({ type: 'stage', stage: 'CLARIFY' });
+    expect(s.ports.converse).not.toHaveBeenCalled(); expect(s.ports.runBooking).not.toHaveBeenCalled();
+  });
   it('keeps comma-separated profile phone replies local and sends the confirmed number to booking', async () => {
     const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'fr', name: 'Marie', email: 'marie@example.com', guide_dog: false }, gps: null, scenario: 'live' });
     s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();

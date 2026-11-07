@@ -15,8 +15,20 @@ export interface UnderstandingClient {
 }
 const extractionSchema = z.object({
   trip: TripSchema.partial(),
-  departure: z.iso.datetime({ offset: true }).optional(),
+  flight_departure: z.iso.datetime({ offset: true }).describe('Flight take-off time, never the car pickup or journey departure.').optional(),
 });
+
+const durationWords: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, sept: 7, huit: 8, neuf: 9, dix: 10, onze: 11, douze: 12 };
+const durationAmount = `(?:\\d+(?:[.,]\\d+)?|${Object.keys(durationWords).join('|')})`;
+const relativeFlight = new RegExp(`\\b(?:airplane|plane|flight|avion|vol)(?:\\s+(?:is|leaves|departs|takes off|est|part|decolle))?\\s+(?:in|dans)\\s+(${durationAmount})\\s*(hours?|heures?|h|minutes?|min)(?![a-z])(?:\\s*(${durationAmount})\\s*(?:minutes?|min)\\b)?`, 'i');
+export function relativeFlightTime(transcript: string, now: Date): string | undefined {
+  const match = relativeFlight.exec(transcript.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/(\d)h(\d{1,2})(?!\d)/g, '$1 heures $2 minutes'));
+  if (!match) return;
+  const amount = (value: string) => durationWords[value] ?? Number(value.replace(',', '.'));
+  const minutes = amount(match[1]!) * (/^(?:min|minute)/.test(match[2]!) ? 1 : 60) + (match[3] ? amount(match[3]) : 0);
+  const date = new Date(now.getTime() + minutes * 60_000);
+  return Number.isFinite(date.getTime()) ? parisIso(date) : undefined;
+}
 
 export function parisIso(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -55,7 +67,7 @@ export async function understand({ transcript, profile, now, previous = {}, sign
     });
     const response = await Promise.race([sdk.models.generateContent({
       model,
-      contents: JSON.stringify({ transcript: redactContactText(transcript, profile), previous: parsedPrevious.data, guide_dog_default: parsedProfile.data.guide_dog ?? false, now: parisIso(now) }),
+      contents: JSON.stringify({ transcript: redactContactText(transcript, profile), previous: parsedPrevious.data, guide_dog_default: parsedProfile.data.guide_dog ?? false, now: parisIso(now), journey_departure: parisIso(now) }),
       config: {
         abortSignal: controller.signal,
         thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
@@ -64,17 +76,19 @@ export async function understand({ transcript, profile, now, previous = {}, sign
 Use previous trip only as context; output new or corrected facts. Do not invent an origin, destination, deadline or luggage count.
 "airport" alone does not identify an airport: omit destination until clarified. Correct clear recognition errors such as "gar du nor" and "charle de gol".
 All dates and clock times are Europe/Paris. Resolve today/tomorrow against now; use the correct seasonal offset. Never silently roll a past clock time to tomorrow.
-trip.deadline is an explicitly supplied arrival deadline or check-in cutoff. Resolve relative arrival limits ("within 2 hours", "dans deux heures maximum") by adding elapsed time to now, including midnight or DST rollover; never copy the current clock time onto tomorrow's date. If a preferred limit and a larger maximum are both stated, use the earlier preferred limit. A flight departure is NOT the cutoff: return it as departure instead, and omit trip.deadline unless an explicit cutoff was also stated. The caller subtracts 60 minutes.
+The car journey starts now by default, including omitted departure times and "asap", "as soon as possible", "now", "tout de suite", "au plus vite". Never ask for a car departure time. Do not interpret ASAP as missing information. Do not invent a departure-time requirement.
+trip.deadline is an explicitly supplied arrival deadline or check-in cutoff. Resolve relative arrival limits ("within 2 hours", "dans deux heures maximum") by adding elapsed time to now, including midnight or DST rollover; never copy the current clock time onto tomorrow's date. If a preferred limit and a larger maximum are both stated, use the earlier preferred limit. A flight departure is NOT the cutoff: return it as flight_departure instead, and omit trip.deadline unless an explicit cutoff was also stated. Resolve "my airplane is in 2 hours" and "mon avion part dans deux heures" as flight_departure = now + 2 elapsed hours, even when combined with ASAP. The caller subtracts the existing 60-minute check-in margin. Do not ask the user for a flight time they have already given as a relative duration.
 Do not copy defaults or previous facts into the output. Missing facts must be omitted, not null. Guide-dog statements in the transcript override the profile.`,
       },
     }), timeout, interrupted]);
     let extracted: z.infer<typeof extractionSchema>;
-    try { extracted = extractionSchema.parse(JSON.parse(response.text ?? '')); }
+    try { const raw = JSON.parse(response.text ?? ''); extracted = extractionSchema.parse({ ...raw, flight_departure: raw.flight_departure ?? raw.departure }); }
     catch { throw new UnderstandError('invalid_output', 'Gemini returned invalid trip JSON.'); }
     const facts = extracted.trip;
     let notes: string | undefined;
-    if (!facts.deadline && extracted.departure) {
-      facts.deadline = parisIso(new Date(Date.parse(extracted.departure) - 60 * 60_000));
+    const flightDeparture = relativeFlightTime(transcript, now) ?? extracted.flight_departure;
+    if (!facts.deadline && flightDeparture) {
+      facts.deadline = parisIso(new Date(Date.parse(flightDeparture) - 60 * 60_000));
       notes = 'Check-in cutoff derived as flight departure minus 60 minutes.';
     } else if (facts.deadline) facts.deadline = parisIso(new Date(facts.deadline));
     const trip = TripSchema.partial().parse({ passengers: 1, luggage: 0, guide_dog: profile.guide_dog ?? false, ...parsedPrevious.data, ...facts });

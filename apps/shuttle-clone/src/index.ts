@@ -1,6 +1,5 @@
 import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
+import { createApp } from './app.js';
 
-const app = new Hono();
-app.get('/', (c) => c.text('Voilà shuttle clone — TODO'));
+const app = createApp();
 serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3001) });

@@ -176,6 +176,11 @@ export function heroScenario(opts: ScenarioOptions = {}) {
     // ── 5. Act ───────────────────────────────────────────────────
     d.beat("Act");
     d.emit({ type: "stage", stage: "EXECUTE" });
+    d.emit({ type: "cue", name: "pipeline", show: true });
+    await d.say("Under the hood: Voilà briefs H's computer-use agent. It reads the screen as pixels, and stops twice for Karim.");
+    await d.wait(3500);
+    d.emit({ type: "cue", name: "pipeline", show: false });
+    await d.wait(600);
     d.emit({ type: "cue", name: "focus", panel: "agent" });
     d.agent({ kind: "session", model: "holo4-27b", session_id: "ses_8f2c1e", max_steps: 60 });
     d.emit({ type: "feed", kind: "agent", text: "H Agents API · holo4-27b · cloud browser 1280×800 · playbook paris-airport-shuttle.md" });

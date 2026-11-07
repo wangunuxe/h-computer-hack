@@ -1,6 +1,7 @@
 import "./styles/stage.css";
 import "./styles/phone.css";
 import "./styles/site.css";
+import "./styles/pipeline.css";
 import { Bus } from "./core/bus";
 import { Director } from "./core/director";
 import { sfx } from "./core/audio";
@@ -13,6 +14,7 @@ import { mountFeed } from "./ui/feed";
 import { mountAgentView } from "./ui/agent-view";
 import { mountCaptions } from "./ui/captions";
 import { mountOverlays } from "./ui/overlays";
+import { mountPipeline } from "./ui/pipeline";
 
 const params = new URLSearchParams(location.search);
 const stage = document.getElementById("stage")!;
@@ -46,6 +48,7 @@ const phone = mountPhone(phoneCol, bus, { framed: true });
 mountFeed(main, bus, elapsed);
 mountAgentView(main, bus);
 mountCaptions(stage, bus);
+const pipeline = mountPipeline(stage, bus);
 stage.append(h("div", { class: "fx-vignette" }), h("div", { class: "fx-grain" }));
 
 setInterval(() => {
@@ -154,6 +157,7 @@ window.addEventListener("keydown", (e) => {
     overlays.showTitle();
     begun = false;
   }
+  if (k === "p") pipeline.toggle();
   if (k === "m") setMuted(!sfx.muted);
   if (k === "h") hud.classList.toggle("is-hidden");
   if (k === "f") {
@@ -170,4 +174,7 @@ const fit = () => {
 window.addEventListener("resize", fit);
 fit();
 
-if (params.has("autostart")) begin();
+if (params.get("scene") === "pipeline") {
+  stage.classList.add("is-static-pipeline");
+  pipeline.renderStatic();
+} else if (params.has("autostart")) begin();

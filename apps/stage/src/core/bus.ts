@@ -8,7 +8,8 @@ export type DirectorCue =
   | { type: "cue"; name: "listen_start" }
   | { type: "cue"; name: "finale"; stats: { label: string; value: string }[] }
   | { type: "cue"; name: "reset" }
-  | { type: "cue"; name: "user_say"; text: string };
+  | { type: "cue"; name: "user_say"; text: string }
+  | { type: "cue"; name: "pipeline"; show: boolean };
 
 export type BusEvent = ServerEvent | DirectorCue;
 type Handler = (e: BusEvent) => void;

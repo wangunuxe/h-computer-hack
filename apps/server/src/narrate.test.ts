@@ -64,6 +64,18 @@ describe('say', () => {
       expect(text).toBe('Paris Airport Shuttle, to CDG. Shall I confirm?');
     }
   });
+  it('ignores flight dates, flight times and unlabelled fares before the pickup facts', () => {
+    const summary = 'Flight date: 2027-01-16, Time: 23:00\nFlight price: 400 EUR\nVehicle: 70 EUR\nPickup: 2027-01-15T20:30:00+01:00\nTotal: 65 EUR';
+    const text = say('confirm', { ...confirmation, summary }, 'fr');
+    expect(text).toContain('aujourd’hui à 20 h 30, 65 €');
+    expect(text).not.toMatch(/23 h|demain|400|70/);
+  });
+  it.each(['Flight Time: 23:00\nFlight date: 2027-01-16\n65 EUR', '2027-01-15T20:00:00+01:00, 65 EUR'])('omits all unlabelled pickup and fare values: %s', (summary) => {
+    expect(say('confirm', { ...confirmation, trip: { ...confirmation.trip, guide_dog: false }, summary }, 'en')).toBe('Paris Airport Shuttle, to CDG. Shall I confirm?');
+  });
+  it.each(['Time: 20:30', 'Heure : 20h30', 'Prise en charge : 20:30'])('accepts a clearly labelled pickup time: %s', (summary) => {
+    expect(say('confirm', { ...confirmation, summary }, 'fr')).toContain('à 20 h 30');
+  });
   it.each([
     ['gare-du-nord-taxi', 'Taxi de la gare du Nord'], ['g7-phone', 'Taxi G7 par téléphone'],
     ['paris-airport-shuttle', 'Navette Paris Airport Shuttle'], ['rer-b-replacement-bus', 'Bus de remplacement du RER B'],

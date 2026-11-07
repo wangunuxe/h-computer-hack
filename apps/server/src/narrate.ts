@@ -32,10 +32,13 @@ export interface NarrationParams {
 
 function confirmationDetails(summary: string) {
   const text = summary.replace(/[*_`#]/g, '');
-  const iso = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})\b/.exec(text)?.[0];
+  const lines = text.split(/\r?\n/).map((line) => line.replace(/^\s*[-•]\s*/, '').trim());
+  const pickupLines = lines.filter((line) => /^(?:pickup\b|pick-up\b|prise en charge\b|time\s*:|heure\b|date\s*:.*\b(?:time|heure)\s*:)/i.test(line));
+  const pickup = pickupLines.map((line) => line.split(/\b(?:flight|vol)\b/i)[0]).join('\n');
+  const iso = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})\b/.exec(pickup)?.[0];
   const instant = iso ? new Date(iso) : undefined;
-  let date = /\b\d{4}-\d{2}-\d{2}\b/.exec(text)?.[0];
-  const labelledTime = /\b(?:pickup(?:\s+time)?|time|heure|prise en charge)\s*[:=-]?\s*(\d{1,2})\s*(?::(\d{2})|h(?:\s*(\d{2}))?)(?!\d)/i.exec(text);
+  let date = /\b\d{4}-\d{2}-\d{2}\b/.exec(pickup)?.[0];
+  const labelledTime = /\b(\d{1,2})\s*(?::(\d{2})|h(?:\s*(\d{2}))?)(?!\d)/i.exec(pickup.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})\b/g, ''));
   let hour = labelledTime ? Number(labelledTime[1]) : undefined;
   let minute = labelledTime ? Number(labelledTime[2] ?? labelledTime[3] ?? 0) : undefined;
   if (!labelledTime && instant && Number.isFinite(instant.getTime())) {
@@ -50,8 +53,9 @@ function confirmationDetails(summary: string) {
   }
   if (hour === undefined || hour > 23 || minute === undefined || minute > 59) { hour = undefined; minute = undefined; }
   const currency = /(?:EUR\b|€)\s*(\d+(?:[.,]\d{1,2})?)(?![\d.,])|(?<![\d.,+-])(\d+(?:[.,]\d{1,2})?)\s*(?:EUR\b|€)/gi;
-  const total = /\b(?:total|prix|price|montant)\s*[:=-]?\s*((?:EUR\b|€)\s*\d+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?\s*(?:EUR\b|€))/i.exec(text)?.[1];
-  const amounts = [...new Set([...((total ?? text).matchAll(currency))].map((match) => Number((match[1] ?? match[2])!.replace(',', '.'))))];
+  const priceLines = lines.filter((line) => /^(?:total|prix|price|montant)\b/i.test(line) || pickupLines.includes(line)).join('\n');
+  const total = /\b(?:total|prix|price|montant)\s*:?\s*((?:EUR\b|€)\s*\d+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?\s*(?:EUR\b|€))/i.exec(priceLines)?.[1];
+  const amounts = [...new Set([...(total ?? '').matchAll(currency)].map((match) => Number((match[1] ?? match[2])!.replace(',', '.'))))];
   const price = amounts.length === 1 && Number.isFinite(amounts[0]) ? amounts[0] : undefined;
   return { date, hour, minute, price };
 }

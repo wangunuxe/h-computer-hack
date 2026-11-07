@@ -44,3 +44,33 @@ the runner validates event payloads before using them rather than assuming that
 checking `type` alone narrows every payload.
 
 Real cloud/browser runs remain pending until HAI_API_KEY is available.
+
+## M4 planning modules (no state machine yet)
+
+`feasibility.ts` compares actual instants (including deadline UTC offsets), with a
+15-minute default buffer before the check-in cutoff. Guide-dog refusals take
+precedence over late-arrival rejection when both apply. Accepted options sort
+before unknown options, then by arrival. Refused options remain usable without a
+guide dog and sort last. `choose.ts` conservatively returns null on multiple
+matching options, including “taxi” when both the taxi rank and G7 are offered.
+
+`options.ts` exports `presetOptions`, `bookingMethods` and `mergeOptions`. Times
+and prices are illustrative estimates, not live availability or quotations. The
+replacement bus must be confirmed with station staff. Taxi guide-dog acceptance
+reflects the legal requirement, not a reservation confirmation from a driver.
+
+`adapters/prim.ts` accepts an explicit API key and injectable fetch; it never needs
+a key for recorded mode. The configured URL is
+`https://prim.iledefrance-mobilites.fr/marketplace/general-message?LineRef=STIF:Line::C01743:`
+with an `apikey` header. Attempts to read PRIM's public general-message page and
+FAQ returned HTTP 403. The endpoint, line identifier, header, and SIRI-Lite response
+shape therefore remain assumptions to verify with official API access; tests
+verify our request contract against a fake only.
+
+On missing keys, network/HTTP/parse errors, empty messages, timeout or caller abort,
+the adapter loads `scripts/fixtures/prim-rer-b.json` and sets `recorded: true`.
+That fixture is explicitly synthetic demo data, not an actual captured service
+response. Keep this file available alongside the repo when running built code.
+`narrate.ts` exports typed `say(key, params, language)` templates; option arrival
+times are spoken in Europe/Paris, prices in EUR, and recorded disruptions are
+explicitly labelled. Unsupported languages fall back to English.

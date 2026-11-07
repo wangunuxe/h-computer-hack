@@ -1,0 +1,21 @@
+{
+  "fixture_note": "Illustrative recorded-mode demo fixture, not a captured live PRIM response. Never present as current traffic information.",
+  "Siri": {
+    "ServiceDelivery": {
+      "ResponseTimestamp": "2026-11-07T17:00:00Z",
+      "GeneralMessageDelivery": [{
+        "Status": true,
+        "InfoMessage": [{
+          "InfoMessageIdentifier": { "value": "demo-rer-b-cdg-001" },
+          "Content": {
+            "LineRef": [{ "value": "STIF:Line::C01743:" }],
+            "Message": [{
+              "MessageType": "TEXT_ONLY",
+              "MessageText": { "lang": "fr", "value": "Trafic interrompu entre Gare du Nord et Aéroport Charles de Gaulle 2 en raison d'un incident de signalisation. Des bus de remplacement sont annoncés ; vérifiez leur départ auprès des agents en gare." }
+            }]
+          }
+        }]
+      }]
+    }
+  }
+}

@@ -6,6 +6,7 @@ export interface State {
   feed: Extract<ServerEvent, { type: 'feed' }>[]; error?: string;
 }
 export const initialState = (): State => ({ stage: 'LISTEN', options: [], feed: [] });
+export const canStop = (stage: Stage) => ['UNDERSTAND', 'RESEARCH', 'EXECUTE', 'CONFIRM', 'HANDOFF', 'AWAIT_PAYMENT'].includes(stage);
 export function reduce(state: State, event: ServerEvent): State {
   switch (event.type) {
     case 'stage': return event.stage === 'LISTEN' ? { ...initialState(), feed: state.feed } : { ...state, stage: event.stage };

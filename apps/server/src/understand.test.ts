@@ -9,6 +9,13 @@ const clientWith = (value: unknown) => ({ models: { generateContent: vi.fn<Under
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe('understand', () => {
+  it('preserves a relative arrival cutoff across midnight without treating it as flight departure', async () => {
+    const client = clientWith({ trip: { origin: 'Gare du Nord', destination: 'CDG 2E', deadline: '2026-11-08T00:41:46+01:00' } });
+    const result = await understand({ transcript: 'Je dois arriver dans deux heures, trois heures au maximum.', profile, now: new Date('2026-11-07T21:41:46Z') }, client);
+    expect(result.trip.deadline).toBe('2026-11-08T00:41:46+01:00');
+    expect(client.models.generateContent.mock.calls[0]![0].config?.systemInstruction).toContain('adding elapsed time to now');
+    expect(result.notes).toBeUndefined();
+  });
   it('does not include profile name, phone or email in the Gemini request', async () => {
     const client = clientWith({ trip: {} });
     await understand({ transcript: 'Je veux aller à CDG', profile, now }, client);

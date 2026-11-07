@@ -33,11 +33,12 @@ describe('Gladia live initialization', () => {
       session.handle({ type: 'hello', profile: { name: 'Karim', email: 'k@example.com', phone: '+33123456789', language: 'en', guide_dog: true }, gps: null });
       const response = await post(issued); expect(response.status).toBe(200); expect(await response.json()).toEqual({ url: 'wss://api.gladia.io/live' }); expect(gladia).toHaveBeenCalledWith('en');
       now = 3000; gladia.mockRejectedValue(new Error('secret upstream response')); expect((await post(issued)).status).toBe(502);
+      for (let i = 0; i < 4; i++) expect((await post(issued)).status).toBe(502);
       expect((await post(issued)).status).toBe(429);
       expect((await app.request('/gladia/session', { method: 'POST', body: '{' })).status).toBe(400);
     } finally { registry.dispose(); }
   });
-  it('atomically limits each claimed session to one attempt per 3 seconds and 30 per rolling hour', async () => {
+  it('allows quick re-presses while atomically limiting six attempts per ten seconds and 120 per hour', async () => {
     let now = 0;
     const registry = new SessionRegistry(undefined, undefined, 100, () => now);
     const first = registry.issue(); const second = registry.issue();
@@ -46,16 +47,16 @@ describe('Gladia live initialization', () => {
     const gladia = vi.fn().mockResolvedValue({ url: 'wss://api.gladia.io/live' }); const app = createApp({ registry, gladia });
     const post = (body = first) => app.request('/gladia/session', { method: 'POST', body: JSON.stringify(body) });
     try {
-      expect((await Promise.all([post(), post()])).map((response) => response.status).sort()).toEqual([200, 429]);
+      expect((await Promise.all(Array.from({ length: 7 }, () => post()))).map((response) => response.status).sort()).toEqual([200, 200, 200, 200, 200, 200, 429]);
       expect((await post(second)).status).toBe(200);
-      now = 2999; expect((await post()).status).toBe(429);
-      for (let i = 1; i < 30; i++) { now = i * 3000; expect((await post()).status).toBe(200); }
-      now = 90_000; expect((await post()).status).toBe(429);
+      now = 9999; expect((await post()).status).toBe(429);
+      for (let i = 6; i < 120; i++) { now = Math.floor(i / 6) * 10_000; expect((await post()).status).toBe(200); }
+      now = 200_000; expect((await post()).status).toBe(429);
       registry.disconnect(first.id); registry.connect(first.id, first.resume_token);
       expect((await post()).status).toBe(429);
       now = 3_599_999; expect((await post()).status).toBe(429);
       now = 3_600_000; expect((await post()).status).toBe(200);
-      expect(gladia).toHaveBeenCalledTimes(32);
+      expect(gladia).toHaveBeenCalledTimes(122);
     } finally { registry.dispose(); }
   });
   it('does not claim or extend an unclaimed reservation when Gladia credentials are rejected', async () => {

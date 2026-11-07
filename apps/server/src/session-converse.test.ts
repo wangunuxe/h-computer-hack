@@ -61,7 +61,7 @@ describe('contextual conversation routing', () => {
     const summary = `Private summary: ${profile.name}, ${profile.phone}, ${profile.email}`;
     const s = setup({ runBooking: async (input) => { await input.confirm(summary, { pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR' }); return new Promise(() => {}); } });
     await s.start(); await s.reply('shuttle'); await s.reply('quel est le prix ?');
-    expect(s.events).toContainEqual({ type: 'confirm', summary });
+    expect(s.events.some((event) => event.type === 'confirm' && !event.summary.includes(summary))).toBe(true);
     const context = s.ports.converse.mock.calls[0]![0];
     expect(context.confirmation).toEqual({ pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR', option_name: 'Paris Airport Shuttle', guide_dog_status: 'unknown' });
     for (const value of [profile.name, profile.phone, profile.email, summary]) expect(JSON.stringify(context)).not.toContain(value);
@@ -162,6 +162,12 @@ describe('contextual conversation routing', () => {
     const s = setup({ converse: vi.fn(() => new Promise(() => {})) }); await s.start(); const replies: string[] = [];
     for (let i = 0; i < 3; i++) { await s.reply('euh'); await vi.advanceTimersByTimeAsync(20_500); const event = s.events.at(-1); if (event?.type === 'say') replies.push(event.text); }
     expect(new Set(replies).size).toBe(3); expect(s.session.stage).toBe('CHOOSE');
+  });
+  it.each(['fr', 'en'])('lowercases a repeated answer after the comma in %s', async (language) => {
+    const reply = language === 'fr' ? 'Voici les prix.' : 'Here are the prices.';
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply })) }); await s.start(language);
+    await s.reply('prix ?'); await s.reply('prix ?');
+    expect(s.events.at(-1)).toEqual({ type: 'say', text: language === 'fr' ? 'Autrement dit, voici les prix.' : 'In other words, here are the prices.' });
   });
   it('does not select a journey on bare hesitation even if a model overstates confidence', async () => {
     const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'choose', option_id: 'gare-du-nord-taxi', confidence: 1 })) }); await s.start(); await s.reply('euh');

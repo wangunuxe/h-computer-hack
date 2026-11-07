@@ -57,8 +57,11 @@ a { color: var(--accent); }
 #talk { width: 100%; height: 100%; border-radius: 50%; padding: .9rem; display: grid; place-items: center; touch-action: manipulation; user-select: none; }
 #talk svg { width: 2.5rem; height: auto; max-width: 100%; stroke-width: 1.5; }
 body[data-mic-mode=hold] #talk { touch-action: none; }
+#dock, #dock * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+#dock, #dock #talk { touch-action: none; }
+#mic-label, #talk-help { pointer-events: none; }
 #mic-label { font-size: .9rem; font-weight: 650; margin-top: .75rem; }
-#talk-help { color: var(--muted); font-size: .75rem; text-align: center; margin: .35rem auto 0; max-width: 28rem; }
+#talk-help { color: var(--muted); font-size: .75rem; text-align: center; margin: 1rem auto 0; max-width: 28rem; }
 [data-mode=listening] .mic-orbit::before { border-color: var(--accent); animation: pulse 1.6s ease-out infinite; }
 [data-mode=listening] #talk { box-shadow: 0 0 0 .3rem var(--raised); }
 [data-mode=busy] .mic-orbit::before { border: .2rem solid var(--line); border-top-color: var(--accent); animation: spin 1.2s linear infinite; }

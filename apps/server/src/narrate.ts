@@ -81,7 +81,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
     'payment-handoff': ({ merchant, amount }) => fr ? `${money(amount)} chez ${merchant}. Ouvrez le paiement sur votre téléphone.` : `${money(amount)} with ${merchant}. Open payment on your phone.`,
     'booking-done': ({ ref }) => fr ? `Réservation ${ref}. Voici votre fiche.` : `Booking ${ref}. Here are your details.`,
     stopped: () => fr ? 'J’arrête. Aucune autre action.' : 'Stopped. No further actions.',
-    'booking-failed': ({ reason }) => `${fr ? 'La réservation a échoué.' : 'Booking failed.'}${reason ? ` ${reason}` : ''}`,
+    'booking-failed': ({ reason }) => `${fr ? 'Cette tentative de réservation a échoué. Voulez-vous réessayer le taxi vers l’aéroport ?' : 'This booking attempt failed. Would you like to retry the airport taxi?'}${reason ? ` ${reason}` : ''}`,
     'clarify-origin': () => fr ? 'Où êtes-vous actuellement ?' : 'Where are you now?',
     'clarify-destination': () => fr ? 'Quel aéroport et quel terminal ?' : 'Which airport and terminal?',
     'choose-again': () => fr ? 'Quelle option choisissez-vous ? Dites son numéro ou son nom.' : 'Which option? Say its number or name.',
@@ -96,7 +96,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
       'rer-b-replacement-bus': 'Demandez aux agents si un bus de remplacement dessert CDG et où monter. Confirmez le terminal, l’accessibilité et le départ.',
     } as Record<string, string>)[id] ?? instructions) : instructions,
     'no-feasible-options': ({ rejected }) => [fr ? 'Aucune option réalisable.' : 'No feasible options.', ...rejected.map((option) => `${optionName(option)}: ${option.reason === 'too_late' ? (fr ? 'arrivée trop tardive' : 'arrival too late') : (fr ? 'chien guide refusé' : 'guide dog refused')}.`)].join(' '),
-    'no-known-options': () => fr ? 'Je ne connais pas d’option pour ce trajet. Demandez de l’aide aux agents de la gare ou appelez un taxi.' : 'No known options for this route. Ask station staff for help or call a taxi.',
+    'no-known-options': () => fr ? 'Je peux réserver un taxi vers l’aéroport. Pour vérifier ce trajet, quel aéroport souhaitez-vous rejoindre et d’où partez-vous ?' : 'I can book an airport taxi. To check this route, which airport are you going to and where should the taxi pick you up?',
   };
   return templates[key](params);
 }

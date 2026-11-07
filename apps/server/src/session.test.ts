@@ -424,7 +424,7 @@ describe('VoilaSession', () => {
     const s = setup({ understand: async () => ({ trip: { ...trip, origin: 'Gare de Lyon', destination: 'Orly' }, missing: [] }) });
     s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'Gare de Lyon vers Orly' }); await flush();
     expect(s.events).toContainEqual({ type: 'options', items: [] });
-    expect(s.events).toContainEqual({ type: 'say', text: 'Je ne connais pas d’option pour ce trajet. Demandez de l’aide aux agents de la gare ou appelez un taxi.' });
+    expect(s.events).toContainEqual({ type: 'say', text: 'Je peux réserver un taxi vers l’aéroport. Pour vérifier ce trajet, quel aéroport souhaitez-vous rejoindre et d’où partez-vous ?' });
     expect(s.ports.linkup.mock.calls[0]?.[0].query).not.toContain('Gare du Nord to CDG');
   });
   it('uses only researched extra options for an unsupported preset route', async () => {
@@ -535,13 +535,13 @@ describe('VoilaSession', () => {
     expect(s.events).toHaveLength(count);
     expect(s.session.stage).toBe('CHOOSE');
   });
-  it('booking failure returns to CHOOSE with the failed option removed', async () => {
+  it('booking failure returns to CHOOSE with the taxi available for an explicit retry', async () => {
     const s = setup({ runBooking: vi.fn().mockRejectedValue(new Error('provider unavailable')) });
     await s.start(); await s.choose();
     expect(s.session.stage).toBe('CHOOSE');
     const lastOptions = s.events.filter((e) => e.type === 'options').at(-1);
-    expect(lastOptions?.items.some((o) => o.id === 'paris-airport-shuttle')).toBe(false);
-    expect(s.events).toContainEqual({ type: 'say', text: 'Booking failed.' });
+    expect(lastOptions?.items.some((o) => o.id === 'paris-airport-shuttle')).toBe(true);
+    expect(s.events).toContainEqual({ type: 'say', text: 'This booking attempt failed. Would you like to retry the airport taxi?' });
   });
   it('emits a heartbeat after four silent seconds in UNDERSTAND', async () => {
     const s = setup({ understand: () => new Promise(() => {}) }); await s.start();

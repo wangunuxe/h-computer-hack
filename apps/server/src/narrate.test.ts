@@ -57,7 +57,12 @@ describe('say', () => {
   });
   it('handles no options and no failure reason without empty or undefined speech', () => {
     expect(say('present-options', { options: [], now: new Date() }, 'fr')).toContain('Aucune option');
-    expect(say('booking-failed', {}, 'en')).toBe('Booking failed.');
+    expect(say('booking-failed', {}, 'en')).toBe('This booking attempt failed. Would you like to retry the airport taxi?');
+  });
+  it.each(['fr', 'en'])('offers taxi clarification and honest retries rather than refusing or deflecting in %s', (language) => {
+    const unknown = say('no-known-options', {}, language), failed = say('booking-failed', {}, language);
+    expect(unknown).toMatch(/Je peux réserver|I can book/); expect(unknown).toContain('?'); expect(unknown).not.toMatch(/agents|staff|call a taxi/);
+    expect(failed).toMatch(/échoué|failed/); expect(failed).toMatch(/réessayer|retry/);
   });
   it('summarizes structured pickup facts in French', () => {
     expect(say('confirm', { ...confirmation, details }, 'fr')).toBe('Taxi vers l’aéroport, vers CDG, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?');

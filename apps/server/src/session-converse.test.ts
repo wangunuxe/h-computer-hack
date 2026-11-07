@@ -30,6 +30,41 @@ function setup(overrides: Partial<SessionPorts> = {}) {
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00+01:00')); });
 afterEach(() => { sessions.splice(0).forEach((session) => session.dispose()); vi.useRealTimers(); });
 describe('contextual conversation routing', () => {
+  it.each(['CLARIFY', 'PRESENT', 'CHOOSE'] as const)('books the offered taxi despite mocked Gemini refusals in %s', async (stage) => {
+    for (const text of ["pouvez-vous m'appeler un taxi ?", 'can you call me a taxi?']) {
+      const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply: "I can't book a taxi. Ask station staff." })) });
+      await s.start(); s.session.stage = stage; const before = s.events.length; await s.reply(text);
+      expect(s.ports.converse).toHaveBeenCalledOnce(); expect(s.ports.runBooking).toHaveBeenCalledOnce(); expect(s.session.stage).toBe('EXECUTE');
+      expect(JSON.stringify(s.events.slice(before))).not.toMatch(/can't book|Ask station/);
+    }
+  });
+  it.each(["pouvez-vous m'appeler un taxi ?", 'can you call me a taxi?'])('asks for genuinely missing trip details instead of repeating a model refusal: %s', async (text) => {
+    const s = setup({ understand: vi.fn().mockResolvedValue({ trip: {}, missing: ['origin', 'destination', 'deadline'] }), converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply: "I can't book a taxi." })) });
+    await s.start(); const before = s.events.length; await s.reply(text);
+    expect(s.session.stage).toBe('CLARIFY'); expect(s.ports.runBooking).not.toHaveBeenCalled();
+    const lines = JSON.stringify(s.events.slice(before)); expect(lines).not.toContain("can't book"); expect(lines).toContain('lieu de départ'); expect(lines).toContain('destination');
+  });
+  it.each(['can you call me a taxi?', "Je suis à l'Étoile, je veux un taxi pour CDG, mon avion part dans deux heures"])('keeps a taxi request in clarification when initial understanding fails: %s', async (text) => {
+    const s = setup({ understand: vi.fn().mockRejectedValue(new Error("I can't book a taxi")) });
+    s.session.handle({ type: 'hello', profile, gps: null }); s.session.handle({ type: 'final_transcript', text }); await flush();
+    expect(s.session.stage).toBe('CLARIFY'); expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(JSON.stringify(s.events)).not.toContain("can't book");
+    expect(s.events.at(-1)).toMatchObject({ type: 'say', text: expect.stringContaining('Je peux réserver') });
+  });
+  it('does not infer confirmation from a repeated taxi request or duplicate an in-flight booking', async () => {
+    const decision = vi.fn();
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply: "I can't book a taxi" })), runBooking: async (input) => { decision(await input.confirm('Taxi', fare)); return new Promise(() => {}); } });
+    await s.start(); await s.reply('taxi'); await s.reply('can you call me a taxi?');
+    expect(s.session.stage).toBe('CONFIRM'); expect(decision).not.toHaveBeenCalled(); expect(s.events.at(-1)).toMatchObject({ type: 'say', text: expect.stringContaining('Dites oui ou non') });
+  });
+  it('keeps a failed taxi available and retries only after the user agrees', async () => {
+    const runBooking = vi.fn<SessionPorts['runBooking']>().mockRejectedValueOnce(new Error('H unavailable')).mockImplementation(() => new Promise(() => {}));
+    const s = setup({ runBooking }); await s.start(); await s.reply('taxi');
+    expect(s.session.stage).toBe('CHOOSE'); expect(runBooking).toHaveBeenCalledOnce();
+    expect(s.events.filter((event) => event.type === 'options').at(-1)).toMatchObject({ items: [expect.objectContaining({ id: 'paris-airport-shuttle' })] });
+    expect(s.events.at(-2)).toMatchObject({ type: 'options' });
+    expect(s.events).toContainEqual({ type: 'say', text: expect.stringContaining('Voulez-vous réessayer') });
+    await s.reply('oui'); expect(runBooking).toHaveBeenCalledTimes(2); expect(s.session.stage).toBe('EXECUTE');
+  });
   it('redacts initial and corrective requests and history before Gemini and both Linkup research paths', async () => {
     const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'correct', trip_patch: { destination: 'CDG 2E' } })) });
     s.session.handle({ type: 'hello', profile, gps: null, scenario: 'live' });

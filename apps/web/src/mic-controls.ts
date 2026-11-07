@@ -1,6 +1,6 @@
 export function micControlState(state: { connected: boolean; failed: boolean; active: boolean; releasing: boolean }, labels: { connectionRetry: string; connecting: string; listening: string; stopListening: string; processing: string; tap: string }) {
   const caption = !state.connected ? (state.failed ? labels.connectionRetry : labels.connecting) : state.active ? labels.listening : state.releasing ? labels.processing : labels.tap;
-  return { caption, label: state.connected && state.active ? labels.stopListening : caption, disabled: state.connected && state.releasing, pressed: state.active };
+  return { caption, label: !state.connected && state.failed ? labels.connectionRetry : state.active ? labels.stopListening : labels.tap, disabled: state.connected && state.releasing, pressed: state.active };
 }
 export function bindMicControls(button: HTMLButtonElement, dock: HTMLElement, controls: {
   active: () => boolean; start: () => void; release: () => void;

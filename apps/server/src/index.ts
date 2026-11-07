@@ -1,6 +1,9 @@
 import { serve } from '@hono/node-server';
 import { getConnInfo } from '@hono/node-server/conninfo';
-import { pathToFileURL } from 'node:url';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { existsSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Hono } from 'hono';
 import { WebSocket, WebSocketServer } from 'ws';
 import { WebEventSchema, type ServerEvent } from '@voila/shared';
@@ -10,8 +13,9 @@ import { SessionRegistry, secureEqual } from './session-registry.js';
 
 const paymentSchema = z.object({ order_id: z.string().min(1), ref: z.string().min(1), status: z.literal('paid') });
 
-export function createApp({ registry = new SessionRegistry(), token = process.env.INTERNAL_CALLBACK_TOKEN }: {
-  registry?: SessionRegistry; token?: string;
+export function createApp({ registry = new SessionRegistry(), token = process.env.INTERNAL_CALLBACK_TOKEN,
+  webDistDir = process.env.NODE_ENV === 'production' ? (process.env.WEB_DIST_DIR ?? fileURLToPath(new URL('../../web/dist', import.meta.url))) : undefined }: {
+  registry?: SessionRegistry; token?: string; webDistDir?: string;
 } = {}) {
   const app = new Hono();
   app.get('/health', (c) => c.json({ status: 'ok' }));
@@ -42,6 +46,16 @@ export function createApp({ registry = new SessionRegistry(), token = process.en
     if (!matched) return c.json({ error: 'Booking not awaiting payment' }, 404);
     return c.json({ received: true });
   });
+  if (webDistDir && existsSync(resolve(webDistDir, 'index.html'))) {
+    const root = relative(process.cwd(), resolve(webDistDir));
+    const assets = serveStatic({ root });
+    const index = serveStatic({ path: relative(process.cwd(), resolve(webDistDir, 'index.html')) });
+    app.get('*', async (c, next) => {
+      if (/^\/(session|gladia|ws|internal|health)(\/|$)/.test(c.req.path)) return c.notFound();
+      return assets(c, next);
+    });
+    app.get('*', index);
+  }
   return app;
 }
 

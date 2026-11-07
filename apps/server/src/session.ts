@@ -110,6 +110,7 @@ export class VoilaSession {
     if (!this.profile) { this.error('Send hello first.'); return; }
     if ((event.type === 'final_transcript' || event.type === 'user_reply') && forgetDetails(event.text)) {
       this.resetTrip(); this.profile = { language: this.language };
+      this.observeSafely({ type: 'session', name: 'User', scenario: this.scenario, started_at: this.ports.clock().toISOString() });
       this.send({ type: 'profile', profile: this.profile }); this.transition('LISTEN');
       this.send({ type: 'say', text: this.language.startsWith('fr') ? 'Vos informations sont effacées de cet appareil et de cette session.' : 'Your details are cleared from this device and session.' }); return;
     }

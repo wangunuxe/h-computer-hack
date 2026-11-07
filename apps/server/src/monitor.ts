@@ -19,7 +19,7 @@ export class MonitorHub {
   publish(session: string, event: PublishedEvent) {
     const message: MonitorMessage = { session, at: new Date().toISOString(), event };
     let buffer = this.sessions.get(session);
-    if (!buffer) buffer = { messages: [] };
+    if (!buffer || event.type === 'session') buffer = { messages: [] };
     this.sessions.delete(session);
     this.sessions.set(session, buffer);
 

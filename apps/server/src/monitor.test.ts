@@ -69,6 +69,30 @@ describe('MonitorHub', () => {
     expect(events.map(({ type }) => type)).toEqual(['session', 'feed', 'agent_frame']);
   });
 
+  it('clears prior monitor history when the session is reset', () => {
+    const hub = new MonitorHub();
+    hub.publish('s1', sessionEvent('Amina'));
+    hub.publish('s1', {
+      type: 'profile',
+      profile: { name: 'Amina', phone: '+33612345678', email: 'amina@example.com', language: 'en', guide_dog: true },
+    });
+    hub.publish('s1', { type: 'say', text: 'Your number is +33612345678.' });
+    hub.publish('s1', { type: 'agent_frame', image: 'data:image/png;base64,private-frame', step: 1 });
+
+    hub.publish('s1', sessionEvent('User'));
+    hub.publish('s1', { type: 'profile', profile: { language: 'en' } });
+    hub.publish('s1', { type: 'stage', stage: 'LISTEN' });
+
+    const client = socket();
+    hub.subscribe(client.ws);
+    const received = messages(client.sent);
+    expect(received.map(({ event }) => event.type)).toEqual(['session', 'profile', 'stage']);
+    expect(received[0]?.event).toEqual(sessionEvent('User'));
+    expect(JSON.stringify(received)).not.toContain('Amina');
+    expect(JSON.stringify(received)).not.toContain('+33612345678');
+    expect(JSON.stringify(received)).not.toContain('private-frame');
+  });
+
   it('skips frames for clients over the backpressure limit', () => {
     const hub = new MonitorHub();
     hub.publish('s1', sessionEvent('Amina'));

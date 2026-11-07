@@ -349,6 +349,8 @@ export class VoilaSession {
         confirm: (summary, details) => {
           if (!current()) return Promise.resolve({ approved: false, reply: 'Stopped' });
           if (this.confirmation) throw new Error('A confirmation is already pending.');
+          details = sanitizeConfirmationFields(details);
+          if (details.total_price === undefined || details.currency !== 'EUR') return Promise.resolve({ approved: false, reply: 'Read the transfer total price and EUR currency before asking for approval.' });
           summary = say('confirm', { trip, option, details, now: this.ports.clock() }, this.language);
           const decision = new Promise<{ approved: boolean; reply: string }>((resolve) => { this.confirmation = { summary, details: { ...sanitizeConfirmationFields(details), option_name: option.name, guide_dog_status: option.guide_dog_status }, resolve }; });
           this.transition('CONFIRM'); this.send({ type: 'confirm', summary }); this.speak('confirm', { trip, option, details, now: this.ports.clock() });

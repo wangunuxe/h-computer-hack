@@ -38,6 +38,14 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it.each([{ total_price: undefined }, { currency: undefined }, { currency: 'USD' }])('rejects missing or unsupported fare facts before asking the user: %j', async (missing) => {
+    const mock = setup(async function* (tools) {
+      expect(await call(tools, 'confirm_with_user', { summary: 'Shuttle', ...confirmationFields, ...missing })).toContain('REJECTED');
+      yield observation(stub); expect(await handoff(tools)).toContain('ERROR');
+    });
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow('without payment handoff');
+    expect(mock.input.confirm).not.toHaveBeenCalled(); expect(mock.input.onPaymentHandoff).not.toHaveBeenCalled();
+  });
   beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2027-01-15T10:00:00Z')); });
   afterEach(() => { vi.useRealTimers(); });
   it('does not ask for approval or hand off payment for a wrong-day pickup', async () => {

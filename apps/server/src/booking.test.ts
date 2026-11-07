@@ -53,6 +53,23 @@ describe('H booking runner', () => {
     expect(mock.cancel).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ['2026-11-07T17:46:00Z', '07/11/2026, 18:46:00'],
+    ['2027-07-15T22:30:00Z', '16/07/2027, 00:30:00'],
+  ])('includes current Paris date/time at %s and future pickup guidance', async (now, paris) => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(now));
+      const mock = setup();
+      await runBooking(mock.input, mock.client);
+      expect(mock.startSession).toHaveBeenCalledWith(expect.objectContaining({ agent: expect.objectContaining({ instructions: expect.stringContaining(`Current Europe/Paris date and time: ${paris}`) }) }));
+      expect(mock.startSession).toHaveBeenCalledWith(expect.objectContaining({ agent: expect.objectContaining({ instructions: expect.stringContaining('Pickup must be strictly after now in Europe/Paris') }) }));
+      expect(mock.startSession).toHaveBeenCalledWith(expect.objectContaining({ agent: expect.objectContaining({ instructions: expect.stringContaining('leave enough travel time') }) }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(['result', 'changes', 'envelope'])('accepts an idle answer from %s and releases the session', async (source) => {
     const mock = setup();
     mock.handle.waitForCompletion.mockResolvedValue({ status: 'idle', ...(source === 'result' ? { answer } : source === 'changes' ? { finalChanges: { answer: JSON.stringify(answer) } } : {}) });

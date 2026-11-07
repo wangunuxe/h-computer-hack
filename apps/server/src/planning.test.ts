@@ -70,8 +70,14 @@ describe('preset options and merge', () => {
 });
 
 describe('chooseOption', () => {
-  it.each(['the shuttle is fine', "la navette c'est bien"])('accepts affirmative selection: %s', (reply) => {
+  it.each(['the shuttle is fine', "la navette c'est bien", 'la navette', 'the shuttle please', 'la navette s’il vous plaît', 'je choisis la navette', 'Paris Airport Shuttle'])('accepts affirmative selection: %s', (reply) => {
     expect(chooseOption(reply, presetOptions)).toBe('paris-airport-shuttle');
+  });
+  it.each(['je veux savoir si la navette accepte mon chien', 'est-ce que la navette accepte les chiens', 'I wonder whether the shuttle takes dogs', 'do you know if the shuttle runs', 'je demande si la navette accepte les chiens', 'tell me if I can I take the shuttle', 'tell me about the shuttle', 'the shuttle would be fine if dogs are accepted', 'navette parce que je ne sais pas', 'maybe the shuttle', '   '])('does not extract a selection keyword from a longer utterance: %s', (reply) => {
+    expect(chooseOption(reply, presetOptions)).toBeNull();
+  });
+  it.each(['2', 'le deux', 'the second please'])('keeps short ordinal selections: %s', (reply) => {
+    expect(chooseOption(reply, presetOptions)).toBe(presetOptions[1]!.id);
   });
   it.each(['is the shuttle ok', 'la navette accepte le chien ?', 'est-ce que la navette convient', 'combien coûte la navette', 'quelle navette', 'quand arrive le bus', 'comment réserver le shuttle', 'pourquoi prendre le bus', 'are shuttles available', 'does the shuttle accept dogs', 'do shuttles run', 'can I take the shuttle', 'how long is the shuttle journey', 'what is the shuttle price', 'which shuttle', 'accepte-t-elle les chiens, la navette'])('defers questions to Gemini: %s', (reply) => {
     expect(chooseOption(reply, presetOptions)).toBeNull();
@@ -79,13 +85,14 @@ describe('chooseOption', () => {
   it.each(['stop the shuttle', 'annuler la navette', 'not the shuttle', 'le shuttle demain', 'le moins cher', 'the fastest shuttle'])('still defers cancellation, corrections and preferences: %s', (reply) => {
     expect(chooseOption(reply, presetOptions)).toBeNull();
   });
-  it('selects either feasible taxi by ordinal even when the taxi-rank name is ambiguous', () => {
+  it('selects either feasible taxi by ordinal or full name, but not an ambiguous keyword', () => {
     const options = assessOptions(presetOptions, trip, now).feasible;
     for (const id of ['gare-du-nord-taxi', 'g7-phone']) {
       const index = options.findIndex((option) => option.id === id); expect(index).toBeGreaterThanOrEqual(0);
       expect(chooseOption(String(index + 1), options)).toBe(id);
     }
-    expect(chooseOption('Gare du Nord taxi rank', options)).toBeNull();
+    expect(chooseOption('Gare du Nord taxi rank', options)).toBe('gare-du-nord-taxi');
+    expect(chooseOption('taxi', options)).toBeNull();
   });
   it.each(['le premier', 'LA PREMIÈRE', 'first', '1', 'option 1'])('maps %s to the first option', (reply) => {
     expect(chooseOption(reply, presetOptions)).toBe(presetOptions[0]!.id);

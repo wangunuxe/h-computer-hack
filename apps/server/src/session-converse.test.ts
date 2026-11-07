@@ -26,6 +26,16 @@ function setup(overrides: Partial<SessionPorts> = {}) {
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00+01:00')); });
 afterEach(() => { sessions.splice(0).forEach((session) => session.dispose()); vi.useRealTimers(); });
 describe('contextual conversation routing', () => {
+  it.each(['je veux savoir si la navette accepte mon chien', 'est-ce que la navette accepte les chiens', 'I wonder whether the shuttle takes dogs'])('routes longer option questions to Gemini: %s', async (text) => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply: 'Je vérifie la politique concernant les chiens guides.' })) }); await s.start(); await s.reply(text);
+    expect(s.ports.converse).toHaveBeenCalledWith(expect.objectContaining({ transcript: text }));
+    expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.session.stage).toBe('CHOOSE');
+  });
+  it.each(['je veux savoir si la navette accepte mon chien', 'est-ce que la navette accepte les chiens', 'I wonder whether the shuttle takes dogs', 'do you know if the shuttle runs', 'je demande si la navette accepte les chiens', 'can I take the shuttle'])('asks a fallback question without selecting when Gemini is offline: %s', async (text) => {
+    const s = setup({ converse: vi.fn().mockRejectedValue(new Error('Unavailable')) }); await s.start(); const before = s.events.length; await s.reply(text);
+    expect(s.ports.converse).toHaveBeenCalledOnce(); expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.session.stage).toBe('CHOOSE');
+    expect(s.events.slice(before)).toContainEqual({ type: 'say', text: expect.stringContaining('?') });
+  });
   it.each(['the shuttle is fine', "la navette c'est bien"])('selects affirmative speech without Gemini: %s', async (text) => {
     const s = setup(); await s.start(); await s.reply(text);
     expect(s.ports.converse).not.toHaveBeenCalled(); expect(s.ports.runBooking).toHaveBeenCalledOnce();

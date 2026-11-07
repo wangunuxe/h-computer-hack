@@ -1,6 +1,36 @@
 import { describe, expect, it } from 'vitest';
 import { parsePhone, parseEmail, VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 describe('local spoken contact parsers', () => {
+  it.each([
+    ['mon numéro,', 'zéro zéro quatre quatre, sept sept, zéro zéro, neuf zéro, zéro un, deux trois'],
+    ['call me on', 'plus four four, seven seven, zero zero, nine zero, zero one, two three'],
+    ['my number is', '+44, seven seven, zero zero, nine zero, zero one, two three'],
+    ['mon téléphone', 'zéro zéro un, quatre un cinq, cinq cinq cinq, zéro un zéro zéro'],
+    ['mon numéro', 'zéro zéro un, deux trois, quatre cinq, six sept, huit neuf, zéro un, deux trois'],
+    ['my number is', '+1, two three, four five, six seven, eight nine, zero one, two three, four five'],
+  ])('joins the complete introduced international phone after %s', (intro, phone) => {
+    expect(redactContactText(`${intro} ${phone}, 2 personnes à 20:45 le 2027-01-15`)).toBe(`${intro} [phone], 2 personnes à 20:45 le 2027-01-15`);
+    expect(redactContactText(`${intro} ${phone}, 20:45 à CDG`)).toBe(`${intro} [phone], 20:45 à CDG`);
+  });
+  it.each(['20:45', '20h45', '2027-01-15', '15/01/2027', '15.01.2027'])('ends an international phone before the temporal token %s', (when) => {
+    expect(redactContactText(`+44 7700 900123 ${when}, 2 personnes à CDG`)).toBe(`[phone] ${when}, 2 personnes à CDG`);
+    expect(redactContactText(`+1 415-555-0100 ${when}`)).toBe(`[phone] ${when}`);
+  });
+  it.each(['+44 7700 900123', '+1 415-555-0100', '+44.7700.900123', '+44-7700-900123', '+12345678', '+123456789012345'])('redacts international plus numbers without consuming surrounding trip facts: %s', (phone) => {
+    expect(redactContactText(phone)).toBe('[phone]');
+    expect(redactContactText(`2027-01-15 2 personnes, à 06:12 ${phone}, 2 personnes à CDG`)).toBe('2027-01-15 2 personnes, à 06:12 [phone], 2 personnes à CDG');
+    expect(redactContactText(`${phone}. 2 personnes`)).toBe('[phone]. 2 personnes');
+  });
+  it.each(['+1234567', '+1234567890123456', '+12 34 56 7', '2027-01-15T20:45:00+01:00'])('does not classify a short or overlong plus run or timezone as an international phone: %s', (text) => expect(redactContactText(text)).toBe(text));
+  it.each(['mon numéro', 'mon téléphone est', "mon numéro c'est", 'call me on', 'my number is', 'appelez-moi au'])('joins comma-separated phone groups only after the introducer %s', (intro) => {
+    const phone = 'zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit';
+    expect(redactContactText(`${intro} ${phone}, 2 personnes à CDG à 20:45 le 2027-01-15`)).toBe(`${intro} [phone], 2 personnes à CDG à 20:45 le 2027-01-15`);
+  });
+  it('retains comma boundaries without a phone introducer', () => {
+    const text = 'zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit, 2 personnes';
+    expect(redactContactText(text)).toBe(text);
+    expect(redactContactText('06 12 34 56 78, 2 personnes')).toBe('[phone], 2 personnes');
+  });
   it.each(['06:12 34 56 78', '06:12:34 56 78'])('does not protect a temporal prefix of a phone-shaped sequence: %s', (phone) => {
     expect(redactContactText(phone)).toBe('[phone]');
     expect(redactContactText(`Call me on ${phone}, from Gare du Nord to CDG 2E`)).toBe('Call me on [phone], from Gare du Nord to CDG 2E');
@@ -95,6 +125,17 @@ describe('local spoken contact parsers', () => {
   });
 });
 describe('one-field-at-a-time voice profile confirmation', () => {
+  it('collects a comma-separated 00 international phone locally without truncating it', () => {
+    const flow = new VoiceProfile({ language: 'fr' }, ['phone']);
+    flow.reply('zéro zéro quatre quatre, sept sept, zéro zéro, neuf zéro, zéro un, deux trois');
+    expect(flow.profile.phone).toBeUndefined(); expect(flow.reply('oui').complete).toBe(true); expect(flow.profile.phone).toBe('+447700900123');
+  });
+  it('collects and confirms comma-separated spoken digits after the local phone question', () => {
+    const flow = new VoiceProfile({ language: 'fr' }, ['phone']);
+    expect(flow.question).toContain('téléphone');
+    expect(flow.reply('zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit').text).toContain('zero, six, un, deux, trois, quatre, cinq, six, sept, huit');
+    expect(flow.profile.phone).toBeUndefined(); expect(flow.reply('oui').complete).toBe(true); expect(flow.profile.phone).toBe('0612345678');
+  });
   it("accepts c'est Marie only in the local name-question context and confirms it before saving", () => {
     const flow = new VoiceProfile({ language: 'fr' }, ['name']);
     expect(flow.question).toContain('nom'); expect(flow.reply("c'est Marie").text).toContain('Marie.'); expect(flow.profile.name).toBeUndefined();

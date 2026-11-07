@@ -57,11 +57,28 @@ export function redactContactText(text: string, profile?: TravelerProfile): stri
     .replace(/\b[\p{L}\d_+-]+(?:(?:\.|\s+(?:point|dot|tiret bas|tiret|dash|underscore)\s+)[\p{L}\d_+-]+)*\s*(?:@|\b(?:arobase|at)\b)\s*[\p{L}\d-]+(?:(?:\s*\.\s*|\s+(?:point|dot)\s+)[\p{L}\d-]+)+\b/giu, (value) => parseEmail(value) ? '[email]' : value);
   let result = '', cursor = 0;
   for (const match of safe.matchAll(contactSpan)) {
-    const value = match[0], offset = match.index!;
+    const offset = match.index!;
+    if (offset < cursor) continue;
+    let value = match[0], joined = false;
     const groups = match.groups!;
-    const digits = groups.spoken ? phoneDigits(value)?.digits : undefined;
     const introduced = /\b(?:call me(?: on| at)?|reach me(?: on| at)?|(?:my )?(?:phone(?: number)?|number)(?: is| s)?|(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:appelez|contactez)(?: moi)?(?: au)?)$/.test(normal(safe.slice(0, offset)));
-    const redact = groups.phone || (digits && ((/\p{L}/u.test(value) && digits.length >= 9) || introduced));
+    const commaRun = introduced ? commaPhoneSpan.exec(safe.slice(offset))?.[0] : undefined;
+    if (commaRun) {
+      const fragments = commaRun.split(',');
+      if (/^[ \t]+(?:personnes?|passagers?|passengers?|people|bags?|bagages?|valises?)\b/iu.test(safe.slice(offset + commaRun.length))) fragments.pop();
+      value = '';
+      for (const fragment of fragments) {
+        if (temporalFragment.test(fragment.trim())) break;
+        const candidate = value + (value ? ',' : '') + fragment;
+        const current = phoneDigits(candidate);
+        const limit = current && (current.international || current.digits.startsWith('00')) ? 15 : 10;
+        if (!current || current.digits.length > limit) break;
+        value = candidate;
+      }
+      joined = !!phoneDigits(value);
+    }
+    const digits = groups.spoken ? phoneDigits(value)?.digits : undefined;
+    const redact = groups.phone || joined || (digits && ((/\p{L}/u.test(value) && digits.length >= 9) || introduced));
     result += safe.slice(cursor, offset) + (redact ? '[phone]' : value); cursor = offset + value.length;
   }
   return result + safe.slice(cursor);
@@ -70,9 +87,15 @@ const dateSpan = /(?<![\p{L}\d])(?<!\d[./:-])(?:\d{4}[-/.](?:0?[1-9]|1[0-2])[-/.
 const timeSpan = /(?<![\p{L}\d])(?<!\d[./:-])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?!\d|[./:-]\d)/gu;
 const numberWords = [...numbers.keys(), 'plus', 'double', 'triple'].sort((a, b) => b.length - a.length).map((word) => word.replace(/zero/g, 'z[eé]ro').replace(/ /g, '[ \\t-]+')).join('|');
 const separator = '(?:[ \\t]+|[.:-](?!\\s))?';
-const numericPhone = `(?<![\\p{L}\\d])(?:(?:\\+33|0033)${separator}\\(?[1-9]\\)?(?:${separator}\\d){8}|0${separator}[1-9](?:${separator}\\d){8}|\\d{10})(?![\\p{L}\\d])`;
+const internationalSeparator = '(?:[ \\t]+|[.-](?!\\s))?';
+const temporalToken = `(?:${dateSpan.source}|\\d{1,2}[:h]\\d{2})`;
+const temporalFragment = new RegExp(`^${temporalToken}`, 'iu');
+const internationalDigit = `(?!${temporalToken})\\d`;
+const numericPhone = `(?<![\\p{L}\\d])(?:\\+${internationalDigit}(?:${internationalSeparator}${internationalDigit}){7,14}|(?:\\+33|0033)${separator}\\(?[1-9]\\)?(?:${separator}\\d){8}|0${separator}[1-9](?:${separator}\\d){8}|\\d{10})(?![\\p{L}\\d])`;
 const spokenToken = `(?:\\d{1,2}(?!\\d)|${numberWords})`;
-const spokenPhoneSpan = `(?<![\\p{L}\\d])${spokenToken}(?:(?:[ \\t:-]+|\\.(?!\\s))${spokenToken})*(?![\\p{L}\\d])`;
+const spokenRun = `${spokenToken}(?:(?:[ \\t:-]+|\\.(?!\\s))${spokenToken})*`;
+const spokenPhoneSpan = `(?<![\\p{L}\\d])\\+?${spokenRun}(?![\\p{L}\\d])`;
+const commaPhoneSpan = new RegExp(`^\\+?${spokenRun}(?:,[ \\t]*${spokenRun})+(?![\\p{L}\\d])`, 'iu');
 const contactSpan = new RegExp(`(?<date>${dateSpan.source})|(?<beforePhone>${timeSpan.source})(?=[ \\t]+${numericPhone})|(?<phone>${numericPhone})|(?<time>${timeSpan.source})|(?<spoken>${spokenPhoneSpan})`, 'giu');
 type Field = 'name' | 'phone' | 'email' | 'guide_dog';
 const yes = (text: string) => /^(oui|yes|correct|exactement|c est correct|c est ca|oui c est ca|c est bon|that s right)$/.test(normal(text));

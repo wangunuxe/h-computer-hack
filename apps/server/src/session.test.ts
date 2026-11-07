@@ -36,6 +36,15 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it('keeps comma-separated profile phone replies local and sends the confirmed number to booking', async () => {
+    const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'fr', name: 'Marie', email: 'marie@example.com', guide_dog: false }, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
+    await s.choose('zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit');
+    expect(s.ports.runBooking).not.toHaveBeenCalled(); await s.choose('oui');
+    expect(s.ports.runBooking.mock.calls[0]![0].profile.phone).toBe('0612345678');
+    expect(s.ports.understand).toHaveBeenCalledOnce(); expect(s.ports.linkup).toHaveBeenCalledOnce(); expect(s.ports.converse).not.toHaveBeenCalled();
+    expect(JSON.stringify([s.ports.understand.mock.calls[0]![0].transcript, s.ports.linkup.mock.calls])).not.toMatch(/zéro six|0612345678/);
+  });
   it("keeps c'est Marie local after asking for a name and passes the confirmed name only to booking", async () => {
     const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'fr', guide_dog: false }, gps: null, scenario: 'live' });
     s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();

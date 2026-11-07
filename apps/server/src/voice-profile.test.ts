@@ -2,6 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { parsePhone, parseEmail, VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 describe('local spoken contact parsers', () => {
   it.each([
+    ["je m'appelle Karim Benali, je suis à gare du Nord et je vais à CDG 2E", ['gare du Nord', 'CDG 2E']],
+    ["je m'appelle Karim Benali je suis à gare du Nord et je vais à CDG 2E", ['gare du Nord', 'CDG 2E']],
+    ['my name is Anna Lee and I need a taxi from Gare du Nord to CDG 2E', ['Gare du Nord', 'CDG 2E']],
+    ['my name is Anna Lee and my email is anna@example.com and I need a taxi to CDG 2E', ['taxi', 'CDG 2E']],
+    ["je m'appelle Karim Benali avec un chien guide pour rejoindre CDG 2E", ['avec un chien guide', 'CDG 2E']],
+    ['mon téléphone est 0612345678, je suis à gare du Nord et je vais à CDG 2E', ['gare du Nord', 'CDG 2E']],
+    ['my email is karim@example.com and I need a taxi to CDG 2E', ['taxi', 'CDG 2E']],
+    ['mon email est karim point benali arobase example point fr, je vais à CDG 2E', ['CDG 2E']],
+    ['mon numéro est zéro six douze trente quatre cinquante six soixante dix huit, je vais à CDG 2E', ['CDG 2E']],
+  ])('redacts contact spans without discarding the route: %s', (speech, route) => {
+    const redacted = redactContactText(speech, { language: 'fr', name: 'Karim' });
+    for (const value of route) expect(redacted).toContain(value);
+    for (const value of ['Karim', 'Benali', 'Anna Lee', '0612345678', 'karim@example.com', 'arobase', 'zéro six douze']) expect(redacted.toLowerCase()).not.toContain(value.toLowerCase());
+  });
+  it.each([
     ['zéro six douze trente-quatre cinquante-six soixante-dix-huit', '0612345678'],
     ['zero six one two three four five six seven eight', '0612345678'],
     ['plus trente-trois six douze trente-quatre cinquante-six soixante-dix-huit', '+33612345678'],

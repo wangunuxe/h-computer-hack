@@ -56,7 +56,10 @@ setInterval(() => {
 // ── source ──
 const live = params.get("source") === "live";
 const director = new Director(bus, heroScenario({ coldOpen: !params.has("nocold") }));
-if (params.has("speed")) director.speed = Number(params.get("speed")) || 1;
+if (params.has("speed")) {
+  const speed = Number(params.get("speed"));
+  director.speed = Number.isFinite(speed) && speed > 0 ? Math.min(4, Math.max(0.25, speed)) : 1;
+}
 const liveUrl = params.get("ws") ?? `ws://${location.hostname}:8787/ws/session/demo`;
 let liveSource = live ? new LiveSource(bus, liveUrl) : null;
 

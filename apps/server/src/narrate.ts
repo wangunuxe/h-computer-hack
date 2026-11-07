@@ -1,4 +1,5 @@
 import type { Option } from '@voila/shared';
+import type { BookingPage } from './booking.js';
 
 type Empty = Record<string, never>;
 export interface NarrationParams {
@@ -17,7 +18,7 @@ export interface NarrationParams {
   'clarify-destination': Empty;
   'choose-again': Empty;
   'confirm-again': Empty;
-  'agent-progress': { text: string };
+  'booking-page': { page: BookingPage };
   'manual-instructions': { id: string; instructions: string };
   'no-feasible-options': { rejected: { name: string; reason: 'too_late' | 'guide_dog_refused' }[] };
 }
@@ -49,7 +50,12 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
     'clarify-destination': () => fr ? 'Quel aéroport et quel terminal ?' : 'Which airport and terminal?',
     'choose-again': () => fr ? 'Quelle option choisissez-vous ? Dites son numéro ou son nom.' : 'Which option? Say its number or name.',
     'confirm-again': () => fr ? 'Confirmez par oui, ou refusez par non.' : 'Please say yes to approve, or no to decline.',
-    'agent-progress': ({ text }) => fr ? `Réservation en cours. ${text}` : `Booking in progress. ${text}`,
+    'booking-page': ({ page }) => ({
+      route: fr ? 'Je remplis l’itinéraire.' : 'I’m filling in the route.',
+      vehicle: fr ? 'Je choisis le véhicule.' : 'I’m choosing the vehicle.',
+      info: fr ? 'Je remplis vos coordonnées.' : 'I’m filling in your contact details.',
+      payment: fr ? 'La réservation est prête pour le paiement.' : 'The booking is ready for payment.',
+    })[page],
     'manual-instructions': ({ id, instructions }) => fr ? (({
       'gare-du-nord-taxi': 'Rejoignez la station officielle de taxis de Gare du Nord. Demandez de l’aide pour la file, signalez le chien guide et confirmez le tarif.',
       'g7-phone': 'Appelez G7 au 3607. Indiquez le point de départ, le terminal, les passagers et le chien guide. Confirmez la disponibilité et le tarif.',

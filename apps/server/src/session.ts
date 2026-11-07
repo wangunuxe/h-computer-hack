@@ -36,7 +36,6 @@ export class VoilaSession {
   private confirmation?: { summary: string; resolve: (decision: { approved: boolean; reply: string }) => void };
   private lastSay: number;
   private lastHeartbeat = -Infinity;
-  private lastAgentSay = -Infinity;
   private heartbeat: ReturnType<typeof setInterval>;
   private readonly ports: SessionPorts;
 
@@ -211,7 +210,6 @@ export class VoilaSession {
     this.transition('EXECUTE');
     const controller = new AbortController();
     this.bookingController = controller;
-    this.lastAgentSay = -Infinity;
     const current = () => this.active(generation) && !controller.signal.aborted;
     try {
       const base = publicShuttleUrl(this.ports.shuttlePublicUrl());
@@ -222,10 +220,8 @@ export class VoilaSession {
         onProgress: (text) => {
           if (!current()) return;
           this.send({ type: 'feed', kind: 'agent', text });
-          if (this.stage === 'EXECUTE' && this.ports.clock().getTime() - this.lastAgentSay >= 8000) {
-            this.lastAgentSay = this.ports.clock().getTime(); this.speak('agent-progress', { text });
-          }
         },
+        onPage: (page) => { if (current() && this.stage === 'EXECUTE') this.speak('booking-page', { page }); },
         confirm: (summary) => {
           if (!current()) return Promise.resolve({ approved: false, reply: 'Stopped' });
           if (this.confirmation) throw new Error('A confirmation is already pending.');

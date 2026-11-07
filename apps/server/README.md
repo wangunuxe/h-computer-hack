@@ -133,8 +133,9 @@ the trip. PRIM recorded-mode feed entries explicitly say “recorded data”.
 
 `stop` aborts research and the H runner, resolves pending confirmation negatively,
 and invalidates callbacks from older operations. Heartbeats run after four silent
-seconds in UNDERSTAND, RESEARCH and EXECUTE. Agent progress remains in the feed;
-its spoken updates are throttled to eight seconds. Confirmation replies accept
+seconds in UNDERSTAND, RESEARCH and EXECUTE. Raw agent progress stays in the feed;
+only observed route/vehicle/info/payment page changes produce localized spoken
+milestones through the runner's optional `onPage(page)` callback. Confirmation replies accept
 French/English yes/no phrases; unclear replies do not approve a booking.
 
 Run `pnpm --filter @voila/server dev` (PORT defaults to 3000). `/ws/session/:id`

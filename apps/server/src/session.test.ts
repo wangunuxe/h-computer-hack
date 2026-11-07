@@ -37,6 +37,7 @@ describe('VoilaSession', () => {
     const linkup = deferred<Awaited<ReturnType<SessionPorts['linkup']>>>();
     const runner = vi.fn<SessionPorts['runBooking']>(async (input) => {
       input.onProgress('Opening booking form');
+      input.onPage?.('route');
       expect(await input.confirm('Shuttle, 65 EUR.')).toEqual({ approved: true, reply: 'oui' });
       await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: 'Ready' });
       return completed;
@@ -203,15 +204,19 @@ describe('VoilaSession', () => {
     s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
     await vi.advanceTimersByTimeAsync(4000); expect(heartbeats()).toHaveLength(4);
   });
-  it('throttles agent speech to eight seconds while still streaming every feed', async () => {
+  it('keeps raw progress in the feed and speaks only localized observed-page milestones', async () => {
     let input!: BookingInput;
     const s = setup({ runBooking: async (value) => { input = value; return new Promise(() => {}); } });
-    await s.start(); await s.choose();
-    input.onProgress('one'); input.onProgress('two');
-    await vi.advanceTimersByTimeAsync(8000); input.onProgress('three');
+    s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
+    input.onProgress('Step 5: click_web — Pickup date field'); input.onProgress('Filling in the passenger details');
+    input.onPage?.('route'); input.onPage?.('vehicle'); input.onPage?.('info'); input.onPage?.('payment');
+    await vi.advanceTimersByTimeAsync(8000); input.onProgress('User approved. Creating the booking now.');
     expect(s.events.filter((e) => e.type === 'feed' && e.kind === 'agent')).toHaveLength(3);
-    expect(s.events.filter((e) => e.type === 'say' && e.text.startsWith('Booking in progress.'))).toHaveLength(2);
-    expect(s.events).toContainEqual({ type: 'say', text: 'Still working. One moment.' });
+    expect(s.events).toContainEqual({ type: 'feed', kind: 'agent', text: 'Step 5: click_web — Pickup date field' });
+    const speech = s.events.filter((e) => e.type === 'say').map((e) => e.text);
+    for (const text of ['Je remplis l’itinéraire.', 'Je choisis le véhicule.', 'Je remplis vos coordonnées.', 'La réservation est prête pour le paiement.']) expect(speech).toContain(text);
+    expect(speech.join(' ')).not.toMatch(/click_web|Step 5|Filling in|User approved/);
+    expect(speech).toContain('Je continue, un instant.');
   });
   it('reports invalid/wrong-stage input and wrong payment references without crashing', async () => {
     const s = setup();

@@ -10,12 +10,14 @@ export function bookingErrorMessage(error: unknown): string {
   return message.trim() && message !== 'undefined' ? message : 'Booking failed: unknown error.';
 }
 export type BookingClient = Pick<HaiAgentsClient, 'startSession' | 'sessions'>;
+export type BookingPage = 'route' | 'vehicle' | 'info' | 'payment';
 export interface BookingInput {
   trip: Trip;
   profile: Profile;
   startUrl: string;
   signal?: AbortSignal;
   onProgress(text: string): void;
+  onPage?(page: BookingPage): void;
   confirm(summary: string): Promise<{ approved: boolean; reply: string }>;
   onPaymentHandoff(payment: { url: string; amount: number; merchant: string; summary: string }): void | Promise<void>;
 }
@@ -36,6 +38,7 @@ export async function runBooking(input: BookingInput, client: BookingClient = ne
     await session.cancel();
   };
   let observedUrl: string | undefined;
+  let lastPage: BookingPage | undefined;
   let paymentUrl: string | undefined;
   let approved = false;
   let steps = 0;
@@ -120,6 +123,17 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
             if (kind === 'observation_event') {
               const { metadata } = z.object({ metadata: z.record(z.string(), z.unknown()).optional() }).parse(event.data);
               observedUrl = typeof metadata?.url === 'string' ? metadata.url : undefined;
+              let url: URL | undefined;
+              try { url = new URL(observedUrl ?? ''); } catch { /* No recognizable browser URL. */ }
+              let page: BookingPage | undefined;
+              if (url && !url.username && !url.password) {
+                if (url.origin === start.origin) {
+                  const step = /^\/fr\/reservation\/[^/]+\/(route|vehicle|info)\/?$/.exec(url.pathname)?.[1];
+                  if (step) page = step as BookingPage;
+                  else if (/^\/fr\/reservation\/payment\/[^/]+\/?$/.test(url.pathname) || /^\/stub-payment\/[^/]+\/?$/.test(url.pathname)) page = 'payment';
+                } else if (url.protocol === 'https:' && url.host === 'checkout.stripe.com') page = 'payment';
+              }
+              if (page && page !== lastPage) { lastPage = page; input.onPage?.(page); }
             }
             if (kind === 'policy_event') {
               const { content, toolReqs } = z.object({

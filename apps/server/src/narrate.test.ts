@@ -3,6 +3,13 @@ import { say } from './narrate.js';
 import { presetOptions } from './options.js';
 
 describe('say', () => {
+  it.each(['route', 'vehicle', 'info', 'payment'] as const)('localizes the %s milestone without raw tool text', (page) => {
+    const fr = say('booking-page', { page }, 'fr');
+    const en = say('booking-page', { page }, 'en');
+    expect(fr).not.toBe(en);
+    expect(fr.length).toBeLessThan(60); expect(en.length).toBeLessThan(60);
+    expect(fr + en).not.toMatch(/Step|click_web|undefined/);
+  });
   it.each(['fr', 'en'])('provides every short narration key in %s', (language) => {
     const lines = [
       say('acknowledgement', {}, language), say('clarify-deadline', {}, language),

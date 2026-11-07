@@ -120,4 +120,16 @@ describe('contextual conversation routing', () => {
     const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'choose', option_id: 'gare-du-nord-taxi', confidence: 1 })) }); await s.start(); await s.reply('euh');
     expect(s.session.stage).toBe('CHOOSE'); expect(s.ports.runBooking).not.toHaveBeenCalled();
   });
+  it.each(['arrêter la navette', 'annuler le shuttle'])('does not mistake cancellation for fast selection: %s', async (text) => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'stop' })) }); await s.start(); await s.reply(text);
+    expect(s.ports.converse).toHaveBeenCalledOnce(); expect(s.session.stage).toBe('LISTEN'); expect(s.ports.runBooking).not.toHaveBeenCalled();
+  });
+  it.each(['est-ce que la navette prend mon chien', 'is the shuttle dog friendly'])('interprets unpunctuated option questions before any booking: %s', async (text) => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question' })) }); await s.start(); await s.reply(text);
+    expect(s.ports.converse).toHaveBeenCalledOnce(); expect(s.session.stage).toBe('CHOOSE'); expect(s.ports.runBooking).not.toHaveBeenCalled();
+  });
+  it.each(['question', 'stop', 'confirm'] as const)('treats bare hesitation as unclear even when the model returns %s', async (intent) => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent, confidence: 1 })) }); await s.start(); await s.reply('euh je sais pas'); await s.reply('euh je sais pas');
+    expect(s.session.stage).toBe('CHOOSE'); expect(s.events.at(-1)).toEqual({ type: 'say', text: expect.stringContaining('1.') });
+  });
 });

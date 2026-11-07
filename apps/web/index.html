@@ -7,8 +7,26 @@
   </head>
   <body>
     <main>
-      <h1>Voilà</h1>
-      <button type="button" disabled>Speak — coming soon</button>
+      <h1 data-label="title">Voilà</h1>
+      <button id="edit" type="button" data-label="edit">Modifier le profil</button>
+      <form id="profile-form">
+        <h2 data-label="profile">Votre profil</h2>
+        <label><span data-label="name">Nom</span><input id="name" name="name" autocomplete="name" required></label>
+        <label><span data-label="phone">Téléphone</span><input name="phone" type="tel" autocomplete="tel" required></label>
+        <label><span data-label="email">Adresse e-mail</span><input name="email" type="email" autocomplete="email" required></label>
+        <label><input name="guide_dog" type="checkbox"><span data-label="dog">Chien guide</span></label>
+        <label><span data-label="language">Langue</span><select name="language"><option value="fr">Français</option><option value="en">English</option></select></label>
+        <button type="submit" data-label="save">Enregistrer</button>
+      </form>
+      <p id="connection" role="status"></p><h2 id="stage"></h2>
+      <section id="actions" aria-labelledby="stage"></section>
+      <p id="talk-help" data-label="instructions"></p>
+      <button id="talk" type="button" aria-describedby="talk-help" aria-pressed="false" disabled></button>
+      <form id="text-form"><label for="text" data-label="text">Votre demande</label><input id="text" name="text" autocomplete="off"><button id="send" type="submit" data-label="send" disabled>Envoyer</button></form>
+      <div id="announcements" aria-live="polite" aria-relevant="additions"></div>
+      <div id="errors" role="alert" aria-live="assertive" aria-relevant="additions"></div>
+      <details><summary data-label="feed">Sources et activité</summary><ul id="feed-items"></ul></details>
+      <button id="stop" type="button" data-label="stop">Arrêter</button>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

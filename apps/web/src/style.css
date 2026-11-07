@@ -1,0 +1,13 @@
+:root { font-family: system-ui, sans-serif; color: #fff; background: #101820; font-size: 125%; color-scheme: dark; }
+* { box-sizing: border-box; } body { margin: 0; } main { max-width: 48rem; margin: auto; padding: 1rem 1rem 7rem; }
+h1 { font-size: 1.7rem; } h2 { font-size: 1.4rem; } p, li, dd { line-height: 1.6; overflow-wrap: anywhere; }
+button, input, select, a.payment { font: inherit; min-height: 3rem; border: 2px solid #fff; border-radius: .5rem; padding: .8rem; }
+button { color: #101820; background: #ffdf57; cursor: pointer; font-weight: 700; } button:disabled { background: #adb5bd; cursor: not-allowed; }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible, summary:focus-visible { outline: 5px solid #67e8f9; outline-offset: 4px; }
+input:not([type=checkbox]), select { display: block; width: 100%; background: #101820; color: #fff; } input[type=checkbox] { width: 1.6rem; height: 1.6rem; vertical-align: middle; }
+label { display: block; margin: 1rem 0; } ul { padding-left: 1.3rem; } li { margin: 1rem 0; } li button { width: 100%; text-align: left; }
+#talk { display: flex; align-items: flex-start; justify-content: center; padding: 2rem .8rem; width: 100%; min-height: 80svh; font-size: 1.8rem; touch-action: none; user-select: none; }
+#talk[aria-pressed=true] { background: #67e8f9; } #stop { position: fixed; bottom: 0; left: 0; width: 100%; min-height: 4rem; padding-bottom: max(.8rem, env(safe-area-inset-bottom)); background: #a31224; color: white; border-radius: 0; z-index: 2; }
+#actions button { margin: .5rem .5rem .5rem 0; } a { color: #8feaff; } a.payment { display: block; background: #ffdf57; color: #101820; font-weight: bold; text-align: center; }
+summary { cursor: pointer; min-height: 3rem; padding: .8rem 0; } #errors { color: #ffb8bf; } dt { font-weight: bold; } dd { margin: 0 0 1rem; } [hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }

@@ -64,7 +64,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
     acknowledgement: () => fr ? 'Je vous aide à rejoindre l’aéroport.' : 'I’ll help you reach the airport.',
     'clarify-deadline': () => fr ? 'À quelle heure ferme l’enregistrement ?' : 'What time does check-in close?',
     'research-started': () => fr ? 'Je vérifie le trafic et les alternatives.' : 'I’m checking traffic and alternatives.',
-    disruption: ({ cause, recorded }) => `${recorded ? (fr ? 'Données de démonstration enregistrées. ' : 'Recorded demo information. ') : ''}${cause}`,
+    disruption: ({ cause, recorded }) => `${recorded ? (fr ? 'Données enregistrées, pas en direct : ' : 'Recorded data, not live: ') : ''}${cause}`,
     'present-options': ({ options, now }) => {
       if (!options.length) return fr ? 'Aucune option réalisable pour cet horaire.' : 'No feasible options for this deadline.';
       return options.slice(0, 3).map((option, index) => {

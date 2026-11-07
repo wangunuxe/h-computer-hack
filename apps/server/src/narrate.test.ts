@@ -28,8 +28,8 @@ describe('say', () => {
     expect(say('stopped', {}, 'fr-FR')).toBe(say('stopped', {}, 'fr'));
   });
   it('explicitly labels recorded disruptions in both languages', () => {
-    expect(say('disruption', { cause: 'Signal failure.', recorded: true }, 'en')).toContain('Recorded demo information.');
-    expect(say('disruption', { cause: 'Incident.', recorded: true }, 'fr')).toContain('enregistrées');
+    expect(say('disruption', { cause: 'Signal failure.', recorded: true }, 'en')).toBe('Recorded data, not live: Signal failure.');
+    expect(say('disruption', { cause: 'Incident.', recorded: true }, 'fr')).toBe('Données enregistrées, pas en direct : Incident.');
     expect(say('disruption', { cause: 'Live incident.', recorded: false }, 'en')).toBe('Live incident.');
   });
   it('reads at most three numbered options with Paris arrival and EUR prices', () => {
@@ -69,6 +69,6 @@ describe('say', () => {
   it('falls back to the supplied name for an unknown option id', () => {
     const option = { ...presetOptions[0]!, id: 'custom', name: 'Transfert solidaire' };
     expect(say('present-options', { options: [option], now: confirmation.now }, 'fr')).toContain(option.name);
-    expect(say('confirm', { ...confirmation, option, summary: '' }, 'fr')).toStartWith(option.name);
+    expect(say('confirm', { ...confirmation, option, summary: '' }, 'fr').startsWith(option.name)).toBe(true);
   });
 });

@@ -11,12 +11,28 @@ credentials stay in memory, not URLs in the page or persistent storage. Reconnec
 reuse the token and do not resend `hello`; the server replays stage-specific UI.
 Editing a profile stops the previous trip before opening a new session.
 
-Hold the large button to talk; release to finish. Keyboard users hold Space or
-Enter. Screen-reader users activate the button once to start and again to finish.
-The text form is always available. Speech is unlocked by a user gesture; every
-spoken message is also appended to a polite live region. Errors are assertive.
+Voice is the only request input; there is no text field or text-input toggle.
+The circular microphone defaults to tap-to-toggle: activate once to start and
+again to finish, including with VoiceOver/TalkBack or keyboard activation.
+The profile also offers hold-to-talk (hold Space/Enter or press and hold).
+Client-only `mic_mode` and `tts_enabled` preferences persist beside the profile;
+they are stripped from the wire profile. Choose “Screen reader only” to disable
+all Voilà speech synthesis and use the live caption card instead. Screen-reader
+presence is not inferred, because browsers provide no reliable detection API.
+Speech is unlocked by a user gesture. The large caption card contains the latest
+message, with Repeat beside it; errors are assertive. The last recognized request
+appears in a separate bubble. Stage changes focus options, confirmation, payment
+or booking content; plain caption updates never move focus. Options send ordinals.
 Stop cancels recording/speech, and sends `stop` (or retries it on reconnection).
 Payment uses a real new-tab link, never a programmatic popup.
+
+The mobile-first interface uses semantic landmarks, 56 px minimum controls, a
+104 px microphone, safe-area-aware fixed dock, dark/light system themes, rem
+typography and reduced-motion support. Stop is beside the microphone whenever
+recording, a trip or a pending cancellation is active. Activity/source links live
+in the native “What I’m doing” details panel. UI evidence uses fake events via
+CDP; scripted session/WebSocket requests can exercise routing without a text
+field or an H booking run.
 
 `POST /gladia/session` accepts `{id, resume_token}` and exposes only `{url}`.
 The session must have connected over WebSocket at least once. Initialization

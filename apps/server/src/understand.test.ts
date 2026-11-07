@@ -9,6 +9,22 @@ const clientWith = (value: unknown) => ({ models: { generateContent: vi.fn<Under
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe('understand', () => {
+  it('does not start Gemini when the caller signal is already aborted', async () => {
+    const client = clientWith({ trip: {} });
+    await expect(understand({ transcript: 'travel', profile, now, signal: AbortSignal.abort() }, client)).rejects.toMatchObject({ code: 'aborted' });
+    expect(client.models.generateContent).not.toHaveBeenCalled();
+  });
+  it('aborts the SDK request and settles even when the fake ignores cancellation', async () => {
+    const controller = new AbortController();
+    const client = clientWith({ trip: {} });
+    client.models.generateContent.mockImplementation(() => new Promise(() => {}));
+    const pending = understand({ transcript: 'travel', profile, now, signal: controller.signal }, client);
+    const sdkSignal = client.models.generateContent.mock.calls[0]![0].config?.abortSignal;
+    expect(sdkSignal?.aborted).toBe(false);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'UnderstandError', code: 'aborted' });
+    expect(sdkSignal?.aborted).toBe(true);
+  });
   it('uses Gemini 3.6, minimal thinking, structured JSON and profile defaults', async () => {
     const client = clientWith({ trip: { origin: 'Gare du Nord', destination: 'CDG 2E', luggage: 1 }, departure: '2026-11-07T21:00:00+01:00' });
     const result = await understand({ transcript: 'Mon vol CDG 2E part à 21h, une valise, Gare du Nord', profile, now }, client);

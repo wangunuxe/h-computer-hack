@@ -3,7 +3,7 @@ import { ProfileSchema, TripSchema, type Profile, type Trip } from '@voila/share
 import { z } from 'zod';
 
 export class UnderstandError extends Error {
-  constructor(public readonly code: 'timeout' | 'invalid_output' | 'provider_error' | 'invalid_input', message: string) {
+  constructor(public readonly code: 'timeout' | 'aborted' | 'invalid_output' | 'provider_error' | 'invalid_input', message: string) {
     super(message);
     this.name = 'UnderstandError';
   }
@@ -26,9 +26,10 @@ function parisIso(date: Date): string {
   return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}${part('timeZoneName').replace('GMT', '')}`;
 }
 
-export async function understand({ transcript, profile, now, previous = {} }: {
-  transcript: string; profile: Profile; now: Date; previous?: Partial<Trip>;
+export async function understand({ transcript, profile, now, previous = {}, signal }: {
+  transcript: string; profile: Profile; now: Date; previous?: Partial<Trip>; signal?: AbortSignal;
 }, client?: UnderstandingClient): Promise<{ trip: Partial<Trip>; missing: (keyof Trip)[]; notes?: string }> {
+  if (signal?.aborted) throw new UnderstandError('aborted', 'Gemini trip understanding was cancelled.');
   if (!transcript.trim() || !Number.isFinite(now.getTime())) throw new UnderstandError('invalid_input', 'A transcript and valid current time are required.');
   const model = process.env.GEMINI_MODEL ?? 'gemini-3.6-flash';
   if (Number(/^gemini-(\d+)/.exec(model)?.[1] ?? 0) < 3) throw new UnderstandError('invalid_input', 'GEMINI_MODEL must be Gemini 3.x or newer.');
@@ -38,7 +39,13 @@ export async function understand({ transcript, profile, now, previous = {} }: {
   const sdk = client ?? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let abort!: () => void;
   try {
+    const interrupted = new Promise<never>((_, reject) => {
+      abort = () => { reject(new UnderstandError('aborted', 'Gemini trip understanding was cancelled.')); controller.abort(); };
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+    });
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         reject(new UnderstandError('timeout', 'Gemini trip understanding timed out after 8000 ms.'));
@@ -59,7 +66,7 @@ All dates and clock times are Europe/Paris. Resolve today/tomorrow against now; 
 trip.deadline is ONLY an explicitly supplied check-in cutoff. A flight departure is NOT the cutoff: return it as departure instead, and omit trip.deadline unless an explicit cutoff was also stated. The caller subtracts 60 minutes.
 Do not copy defaults or previous facts into the output. Missing facts must be omitted, not null. Guide-dog statements in the transcript override the profile.`,
       },
-    }), timeout]);
+    }), timeout, interrupted]);
     let extracted: z.infer<typeof extractionSchema>;
     try { extracted = extractionSchema.parse(JSON.parse(response.text ?? '')); }
     catch { throw new UnderstandError('invalid_output', 'Gemini returned invalid trip JSON.'); }
@@ -76,5 +83,5 @@ Do not copy defaults or previous facts into the output. Missing facts must be om
   } catch (error) {
     if (error instanceof UnderstandError) throw error;
     throw new UnderstandError('provider_error', 'Gemini trip understanding request failed.');
-  } finally { clearTimeout(timer); controller.abort(); }
+  } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); controller.abort(); }
 }

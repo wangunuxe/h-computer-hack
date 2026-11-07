@@ -221,9 +221,11 @@ describe('VoilaSession', () => {
   it('stop aborts research and ignores a late understanding response', async () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['understand']>>>();
     let signal: AbortSignal | undefined;
-    const s = setup({ understand: () => pending.promise, prim: async (input) => { signal = input?.signal; return new Promise(() => {}); } });
+    let understandingSignal: AbortSignal | undefined;
+    const s = setup({ understand: (input) => { understandingSignal = input.signal; return pending.promise; }, prim: async (input) => { signal = input?.signal; return new Promise(() => {}); } });
     await s.start(); s.session.handle({ type: 'stop' });
     expect(signal?.aborted).toBe(true);
+    expect(understandingSignal?.aborted).toBe(true);
     pending.resolve({ trip, missing: [] }); await flush();
     expect(s.session.stage).toBe('LISTEN');
     expect(s.events.some((e) => e.type === 'options')).toBe(false);

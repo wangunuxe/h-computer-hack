@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { pathToFileURL } from 'node:url';
 import { HaiAgentsClient, type SessionHandle } from 'hai-agents';
@@ -55,7 +54,8 @@ export async function smokeSession() {
     if (!running.server.listening) await once(running.server, 'listening');
     const address = running.server.address();
     if (!address || typeof address === 'string') throw new Error('Expected a TCP listening port');
-    ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws/session/${randomUUID()}`);
+    const issued = await (await running.app.request('/session', { method: 'POST' })).json() as { id: string; resume_token: string };
+    ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws/session/${issued.id}?token=${encodeURIComponent(issued.resume_token)}`);
     const socket = ws;
     await new Promise<void>((resolve) => {
       const finish = finishOnce((reason) => { outcome = reason; totalMs = Math.round(performance.now() - started); clearTimeout(timer); resolve(); });

@@ -57,8 +57,14 @@ describe('real WebSocket round-trip', () => {
     if (!running.server.listening) await once(running.server, 'listening');
     const address = running.server.address();
     if (!address || typeof address === 'string') throw new Error('Expected an ephemeral TCP port');
-    const connect = async (token?: string) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws/session/demo${token ? `?token=${encodeURIComponent(token)}` : ''}`);
+    const response = await fetch(`http://127.0.0.1:${address.port}/session`, { method: 'POST' });
+    expect(response.status).toBe(201); expect(response.headers.get('cache-control')).toBe('no-store');
+    const issued = await response.json() as { id: string; resume_token: string };
+    expect(issued.id).toMatch(/^[\w-]{32}$/); expect(issued.resume_token).toMatch(/^[\w-]{43}$/);
+    const another = await (await running.app.request('/session', { method: 'POST' })).json();
+    expect(another.id).not.toBe(issued.id); expect(another.resume_token).not.toBe(issued.resume_token);
+    const connect = async (token?: string, id = issued.id) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws/session/${id}${token ? `?token=${encodeURIComponent(token)}` : ''}`);
       const messages: ServerEvent[] = [];
       ws.on('message', (data) => messages.push(ServerEventSchema.parse(JSON.parse(data.toString()))));
       await once(ws, 'open');
@@ -67,11 +73,15 @@ describe('real WebSocket round-trip', () => {
       };
       return { ws, messages, until };
     };
-    const first = await connect();
+    for (const [token, id] of [[undefined, issued.id], ['wrong', issued.id], [issued.resume_token, 'unissued-session']]) {
+      const attacker = await connect(token, id);
+      const [code] = await once(attacker.ws, 'close');
+      expect(code).toBe(4401); expect(attacker.messages).toEqual([]);
+      expect(running.sessions.size).toBe(0);
+    }
+    const first = await connect(issued.resume_token);
     await first.until(() => first.messages.length > 0);
-    expect(first.messages[0]).toMatchObject({ type: 'stage', stage: 'LISTEN', resume_token: expect.stringMatching(/^[\w-]{43}$/) });
-    const initial = first.messages[0];
-    if (initial?.type !== 'stage' || !initial.resume_token) throw new Error('Expected resume token');
+    expect(first.messages[0]).toEqual({ type: 'stage', stage: 'LISTEN' });
     for (const token of [undefined, 'incorrect-token']) {
       const attacker = await connect(token);
       const [code] = await once(attacker.ws, 'close');
@@ -84,10 +94,10 @@ describe('real WebSocket round-trip', () => {
     first.ws.send(JSON.stringify(hello));
     first.ws.send(JSON.stringify({ type: 'final_transcript', text: 'CDG' }));
     await first.until(() => first.messages.some((e) => e.type === 'stage' && e.stage === 'CHOOSE'));
-    const session = running.sessions.get('demo');
-    const second = await connect(initial.resume_token);
+    const session = running.sessions.get(issued.id);
+    const second = await connect(issued.resume_token);
     await second.until(() => second.messages.length > 0);
-    expect(running.sessions.get('demo')).toBe(session);
+    expect(running.sessions.get(issued.id)).toBe(session);
     expect(second.messages[0]).toEqual({ type: 'stage', stage: 'CHOOSE' });
     second.ws.send(JSON.stringify({ type: 'user_reply', text: 'G7' }));
     await second.until(() => second.messages.some((e) => e.type === 'stage' && e.stage === 'DONE'));

@@ -168,10 +168,12 @@ speech uses a short localized template, omitting unparseable pickup time and
 price; the `confirm` event keeps the full agent summary. Confirmation replies accept
 French/English yes/no phrases; unclear replies do not approve a booking.
 
-Run `pnpm --filter @voila/server dev` (PORT defaults to 3000). `/ws/session/:id`
-creates an in-memory session. Its first `stage` event includes a cryptographically
-random `resume_token`; keep it private and pass it as `?token=<resume_token>`
-when reconnecting to the same id. Missing or incorrect tokens close with 4401
+Run `pnpm --filter @voila/server dev` (PORT defaults to 3000). First call
+`POST /session` to obtain `{ id, resume_token }` (HTTP 201, not cacheable).
+The server generates a random 192-bit id and a separate 256-bit token. Keep both
+private. Connect to `/ws/session/:id?token=<resume_token>` on every connection,
+including the first; clients cannot choose or claim a session id. Unissued ids
+and missing or incorrect tokens close with 4401
 without replacing the existing socket. Authorized reconnects replay the current
 stage plus pending confirmation, payment handoff, choices or completed booking
 card, without restarting work or repeating speech. Send `hello` once

@@ -10,11 +10,18 @@ import { VoilaSession, type SessionPorts } from './session.js';
 const paymentSchema = z.object({ order_id: z.string().min(1), ref: z.string().min(1), status: z.literal('paid') });
 const secureEqual = (a: string, b: string) => timingSafeEqual(createHash('sha256').update(a).digest(), createHash('sha256').update(b).digest());
 
-export function createApp({ sessions = new Map<string, VoilaSession>(), token = process.env.INTERNAL_CALLBACK_TOKEN }: {
-  sessions?: Map<string, VoilaSession>; token?: string;
+export function createApp({ sessions = new Map<string, VoilaSession>(), credentials = new Map<string, string>(), token = process.env.INTERNAL_CALLBACK_TOKEN }: {
+  sessions?: Map<string, VoilaSession>; credentials?: Map<string, string>; token?: string;
 } = {}) {
   const app = new Hono();
   app.get('/health', (c) => c.json({ status: 'ok' }));
+  app.post('/session', (c) => {
+    const id = randomBytes(24).toString('base64url');
+    const resume_token = randomBytes(32).toString('base64url');
+    credentials.set(id, resume_token);
+    c.header('Cache-Control', 'no-store');
+    return c.json({ id, resume_token }, 201);
+  });
   app.get('/ws/session/:id', (c) => c.text('WebSocket upgrade required', 426));
   app.post('/internal/payment-completed', async (c) => {
     const provided = c.req.header('authorization') ?? '';
@@ -39,7 +46,7 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
   const sessions = new Map<string, VoilaSession>();
   const clients = new Map<string, WebSocket>();
   const resumeTokens = new Map<string, string>();
-  const app = createApp({ sessions, token });
+  const app = createApp({ sessions, credentials: resumeTokens, token });
   const server = serve({ fetch: app.fetch, port, hostname });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   server.on('upgrade', (request, socket, head) => {
@@ -51,20 +58,15 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
     sockets.handleUpgrade(request, socket, head, (ws) => {
       ws.on('error', () => (ports?.logger ?? console).error('Session WebSocket error.'));
       const existing = sessions.get(id);
-      if (existing && !secureEqual(url.searchParams.get('token') ?? '', resumeTokens.get(id)!)) {
+      const resumeToken = resumeTokens.get(id);
+      if (!resumeToken || !secureEqual(url.searchParams.get('token') ?? '', resumeToken)) {
         ws.close(4401, 'Invalid resume token');
         return;
       }
-      const resumeToken = resumeTokens.get(id) ?? randomBytes(32).toString('base64url');
-      resumeTokens.set(id, resumeToken);
-      let sendToken = !existing;
       clients.get(id)?.close(1000, 'Session reattached');
       clients.set(id, ws);
       const emit = (event: ServerEvent) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify(event.type === 'stage' && sendToken ? { ...event, resume_token: resumeToken } : event));
-          if (event.type === 'stage') sendToken = false;
-        }
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
       };
       const session = existing ?? new VoilaSession(emit, ports);
       sessions.set(id, session);

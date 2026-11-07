@@ -51,7 +51,7 @@ export const StageSchema = z.enum([
 export const ScenarioSchema = z.enum(['demo', 'live']);
 export type Scenario = z.infer<typeof ScenarioSchema>;
 export const ServerEventSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('stage'), stage: StageSchema, resume_token: text.optional() }),
+  z.object({ type: z.literal('stage'), stage: StageSchema }),
   z.object({ type: z.literal('say'), text }),
   z.object({ type: z.literal('feed'), kind: text, text, source: z.url().optional(), mode: z.enum(['demo', 'live-prim', 'live-h']).optional(), status: z.enum(['normal', 'disrupted', 'unknown']).optional() }),
   z.object({ type: z.literal('clarify'), question: text }),

@@ -258,11 +258,13 @@ export function mountAgentView(root: HTMLElement, bus: Bus) {
         panel.classList.toggle("is-audit", a.on);
         break;
       case "tool_call":
-        pause.innerHTML = `<div class="ag-tool"><small>CUSTOM TOOL</small><code>${a.name}(${a.name === "handoff_payment" ? "ref: \"PAS-48213\", amount: \"€65.00\"" : "summary"})</code></div>`;
+        pause.replaceChildren(
+          h("div", { class: "ag-tool" }, h("small", {}, "CUSTOM TOOL"), h("code", {}, `${a.name}(${a.name === "handoff_payment" ? 'ref: "PAS-48213", amount: "€65.00"' : "summary"})`)),
+        );
         pause.className = "ag-pause is-on";
         break;
       case "paused":
-        pause.insertAdjacentHTML("beforeend", `<div class="ag-pause-r"><i></i>${a.reason}</div>`);
+        pause.append(h("div", { class: "ag-pause-r" }, h("i"), a.reason));
         break;
       case "done":
         pause.innerHTML = `<div class="ag-tool ag-tool-ok"><small>SESSION COMPLETE</small><code>Booking { ref: "PAS-48213", status: "paid" }</code></div>`;

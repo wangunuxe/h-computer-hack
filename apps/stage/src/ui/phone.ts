@@ -172,14 +172,17 @@ export function mountPhone(root: HTMLElement, bus: Bus, opts: { framed: boolean 
   };
 
   const renderPay = (amount: string, merchant: string) => {
-    pay.innerHTML = `
-      <div class="ph-pay-sheet">
-        <div class="ph-pay-head"><span class="ph-pay-logo">${ICON.apple}Pay</span><span class="ph-pay-x">Cancel</span></div>
-        <div class="ph-pay-row"><span class="ph-pay-card"></span><div><b>Visa ···· 4242</b><small>Karim Benali</small></div></div>
-        <div class="ph-pay-row ph-pay-merchant"><small>PAY ${merchant.toUpperCase()}</small><b>${amount}</b></div>
-        <div class="ph-pay-face">${ICON.face}<span class="ph-pay-face-t">Double-click to pay</span></div>
-      </div>
-      <div class="ph-pay-side-hint"><i></i><i></i></div>`;
+    pay.replaceChildren(
+      h(
+        "div",
+        { class: "ph-pay-sheet" },
+        h("div", { class: "ph-pay-head" }, h("span", { class: "ph-pay-logo", html: `${ICON.apple}Pay` }), h("span", { class: "ph-pay-x" }, "Cancel")),
+        h("div", { class: "ph-pay-row" }, h("span", { class: "ph-pay-card" }), h("div", {}, h("b", {}, "Visa ···· 4242"), h("small", {}, "Karim Benali"))),
+        h("div", { class: "ph-pay-row ph-pay-merchant" }, h("small", {}, `PAY ${merchant.toUpperCase()}`), h("b", {}, amount)),
+        h("div", { class: "ph-pay-face" }, h("span", { html: ICON.face }), h("span", { class: "ph-pay-face-t" }, "Double-click to pay")),
+      ),
+      h("div", { class: "ph-pay-side-hint" }, h("i"), h("i")),
+    );
   };
 
   let agentPhase = 0;
@@ -267,7 +270,7 @@ export function mountPhone(root: HTMLElement, bus: Bus, opts: { framed: boolean 
         show(viewConfirm);
         break;
       case "confirmed":
-        confirmState.innerHTML = `${ICON.check} Confirmed by voice`;
+        confirmState.replaceChildren(h("span", { html: ICON.check }), " Confirmed by voice");
         confirmState.classList.add("is-ok");
         break;
       case "payment_handoff":
@@ -278,7 +281,7 @@ export function mountPhone(root: HTMLElement, bus: Bus, opts: { framed: boolean 
         break;
       case "payment_completed":
         pay.classList.add("is-done");
-        pay.querySelector(".ph-pay-face")!.innerHTML = `<span class="ph-pay-ok">${ICON.check}</span><span class="ph-pay-face-t">Done</span>`;
+        pay.querySelector(".ph-pay-face")!.replaceChildren(h("span", { class: "ph-pay-ok", html: ICON.check }), h("span", { class: "ph-pay-face-t" }, "Done"));
         setTimeout(() => {
           pay.classList.remove("is-on");
           device.classList.remove("is-paying");

@@ -36,6 +36,14 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it("keeps c'est Marie local after asking for a name and passes the confirmed name only to booking", async () => {
+    const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'fr', guide_dog: false }, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
+    for (const text of ["c'est Marie", 'oui', '0612345678', 'oui', 'marie at example dot com', 'oui']) await s.choose(text);
+    expect(s.ports.runBooking).toHaveBeenCalledOnce(); expect(s.ports.runBooking.mock.calls[0]![0].profile.name).toBe('Marie');
+    expect(s.ports.understand).toHaveBeenCalledOnce(); expect(s.ports.linkup).toHaveBeenCalledOnce(); expect(s.ports.converse).not.toHaveBeenCalled();
+    const external = JSON.stringify([s.ports.understand.mock.calls[0]![0].transcript, s.ports.linkup.mock.calls]); expect(external).not.toContain('Marie');
+  });
   it.each([[false, true], [true, false]])('preserves an explicit trip dog=%s over saved dog=%s after contact collection', async (savedDog, tripDog) => {
     const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { ...trip, guide_dog: tripDog }, missing: [] }) });
     s.session.handle({ type: 'hello', profile: { language: 'en', guide_dog: savedDog }, gps: null, scenario: 'live' });

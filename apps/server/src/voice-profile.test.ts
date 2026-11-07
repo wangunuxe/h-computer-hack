@@ -1,8 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import { parsePhone, parseEmail, VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 describe('local spoken contact parsers', () => {
+  it.each(['06:12 34 56 78', '06:12:34 56 78', '2027-01-15 12 34'])('does not protect a temporal prefix of a phone-length sequence: %s', (phone) => {
+    expect(redactContactText(phone)).toBe('[phone]');
+    expect(redactContactText(`Call me on ${phone}, from Gare du Nord to CDG 2E`)).toBe('Call me on [phone], from Gare du Nord to CDG 2E');
+  });
+  it.each(['20:45', 'à 20:45 depuis gare du Nord', '2027-01-15 20:45', '20:45 2E', '2027-01-15 2E', '2027-01-15 à 20:45 pour 2 personnes'])('keeps a real temporal value intact: %s', (text) => expect(redactContactText(text)).toBe(text));
+  it.each(["c'est pour demain", "c'est pour aller à CDG", "c'est urgent", "c'est demain", "c'est aujourd'hui", "c'est ce soir", "c'est à la gare", "c'est la gare du Nord", "c'est le train", "c'est un taxi", "c'est Marie"])("does not infer a name from ambiguous trip speech: %s", (text) => expect(redactContactText(text)).toBe(text));
+  it('still removes explicit name introductions and known saved names', () => {
+    for (const text of ["mon nom c'est Marie, pour aller à CDG", "je m'appelle Marie, pour aller à CDG", 'my name is Marie, to CDG']) {
+      expect(redactContactText(text)).not.toContain('Marie'); expect(redactContactText(text)).toContain('CDG');
+    }
+    expect(redactContactText("c'est Marie, pour aller à CDG", { language: 'fr', name: 'Marie' })).toBe("c'est [contact], pour aller à CDG");
+  });
+  it.each(['2027-01-15', '15/01/2027', '15.01.2027', '15-01-2027', '2027/01/15', '20:45', '20:45:30', '2027-01-15T20:45:00+01:00'])('preserves the trip date/time %s while still removing phone numbers', (when) => {
+    const safe = redactContactText(`Gare du Nord to CDG 2E, ${when}. Call me on 06 12 34 56 78 or +33 6 12 34 56 78 or zero six twelve thirty four fifty six seventy eight.`);
+    expect(safe).toContain(when); expect(safe).toContain('Gare du Nord to CDG 2E'); expect(safe).not.toMatch(/06 12|\+33 6|zero six/);
+  });
+  it('preserves adjacent dates and times but does not mistake phone-number subgroups for dates', () => {
+    expect(redactContactText('2027-01-15 20:45, 15/01/2027 à 20:45')).toBe('2027-01-15 20:45, 15/01/2027 à 20:45');
+    expect(redactContactText('06.12.3456.78')).toBe('[phone]');
+  });
   it.each(['Dr.', 'Dr', 'M.', 'Mme', 'Mr', 'Mrs', 'Ms', 'Monsieur', 'Madame', 'Mademoiselle'])('redacts the name following the honorific %s, not just the title', (title) => {
-    for (const intro of ['my name is', "c'est", "I'm"]) {
+    for (const intro of ['my name is', "mon nom c'est", "I'm"]) {
       const safe = redactContactText(`${intro} ${title} Anna Lee, from Gare du Nord to CDG 2E`);
       expect(safe).not.toMatch(/Anna|Lee/); expect(safe).toContain('[name]'); expect(safe).toContain('from Gare du Nord to CDG 2E');
     }
@@ -19,7 +39,7 @@ describe('local spoken contact parsers', () => {
     ["mon numéro c'est zéro six douze trente-quatre cinquante-six soixante-dix-huit, de Gare du Nord à CDG 2E", 'zéro six douze'],
     ['mon téléphone est zéro six, douze, trente quatre, cinquante six, soixante dix huit, de Gare du Nord à CDG 2E', 'zéro six'],
     ["I'm Marie, take me from Gare du Nord to CDG 2E", 'Marie'],
-    ["c'est Marie, emmenez-moi de Gare du Nord à CDG 2E", 'Marie'],
+    ["mon nom c'est Marie, emmenez-moi de Gare du Nord à CDG 2E", 'Marie'],
     ['my email is marie at gmail dot com, from Gare du Nord to CDG 2E', 'marie'],
     ['mon mail est marie arobase gmail point com, de Gare du Nord à CDG 2E', 'marie'],
   ])('removes spoken contacts, including incomplete numbers, without removing the route: %s', (text, secret) => {
@@ -69,6 +89,11 @@ describe('local spoken contact parsers', () => {
   });
 });
 describe('one-field-at-a-time voice profile confirmation', () => {
+  it("accepts c'est Marie only in the local name-question context and confirms it before saving", () => {
+    const flow = new VoiceProfile({ language: 'fr' }, ['name']);
+    expect(flow.question).toContain('nom'); expect(flow.reply("c'est Marie").text).toContain('Marie.'); expect(flow.profile.name).toBeUndefined();
+    expect(flow.reply('oui').complete).toBe(true); expect(flow.profile.name).toBe('Marie');
+  });
   it('does not save until confirmed, reads phone digits individually, and accepts corrections', () => {
     const flow = new VoiceProfile({ language: 'fr' }, ['phone', 'email']);
     expect(flow.question).toContain('téléphone');

@@ -51,17 +51,28 @@ export function forgetDetails(text: string): boolean {
   return /^(?:please )?(?:efface mes informations|oublie mes informations|forget my details|delete my details)(?: s il vous plait| please)?$/.test(normal(text));
 }
 export function redactContactText(text: string, profile?: TravelerProfile): string {
-  let safe = text.replace(/\b(je m['’]appelle|mon nom est|my name is|i['’]m|i am|c['’]est|call me)\s+(?:(?:dr|m|mme|mr|mrs|ms|monsieur|madame|mademoiselle)\.?\s+)*(?!(?:on|at|in|from|to|going|travelling|traveling|with|without|blind|late|lost|looking|trying|ready|not|le|la|les|un|une|bien|bon|à|a|en|dans|au|aux|avec|sans|gare|airport|station|terminal|CDG|Orly|Paris)\b)[\p{L}\p{M}'’-]+(?:[ \t]+[\p{L}\p{M}'’-]+)*?(?=[,;.!?]|\s+(?:(?:et|and|avec|with|pour|for|from|at|to|depuis|vers|take|emmenez|amenez)\b|je (?:suis|vais|dois|pars|veux)\b|j['’]ai\b|i (?:am|need|want|have)\b|i['’]m\b|à\s)|$)/giu, '$1 [name]');
+  let safe = text.replace(/\b(je m['’]appelle|mon nom (?:est|c['’]est)|my name is|i['’]m|i am|call me)\s+(?:(?:dr|m|mme|mr|mrs|ms|monsieur|madame|mademoiselle)\.?\s+)*(?!(?:on|at|in|from|to|going|travelling|traveling|with|without|blind|late|lost|looking|trying|ready|not|le|la|les|un|une|bien|bon|à|a|en|dans|au|aux|avec|sans|gare|airport|station|terminal|CDG|Orly|Paris)\b)[\p{L}\p{M}'’-]+(?:[ \t]+[\p{L}\p{M}'’-]+)*?(?=[,;.!?]|\s+(?:(?:et|and|avec|with|pour|for|from|at|to|depuis|vers|take|emmenez|amenez)\b|je (?:suis|vais|dois|pars|veux)\b|j['’]ai\b|i (?:am|need|want|have)\b|i['’]m\b|à\s)|$)/giu, '$1 [name]');
   for (const value of [profile?.name, profile?.phone, profile?.email]) if (value) safe = safe.replace(new RegExp(`(?<![\\p{L}\\p{N}])${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'giu'), '[contact]');
   safe = safe.replace(/[a-z\d.!#$%&'*+/=?^_`{|}~-]+@[a-z\d.-]+\.[a-z]{2,}/gi, '[email]')
-    .replace(/\b[\p{L}\d_+-]+(?:(?:\.|\s+(?:point|dot|tiret bas|tiret|dash|underscore)\s+)[\p{L}\d_+-]+)*\s*(?:@|\b(?:arobase|at)\b)\s*[\p{L}\d-]+(?:(?:\s*\.\s*|\s+(?:point|dot)\s+)[\p{L}\d-]+)+\b/giu, (value) => parseEmail(value) ? '[email]' : value)
-    .replace(/(?:\+\d(?:[\s().-]*\d){7,14}|\b\d(?:[\s().-]*\d){9}\b)/g, '[phone]');
-  return safe.replace(spokenPhoneSpan, (value: string, offset: number) => {
-    const digits = phoneDigits(value)?.digits;
-    const introduced = /\b(?:call me(?: on| at)?|reach me(?: on| at)?|(?:my )?(?:phone(?: number)?|number)(?: is| s)?|(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:appelez|contactez)(?: moi)?(?: au)?)$/.test(normal(safe.slice(0, offset)));
-    return digits && (digits.length >= 7 || introduced) ? '[phone]' : value;
-  });
+    .replace(/\b[\p{L}\d_+-]+(?:(?:\.|\s+(?:point|dot|tiret bas|tiret|dash|underscore)\s+)[\p{L}\d_+-]+)*\s*(?:@|\b(?:arobase|at)\b)\s*[\p{L}\d-]+(?:(?:\s*\.\s*|\s+(?:point|dot)\s+)[\p{L}\d-]+)+\b/giu, (value) => parseEmail(value) ? '[email]' : value);
+  const parts = safe.split(temporalSpan);
+  for (let index = 1; index < parts.length; index += 2) {
+    const continuation = /^(?:[\s().,;:-]+\d+(?![\p{L}\d]))+/u.exec(parts[index + 1]!)?.[0];
+    if (continuation && (parts[index]! + continuation).replace(/\D/g, '').length >= 7) {
+      parts[index - 1] += parts[index]! + parts[index + 1]!;
+      parts.splice(index, 2); index -= 2;
+    }
+  }
+  return parts.map((part, index) => {
+    if (index % 2) return part;
+    return part.replace(spokenPhoneSpan, (value: string, offset: number) => {
+      const digits = phoneDigits(value)?.digits;
+      const introduced = /\b(?:call me(?: on| at)?|reach me(?: on| at)?|(?:my )?(?:phone(?: number)?|number)(?: is| s)?|(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:appelez|contactez)(?: moi)?(?: au)?)$/.test(normal(part.slice(0, offset)));
+      return digits && (digits.length >= 7 || introduced) ? '[phone]' : value;
+    });
+  }).join('');
 }
+const temporalSpan = /((?<![\p{L}\d])(?<!\d[./:-])(?:\d{4}[-/.](?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])[-/.](?:0?[1-9]|1[0-2])[-/.]\d{4}|(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)(?!\d|[./:-]\d))/gu;
 const numberWords = [...numbers.keys(), 'plus', 'double', 'triple'].sort((a, b) => b.length - a.length).map((word) => word.replace(/zero/g, 'z[eé]ro').replace(/ /g, '\\s+')).join('|');
 const spokenPhoneSpan = new RegExp(`(?<![\\p{L}\\p{N}])\\+?(?:\\d+|${numberWords})(?:[\\s().,;:-]+(?:\\d+|${numberWords}))*(?![\\p{L}\\p{N}])`, 'giu');
 type Field = 'name' | 'phone' | 'email' | 'guide_dog';
@@ -80,7 +91,7 @@ export class VoiceProfile {
     if (this.field === 'phone') return parsePhone(text);
     if (this.field === 'email') return parseEmail(text);
     if (this.field === 'guide_dog') return yes(text) || /^(oui|yes)\b/.test(normal(text)) ? true : no(text) || /^(non|no)\b/.test(normal(text)) ? false : undefined;
-    const name = text.replace(/^(?:je m['’]appelle|mon nom est|my name is)\s+/i, '').replace(/[.!?,]+$/, '').trim();
+    const name = text.replace(/^(?:je m['’]appelle|mon nom (?:est|c['’]est)|my name is|c['’]est)\s+/i, '').replace(/[.!?,]+$/, '').trim();
     return !yes(name) && !no(name) && /^[\p{L}\p{M}][\p{L}\p{M} '\u2019-]{0,79}$/u.test(name) ? name : undefined;
   }
   private readback() {

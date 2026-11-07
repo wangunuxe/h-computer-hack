@@ -9,6 +9,12 @@ const clientWith = (value: unknown) => ({ models: { generateContent: vi.fn<Under
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe('understand', () => {
+  it('does not include profile name, phone or email in the Gemini request', async () => {
+    const client = clientWith({ trip: {} });
+    await understand({ transcript: 'Je veux aller à CDG', profile, now }, client);
+    const payload = JSON.stringify(client.models.generateContent.mock.calls[0]![0]);
+    for (const value of [profile.name, profile.phone, profile.email]) expect(payload).not.toContain(value);
+  });
   it('does not start Gemini when the caller signal is already aborted', async () => {
     const client = clientWith({ trip: {} });
     await expect(understand({ transcript: 'travel', profile, now, signal: AbortSignal.abort() }, client)).rejects.toMatchObject({ code: 'aborted' });

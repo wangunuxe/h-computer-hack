@@ -3,6 +3,8 @@ import { type ServerEvent, type Trip } from '@voila/shared';
 import { VoilaSession, type SessionPorts } from './session.js';
 import type { TurnResult } from './converse.js';
 import type { BookingInput } from './booking.js';
+import { presetOptions } from './options.js';
+import { say } from './narrate.js';
 
 const trip: Trip = { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T21:00:00+01:00', guide_dog: true, passengers: 1, luggage: 0 };
 const profile = { name: 'Karim', phone: '+33612345678', email: 'karim@example.com', guide_dog: true, language: 'fr' };
@@ -26,6 +28,44 @@ function setup(overrides: Partial<SessionPorts> = {}) {
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00+01:00')); });
 afterEach(() => { sessions.splice(0).forEach((session) => session.dispose()); vi.useRealTimers(); });
 describe('contextual conversation routing', () => {
+  it.each(['fr', 'en'])('selects spoken option names in %s without Gemini, including when offline', async (language) => {
+    for (const option of presetOptions) {
+      const s = setup({ converse: vi.fn().mockRejectedValue(new Error('Unavailable')) }); await s.start(language);
+      const spoken = say('present-options', { options: [option], now: new Date() }, language).split(',')[0]!.replace(/^1\. /, '');
+      await s.reply(language === 'fr' ? `${spoken} s’il vous plaît` : `${spoken} please`);
+      expect(s.ports.converse).not.toHaveBeenCalled();
+      expect(s.session.stage).toBe(option.id === 'paris-airport-shuttle' ? 'EXECUTE' : 'DONE');
+    }
+  });
+  it.each(['je veux savoir si la navette accepte mon chien', 'est-ce que la navette accepte les chiens', 'I wonder whether the shuttle takes dogs'])('routes longer option questions to Gemini: %s', async (text) => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply: 'Je vérifie la politique concernant les chiens guides.' })) }); await s.start(); await s.reply(text);
+    expect(s.ports.converse).toHaveBeenCalledWith(expect.objectContaining({ transcript: text }));
+    expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.session.stage).toBe('CHOOSE');
+  });
+  it.each(['je veux savoir si la navette accepte mon chien', 'est-ce que la navette accepte les chiens', 'I wonder whether the shuttle takes dogs', 'do you know if the shuttle runs', 'je demande si la navette accepte les chiens', 'can I take the shuttle'])('asks a fallback question without selecting when Gemini is offline: %s', async (text) => {
+    const s = setup({ converse: vi.fn().mockRejectedValue(new Error('Unavailable')) }); await s.start(); const before = s.events.length; await s.reply(text);
+    expect(s.ports.converse).toHaveBeenCalledOnce(); expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.session.stage).toBe('CHOOSE');
+    expect(s.events.slice(before)).toContainEqual({ type: 'say', text: expect.stringContaining('?') });
+  });
+  it.each(['the shuttle is fine', "la navette c'est bien"])('selects affirmative speech without Gemini: %s', async (text) => {
+    const s = setup(); await s.start(); await s.reply(text);
+    expect(s.ports.converse).not.toHaveBeenCalled(); expect(s.ports.runBooking).toHaveBeenCalledOnce();
+    expect(s.session.stage).toBe('EXECUTE');
+  });
+  it.each(['is the shuttle ok', 'la navette accepte le chien ?'])('answers option questions without booking: %s', async (text) => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question' })) }); await s.start(); await s.reply(text);
+    expect(s.ports.converse).toHaveBeenCalledOnce(); expect(s.ports.runBooking).not.toHaveBeenCalled();
+    expect(s.session.stage).toBe('CHOOSE');
+  });
+  it('keeps the raw confirmation on screen but passes only structured fields to the interpreter', async () => {
+    const summary = `Private summary: ${profile.name}, ${profile.phone}, ${profile.email}`;
+    const s = setup({ runBooking: async (input) => { await input.confirm(summary, { pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR' }); return new Promise(() => {}); } });
+    await s.start(); await s.reply('shuttle'); await s.reply('quel est le prix ?');
+    expect(s.events).toContainEqual({ type: 'confirm', summary });
+    const context = s.ports.converse.mock.calls[0]![0];
+    expect(context.confirmation).toEqual({ pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR', option_name: 'Paris Airport Shuttle', guide_dog_status: 'unknown' });
+    for (const value of [profile.name, profile.phone, profile.email, summary]) expect(JSON.stringify(context)).not.toContain(value);
+  });
   it('keeps ordinal selection instant without calling Gemini', async () => {
     const s = setup(); await s.start(); await s.reply('2'); expect(s.session.stage).toBe('DONE'); expect(s.ports.converse).not.toHaveBeenCalled();
   });

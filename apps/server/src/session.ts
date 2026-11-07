@@ -9,8 +9,8 @@ import { assessOptions } from './feasibility.js';
 import { bookingMethods, matchesPresetRoute, mergeOptions, presetOptions } from './options.js';
 import { chooseOption } from './choose.js';
 import { say, type NarrationParams } from './narrate.js';
-import { converse, type Turn, type TurnResult } from './converse.js';
-import type { ConfirmationFields } from './confirmation.js';
+import { converse, type ConfirmationContext, type Turn, type TurnResult } from './converse.js';
+import { sanitizeConfirmationFields } from './confirmation.js';
 import { fallbackQuestion } from './questions.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
@@ -43,7 +43,7 @@ export class VoilaSession {
   private flow = new AbortController();
   private bookingController?: AbortController;
   private research?: Promise<Research>;
-  private confirmation?: { summary: string; details?: ConfirmationFields; resolve: (decision: { approved: boolean; reply: string }) => void };
+  private confirmation?: { summary: string; details: ConfirmationContext; resolve: (decision: { approved: boolean; reply: string }) => void };
   private history: Turn[] = [];
   private turnVersion = 0;
   private turnController?: AbortController;
@@ -269,7 +269,7 @@ export class VoilaSession {
     const controller = new AbortController(); this.turnController = controller;
     let result: TurnResult;
     try {
-      result = await this.limited((signal) => this.ports.converse({ transcript, stage, language: this.language, trip: { ...this.trip }, missing: this.missing(), options: this.options, confirmation: this.confirmation ? { summary: this.confirmation.summary, ...this.confirmation.details } : undefined, history: [...this.history], attempt: this.attempt, now: this.ports.clock(), signal }), 20_500, controller.signal);
+      result = await this.limited((signal) => this.ports.converse({ transcript, stage, language: this.language, trip: { ...this.trip }, missing: this.missing(), options: this.options, confirmation: this.confirmation ? { ...this.confirmation.details } : undefined, history: [...this.history], attempt: this.attempt, now: this.ports.clock(), signal }), 20_500, controller.signal);
     } catch { result = { intent: 'unclear', confidence: 0, reply: this.fallback() }; }
     finally { if (this.turnController === controller) this.turnController = undefined; }
     if (!this.active(generation) || this.stage !== stage || this.turnVersion !== version || controller.signal.aborted) return;
@@ -349,7 +349,7 @@ export class VoilaSession {
         confirm: (summary, details) => {
           if (!current()) return Promise.resolve({ approved: false, reply: 'Stopped' });
           if (this.confirmation) throw new Error('A confirmation is already pending.');
-          const decision = new Promise<{ approved: boolean; reply: string }>((resolve) => { this.confirmation = { summary, details, resolve }; });
+          const decision = new Promise<{ approved: boolean; reply: string }>((resolve) => { this.confirmation = { summary, details: { ...sanitizeConfirmationFields(details), option_name: option.name, guide_dog_status: option.guide_dog_status }, resolve }; });
           this.transition('CONFIRM'); this.send({ type: 'confirm', summary }); this.speak('confirm', { trip, option, details, now: this.ports.clock() });
           return decision;
         },

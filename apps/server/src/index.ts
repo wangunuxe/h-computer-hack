@@ -9,8 +9,8 @@ import { SessionRegistry, secureEqual } from './session-registry.js';
 
 const paymentSchema = z.object({ order_id: z.string().min(1), ref: z.string().min(1), status: z.literal('paid') });
 
-export function createApp({ sessions = new Map<string, VoilaSession>(), registry = new SessionRegistry(sessions), token = process.env.INTERNAL_CALLBACK_TOKEN }: {
-  sessions?: Map<string, VoilaSession>; registry?: SessionRegistry; token?: string;
+export function createApp({ registry = new SessionRegistry(), token = process.env.INTERNAL_CALLBACK_TOKEN }: {
+  registry?: SessionRegistry; token?: string;
 } = {}) {
   const app = new Hono();
   app.get('/health', (c) => c.json({ status: 'ok' }));
@@ -31,7 +31,7 @@ export function createApp({ sessions = new Map<string, VoilaSession>(), registry
     const parsed = paymentSchema.safeParse(body);
     if (!parsed.success) return c.json({ error: 'Invalid payment notification' }, 400);
     let matched = false;
-    for (const session of sessions.values()) if (session.markPaid(parsed.data.ref)) matched = true;
+    for (const session of registry.sessions.values()) if (session.markPaid(parsed.data.ref)) matched = true;
     if (!matched) return c.json({ error: 'Booking not awaiting payment' }, 404);
     return c.json({ received: true });
   });
@@ -41,10 +41,10 @@ export function createApp({ sessions = new Map<string, VoilaSession>(), registry
 export function createSessionServer({ port = Number(process.env.PORT ?? 3000), hostname = '0.0.0.0', ports, token }: {
   port?: number; hostname?: string; ports?: Partial<SessionPorts>; token?: string;
 } = {}) {
-  const sessions = new Map<string, VoilaSession>();
   const clients = new Map<string, WebSocket>();
-  const registry = new SessionRegistry(sessions, ports?.timers);
-  const app = createApp({ sessions, registry, token });
+  const registry = new SessionRegistry(new Map(), ports?.timers);
+  const sessions = registry.sessions;
+  const app = createApp({ registry, token });
   const server = serve({ fetch: app.fetch, port, hostname });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   server.on('upgrade', (request, socket, head) => {

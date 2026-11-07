@@ -9,6 +9,12 @@ const clientWith = (value: unknown) => ({ models: { generateContent: vi.fn<Under
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe('understand', () => {
+  it('preserves a trailing pickup time and date after an international phone in the SDK payload', async () => {
+    const client = clientWith({ trip: {} });
+    await understand({ transcript: '+44 7700 900123 20:45 le 2027-01-15, 2 personnes à CDG', profile, now }, client);
+    const payload = JSON.parse(String(client.models.generateContent.mock.calls[0]![0].contents));
+    expect(payload.transcript).toBe('[phone] 20:45 le 2027-01-15, 2 personnes à CDG');
+  });
   it('redacts UK and US international phones from the actual Gemini payload', async () => {
     const client = clientWith({ trip: {} });
     await understand({ transcript: '2027-01-15 2 personnes, à 20:45 +44 7700 900123, or +1 415-555-0100, from Gare du Nord to CDG', profile, now }, client);

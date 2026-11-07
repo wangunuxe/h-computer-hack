@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { parsePhone, parseEmail, VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 describe('local spoken contact parsers', () => {
+  it.each(['20:45', '20h45', '2027-01-15', '15/01/2027', '15.01.2027'])('ends an international phone before the temporal token %s', (when) => {
+    expect(redactContactText(`+44 7700 900123 ${when}, 2 personnes à CDG`)).toBe(`[phone] ${when}, 2 personnes à CDG`);
+    expect(redactContactText(`+1 415-555-0100 ${when}`)).toBe(`[phone] ${when}`);
+  });
   it.each(['+44 7700 900123', '+1 415-555-0100', '+44.7700.900123', '+44-7700-900123', '+12345678', '+123456789012345'])('redacts international plus numbers without consuming surrounding trip facts: %s', (phone) => {
     expect(redactContactText(phone)).toBe('[phone]');
     expect(redactContactText(`2027-01-15 2 personnes, à 06:12 ${phone}, 2 personnes à CDG`)).toBe('2027-01-15 2 personnes, à 06:12 [phone], 2 personnes à CDG');

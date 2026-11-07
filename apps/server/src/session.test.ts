@@ -329,6 +329,20 @@ describe('VoilaSession', () => {
     s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
     await vi.advanceTimersByTimeAsync(4000); expect(heartbeats()).toHaveLength(4);
   });
+  it('does not carry a research heartbeat back-off into EXECUTE', async () => {
+    const pending = deferred<Awaited<ReturnType<SessionPorts['linkup']>>>();
+    const s = setup({ linkup: () => pending.promise, runBooking: () => new Promise(() => {}) });
+    await s.start(); expect(s.session.stage).toBe('RESEARCH');
+    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text === 'Still working. One moment.');
+    await vi.advanceTimersByTimeAsync(4000); expect(heartbeats()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    pending.resolve({ corroboration: [], extraOptions: [] }); await flush(); await s.choose();
+    expect(s.session.stage).toBe('EXECUTE');
+    await vi.advanceTimersByTimeAsync(3999); expect(heartbeats()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1); expect(heartbeats()).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(14_999); expect(heartbeats()).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1); expect(heartbeats()).toHaveLength(3);
+  });
   it('keeps raw progress in the feed and speaks only localized observed-page milestones', async () => {
     let input!: BookingInput;
     const s = setup({ runBooking: async (value) => { input = value; return new Promise(() => {}); } });

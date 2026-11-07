@@ -142,7 +142,7 @@ export class VoilaSession {
   dispose() { this.cancel(); this.ports.timers.clearInterval(this.heartbeat); this.emit = () => {}; }
   private send(event: ServerEvent) { try { this.emit(event); } catch { this.ports.logger.error('Session event delivery failed.'); } }
   private error(message: string) { this.send({ type: 'error', message }); }
-  private transition(stage: Stage) { this.stage = stage; this.send({ type: 'stage', stage }); }
+  private transition(stage: Stage) { this.lastHeartbeat = -Infinity; this.stage = stage; this.send({ type: 'stage', stage }); }
   private speak<K extends keyof NarrationParams>(key: K, params: NarrationParams[K]) {
     this.lastSay = this.ports.clock().getTime();
     this.send({ type: 'say', text: say(key, params, this.profile?.language ?? 'en') });

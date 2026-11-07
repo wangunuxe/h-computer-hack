@@ -160,7 +160,8 @@ PRIM recorded-mode feed entries explicitly say “recorded data”.
 
 `stop` aborts understanding, research and the H runner, resolves pending confirmation negatively,
 and invalidates callbacks from older operations. Heartbeats run after four silent
-seconds in UNDERSTAND, RESEARCH and EXECUTE, then at most every fifteen seconds.
+seconds in UNDERSTAND, RESEARCH and EXECUTE, then at most every fifteen seconds
+within that stage. Every stage transition resets the back-off.
 Raw agent progress stays in the feed;
 only observed route/vehicle/info/payment page changes produce localized spoken
 milestones through the runner's optional `onPage(page)` callback. Confirmation

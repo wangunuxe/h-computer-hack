@@ -27,6 +27,9 @@ export class LiveSource implements EventSourceLike {
   }
 
   stop() {
-    this.ws?.close();
+    if (!this.ws) return;
+    this.ws.onmessage = this.ws.onclose = null;
+    this.ws.close();
+    this.ws = undefined;
   }
 }

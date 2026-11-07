@@ -5,6 +5,13 @@ import { presetOptions } from './options.js';
 const confirmation = { trip: { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T22:00:00+01:00', passengers: 1, luggage: 1, guide_dog: true }, option: presetOptions[2]!, now: new Date('2027-01-15T10:00:00Z') };
 
 describe('say', () => {
+  it.each(['fr', 'en'])('clearly announces normal and unknown live status in %s', (language) => {
+    const normal = say('disruption', { mode: 'live-prim', status: 'normal', cause: '', recorded: false }, language);
+    expect(normal).toContain('PRIM'); expect(normal).toContain(language === 'fr' ? 'circule normalement' : 'running normally');
+    const unknown = say('disruption', { mode: 'live-h', status: 'unknown', cause: '', recorded: false }, language);
+    expect(unknown).toContain(language === 'fr' ? 'Statut inconnu' : 'status is unknown');
+    expect(unknown).not.toContain('Recorded');
+  });
   it.each(['route', 'vehicle', 'info', 'payment'] as const)('localizes the %s milestone without raw tool text', (page) => {
     const fr = say('booking-page', { page }, 'fr');
     const en = say('booking-page', { page }, 'en');

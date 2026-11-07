@@ -123,6 +123,30 @@ HTTP routes, or live H browser sessions are added by these adapters.
 
 ## M4 session orchestration
 
+### Demo and live traffic scenarios
+
+`hello.scenario` optionally selects `demo` or `live`; otherwise `VOILA_SCENARIO`
+is used, defaulting to `demo` (invalid environment values also fall back to demo).
+Demo always loads `scripts/fixtures/prim-rer-b.json`, labels it recorded data,
+and never calls PRIM, the H traffic reader, or Linkup. Its alternatives catalogue
+is fixed; trip understanding and an explicitly chosen booking still use their
+usual adapters.
+
+Live queries PRIM with `PRIM_API_KEY` first. A missing key, timeout or failure
+starts a read-only H text session on the official RATP RER B traffic page.
+The reader uses `mode: { type: 'text' }`, a structured `answerSchema`, a 45-second
+budget and no custom tools. Configuration was checked against `hai-agents`
+`BrowserMode.Text` and `/home/ubuntu/hdocs/agents-api_browser_configuration.md`
+and `agents-api_optimize-for-speed.md`; text mode cannot click or type.
+Stopping cancels the H session, including sessions created after cancellation.
+
+Traffic feed entries carry `mode: demo | live-prim | live-h` and
+`status: normal | disrupted | unknown`; both feed and localized speech identify
+the source. A successful PRIM delivery with no alerts is normal. A normal RER B
+still leads to alternatives. If both live sources fail, status is explicitly
+unknown, never replaced with the recorded signalling failure. `live-h/unknown`
+identifies the failed fallback attempt, not a successful observation.
+
 `VoilaSession(emit, ports?)` accepts validated web events through `handle`, emits
 shared server events, and exposes `stage`, `attach(emit)`, `markPaid(ref)` and
 `dispose()`. All service ports, the clock, timers and logger can be replaced in

@@ -5,12 +5,12 @@ import { ServerEventSchema, type ServerEvent } from '@voila/shared';
 import { createApp, createSessionServer } from './index.js';
 import { VoilaSession, type SessionPorts } from './session.js';
 
-const hello = { type: 'hello', profile: { name: 'Karim', email: 'karim@example.com', phone: '+33612345678', language: 'fr', guide_dog: true }, gps: null };
+const hello = { type: 'hello', scenario: 'live', profile: { name: 'Karim', email: 'karim@example.com', phone: '+33612345678', language: 'fr', guide_dog: true }, gps: null };
 const booking = { ref: 'PAS-123', pickup_time: '2027-01-15T11:00:00+01:00', pickup_point: 'Gare du Nord', price: 65, operator_phone: '+33123456789', guide_dog_status: 'accepted' as const, payment_url: 'https://checkout.stripe.com/test' };
 const ports: Partial<SessionPorts> = {
   clock: () => new Date('2027-01-15T10:00:00+01:00'),
   understand: async () => ({ trip: { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T16:00:00+01:00', passengers: 1, luggage: 0, guide_dog: true }, missing: [] }),
-  prim: async () => ({ summary: 'Signal failure', cause: 'Incident.', source: 'https://example.com/traffic', recorded: true }),
+  prim: async () => ({ status: 'disrupted', mode: 'live-prim', summary: 'Signal failure', cause: 'Incident.', source: 'https://example.com/traffic', recorded: false }),
   linkup: async () => ({ corroboration: [], extraOptions: [] }),
   runBooking: async (input) => {
     await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: 'Shuttle' });

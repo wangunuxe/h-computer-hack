@@ -12,7 +12,7 @@ export interface NarrationParams {
   acknowledgement: Empty;
   'clarify-deadline': Empty;
   'research-started': Empty;
-  disruption: { cause: string; recorded: boolean };
+  disruption: { cause: string; recorded: boolean; mode?: 'demo' | 'live-prim' | 'live-h'; status?: 'normal' | 'disrupted' | 'unknown' };
   'present-options': { options: readonly Option[]; now: Date };
   'still-working': Empty;
   confirm: { trip: Trip; option: Option; summary: string; now: Date };
@@ -65,7 +65,11 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
     acknowledgement: () => fr ? 'Je vous aide à rejoindre l’aéroport.' : 'I’ll help you reach the airport.',
     'clarify-deadline': () => fr ? 'À quelle heure ferme l’enregistrement ?' : 'What time does check-in close?',
     'research-started': () => fr ? 'Je vérifie le trafic et les alternatives.' : 'I’m checking traffic and alternatives.',
-    disruption: ({ cause, recorded }) => `${recorded ? (fr ? 'Données enregistrées, pas en direct : ' : 'Recorded data, not live: ') : ''}${cause}`,
+    disruption: ({ cause, recorded, mode, status }) => {
+      const origin = mode === 'demo' ? (fr ? 'Mode démonstration. ' : 'Demo mode. ') : mode === 'live-prim' ? (fr ? 'Trafic en direct, source PRIM. ' : 'Live traffic, PRIM source. ') : mode === 'live-h' ? (status === 'unknown' ? (fr ? 'Mode direct. Vérifications PRIM et H indisponibles. ' : 'Live mode. PRIM and H checks unavailable. ') : (fr ? 'Trafic en direct, pages officielles lues par H. ' : 'Live traffic, official pages read by H. ')) : '';
+      const body = status === 'normal' ? (fr ? 'Le RER B circule normalement. Je vous propose aussi des alternatives.' : 'The RER B is running normally. I’ll still offer alternatives.') : status === 'unknown' ? (fr ? 'Je ne peux pas vérifier l’état du RER B. Statut inconnu. Voici les alternatives.' : 'I can’t verify the RER B status. Its status is unknown. Here are the alternatives.') : cause;
+      return `${origin}${recorded ? (fr ? 'Données enregistrées, pas en direct : ' : 'Recorded data, not live: ') : ''}${body}`;
+    },
     'present-options': ({ options, now }) => {
       if (!options.length) return fr ? 'Aucune option réalisable pour cet horaire.' : 'No feasible options for this deadline.';
       return options.slice(0, 3).map((option, index) => {

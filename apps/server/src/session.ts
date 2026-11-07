@@ -1,6 +1,7 @@
-import { TripSchema, WebEventSchema, type Booking, type Option, type Profile, type ServerEvent, type Trip } from '@voila/shared';
+import { ScenarioSchema, TripSchema, WebEventSchema, type Booking, type Option, type Profile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
 import { understand } from './understand.js';
-import { getRerBDisruption, type Disruption } from './adapters/prim.js';
+import { getDemoDisruption, getRerBDisruption, type Disruption } from './adapters/prim.js';
+import { readRerBTraffic, rerBTrafficPage } from './adapters/traffic-h.js';
 import { searchDisruptionAndAlternatives } from './adapters/linkup.js';
 import { runBooking } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
@@ -14,6 +15,7 @@ type Research = { disruption: Disruption; extraOptions: Option[] };
 export interface SessionPorts {
   understand: typeof understand;
   prim: typeof getRerBDisruption;
+  trafficH: typeof readRerBTraffic;
   linkup: typeof searchDisruptionAndAlternatives;
   runBooking: typeof runBooking;
   clock: () => Date;
@@ -25,6 +27,7 @@ export interface SessionPorts {
 export class VoilaSession {
   stage: Stage = 'LISTEN';
   private profile?: Profile;
+  private scenario: Scenario = 'demo';
   private gpsOrigin?: string;
   private trip: Partial<Trip> = {};
   private options: Option[] = [];
@@ -42,7 +45,7 @@ export class VoilaSession {
   private readonly ports: SessionPorts;
 
   constructor(private emit: (event: ServerEvent) => void, ports: Partial<SessionPorts> = {}) {
-    this.ports = { understand, prim: (input) => getRerBDisruption({ apiKey: process.env.PRIM_API_KEY, ...input }), linkup: searchDisruptionAndAlternatives, runBooking,
+    this.ports = { understand, prim: (input) => getRerBDisruption({ apiKey: process.env.PRIM_API_KEY, ...input }), trafficH: readRerBTraffic, linkup: searchDisruptionAndAlternatives, runBooking,
       clock: () => new Date(), timers: globalThis, logger: console, shuttlePublicUrl: () => process.env.SHUTTLE_PUBLIC_URL, ...ports };
     this.lastSay = this.ports.clock().getTime();
     this.heartbeat = this.ports.timers.setInterval(() => {
@@ -73,6 +76,7 @@ export class VoilaSession {
     if (event.type === 'hello') {
       if (this.profile) { this.error('Profile already set; reconnect without restarting the trip.'); return; }
       this.profile = event.profile;
+      this.scenario = event.scenario ?? (ScenarioSchema.safeParse(process.env.VOILA_SCENARIO).data ?? 'demo');
       this.gpsOrigin = event.gps ? `${event.gps.latitude}, ${event.gps.longitude}` : undefined;
       this.transition('LISTEN');
       return;
@@ -88,6 +92,7 @@ export class VoilaSession {
       this.speak('acknowledgement', {});
       this.speak('research-started', {});
       this.research = this.startResearch(event.text, generation);
+      void this.research.catch(() => {});
       void this.interpret(event.text, generation);
     } else if (event.type === 'user_reply' && this.stage === 'CLARIFY') {
       if (!event.text.trim()) { this.error('Reply must not be empty.'); return; }
@@ -171,15 +176,24 @@ export class VoilaSession {
     finally { this.ports.timers.clearTimeout(timer); parent.removeEventListener('abort', abort); controller.abort(); }
   }
   private async startResearch(transcript: string, generation: number): Promise<Research> {
-    const prim = this.limited((signal) => this.ports.prim({ signal }), 6000, this.flow.signal).catch((): Disruption => ({
-      summary: 'Traffic information unavailable.', cause: 'Traffic information unavailable.', source: 'https://www.rerb-leblog.fr/', recorded: true,
-    })).then((disruption) => {
-      if (this.active(generation)) this.send({ type: 'feed', kind: 'prim', text: `${disruption.recorded ? 'recorded data — ' : ''}${disruption.summary}`, source: disruption.source });
+    const parent = this.flow.signal;
+    const traffic = async (): Promise<Disruption> => {
+      if (this.scenario === 'demo') return getDemoDisruption();
+      try { return await this.limited((signal) => this.ports.prim({ signal }), 6000, parent); }
+      catch { parent.throwIfAborted(); }
+      try { return await this.limited((signal) => this.ports.trafficH({ signal, now: this.ports.clock() }), 46_000, parent); }
+      catch {
+        parent.throwIfAborted();
+        return { status: 'unknown', mode: 'live-h', summary: 'RER B status unknown: PRIM and H lookup unavailable.', cause: '', source: rerBTrafficPage, recorded: false };
+      }
+    };
+    const prim = traffic().then((disruption) => {
+      if (this.active(generation)) this.send({ type: 'feed', kind: disruption.mode === 'live-h' ? 'traffic' : 'prim', text: `${disruption.mode}${disruption.recorded ? ' — recorded data' : ''} — ${disruption.summary}`, source: disruption.source, mode: disruption.mode, status: disruption.status });
       return disruption;
     });
-    const linkup = this.limited((signal) => this.ports.linkup({
+    const linkup = this.scenario === 'demo' ? Promise.resolve([] as Option[]) : this.limited((signal) => this.ports.linkup({
       query: `Transport disruption and alternatives for this request today ${this.ports.clock().toISOString()}. ${transcript}`, signal,
-    }), 9000, this.flow.signal).then((result) => {
+    }), 9000, parent).then((result) => {
       if (this.active(generation)) for (const item of result.corroboration) {
         for (const source of item.sources) this.send({ type: 'feed', kind: 'research', text: item.text, source });
       }

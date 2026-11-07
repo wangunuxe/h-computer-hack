@@ -405,12 +405,14 @@ describe('VoilaSession', () => {
   it('backs off EXECUTE heartbeats to fifteen seconds after the first at four seconds', async () => {
     const s = setup({ runBooking: () => new Promise(() => {}) });
     await s.start(); await s.choose();
-    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text === 'Still working. One moment.');
+    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text.includes('Still working. One moment.'));
     await vi.advanceTimersByTimeAsync(3999); expect(heartbeats()).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1); expect(heartbeats()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(14_999); expect(heartbeats()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1); expect(heartbeats()).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(15_000); expect(heartbeats()).toHaveLength(3);
+    const spoken = heartbeats().map((event) => event.type === 'say' ? event.text : '');
+    expect(spoken[0]).not.toBe(spoken[1]); expect(spoken[1]).not.toBe(spoken[2]);
     s.session.handle({ type: 'stop' });
     s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
     await vi.advanceTimersByTimeAsync(4000); expect(heartbeats()).toHaveLength(4);
@@ -419,7 +421,7 @@ describe('VoilaSession', () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['linkup']>>>();
     const s = setup({ linkup: () => pending.promise, runBooking: () => new Promise(() => {}) });
     await s.start(); expect(s.session.stage).toBe('RESEARCH');
-    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text === 'Still working. One moment.');
+    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text.includes('Still working. One moment.'));
     await vi.advanceTimersByTimeAsync(4000); expect(heartbeats()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1000);
     pending.resolve({ corroboration: [], extraOptions: [] }); await flush(); await s.choose();

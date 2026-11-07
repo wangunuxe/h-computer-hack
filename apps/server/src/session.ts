@@ -11,6 +11,7 @@ import { chooseOption } from './choose.js';
 import { say, type NarrationParams } from './narrate.js';
 import { converse, type Turn, type TurnResult } from './converse.js';
 import type { ConfirmationFields } from './confirmation.js';
+import { fallbackQuestion } from './questions.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 type Research = { disruption: Disruption; extraOptions: Option[] };
@@ -47,6 +48,9 @@ export class VoilaSession {
   private turnVersion = 0;
   private turnController?: AbortController;
   private attempt = 0;
+  private lastText?: string;
+  private questionReplies: string[] = [];
+  private questionAsked = false;
   private lastSay: number;
   private lastHeartbeat = -Infinity;
   private heartbeat: ReturnType<typeof setInterval>;
@@ -151,7 +155,10 @@ export class VoilaSession {
   dispose() { this.cancel(); this.ports.timers.clearInterval(this.heartbeat); this.emit = () => {}; }
   private send(event: ServerEvent) { try { this.emit(event); } catch { this.ports.logger.error('Session event delivery failed.'); } }
   private error(message: string) { this.send({ type: 'error', message }); }
-  private transition(stage: Stage) { this.lastHeartbeat = -Infinity; this.stage = stage; this.send({ type: 'stage', stage }); }
+  private transition(stage: Stage) {
+    if (stage !== this.stage) { this.attempt = 0; this.questionReplies = []; this.questionAsked = ['CHOOSE', 'CONFIRM'].includes(stage); }
+    this.lastHeartbeat = -Infinity; this.stage = stage; this.send({ type: 'stage', stage });
+  }
   private speak<K extends keyof NarrationParams>(key: K, params: NarrationParams[K]) {
     this.answer(say(key, params, this.profile?.language ?? 'en'));
   }
@@ -167,7 +174,7 @@ export class VoilaSession {
   }
   private resetTrip() {
     this.cancel();
-    this.history = []; this.attempt = 0;
+    this.history = []; this.attempt = 0; this.questionReplies = []; this.questionAsked = false;
     this.research = undefined; this.booking = undefined; this.payment = undefined; this.options = []; this.trip = {};
   }
   private stop() {
@@ -223,6 +230,7 @@ export class VoilaSession {
       if (!this.active(generation)) return;
       this.ports.logger.error('Trip understanding failed.');
       this.error('Could not understand the trip. Please try again.');
+      this.answer(this.fallback());
       this.cancel(); this.transition('LISTEN');
     }
   }
@@ -240,17 +248,21 @@ export class VoilaSession {
     this.confirmation = undefined; this.attempt = 0; this.transition('EXECUTE'); pending.resolve({ approved, reply });
   }
   private answer(text: string) {
+    if (text === this.lastText) text = `${this.language === 'fr' ? 'Autrement dit, ' : 'In other words, '}${text}`;
+    this.lastText = text;
     this.lastSay = this.ports.clock().getTime(); this.remember('assistant', text); this.send({ type: 'say', text });
   }
-  private ask(text: string) { this.send({ type: 'clarify', question: text }); this.answer(text); }
-  private fallback() {
-    if (this.stage === 'CLARIFY') {
-      const fields = this.missing().map((key) => this.language === 'fr' ? ({ origin: 'votre lieu de départ', destination: 'votre destination', deadline: 'votre heure limite d’arrivée' })[key] : ({ origin: 'your starting point', destination: 'your destination', deadline: 'your arrival cutoff' })[key]);
-      return this.language === 'fr' ? `Pouvez-vous préciser ${fields.join(' et ')} ?` : `Could you provide ${fields.join(' and ')}?`;
+  private ask(text: string) {
+    if (text === this.lastText || this.questionReplies.includes(text)) {
+      const alternative = [0, 1, 2].map((variant) => this.fallback(variant)).find((value) => value !== this.lastText && !this.questionReplies.includes(value));
+      text = alternative ?? `${this.language === 'fr' ? 'Nouvel essai' : 'Another attempt'} ${this.attempt + 1}. ${this.fallback()}`;
     }
-    if (this.stage === 'CONFIRM') return say('confirm-again', {}, this.language);
-    if (this.stage === 'CHOOSE') return say('choose-again', {}, this.language);
-    return this.language === 'fr' ? 'Votre demande est toujours en cours. Vous pouvez dire arrêter.' : 'Your request is still in progress. You can say stop.';
+    this.questionReplies = [...this.questionReplies, text].slice(-10); this.questionAsked = true;
+    if (this.stage === 'CLARIFY') this.send({ type: 'clarify', question: text });
+    this.answer(text);
+  }
+  private fallback(variant = 0) {
+    return fallbackQuestion({ stage: this.stage, language: this.language, missing: this.missing(), options: this.options, now: this.ports.clock(), attempt: this.attempt, variant });
   }
   private async interpretTurn(transcript: string) {
     const generation = this.generation, stage = this.stage, version = this.turnVersion;
@@ -261,6 +273,7 @@ export class VoilaSession {
     } catch { result = { intent: 'unclear', confidence: 0, reply: this.fallback() }; }
     finally { if (this.turnController === controller) this.turnController = undefined; }
     if (!this.active(generation) || this.stage !== stage || this.turnVersion !== version || controller.signal.aborted) return;
+    if (result.intent === 'choose' && /^(euh|uh|um|hmm|je sais pas|i don.t know)[.!? ]*$/i.test(transcript.trim())) result = { intent: 'unclear', confidence: 0, reply: this.fallback() };
     if (result.intent === 'stop' && result.confidence >= .65) { this.stop(); return; }
     if (stage === 'CONFIRM') {
       const uncertain = /\b(euh|maybe|perhaps|unsure|not|non|no|pas|attends|demain|tomorrow)\b/i.test(transcript);
@@ -278,8 +291,11 @@ export class VoilaSession {
       await this.plan(transcript, next, result.reply); return;
     }
     if (stage === 'CHOOSE' && result.intent === 'choose' && result.confidence >= .65 && result.option_id && this.options.some((option) => option.id === result.option_id)) { this.answer(result.reply); this.select(result.option_id); return; }
-    ++this.attempt;
-    if (stage === 'CLARIFY') this.ask(result.reply); else this.answer(result.reply);
+    if (['CLARIFY', 'CHOOSE', 'CONFIRM'].includes(stage)) {
+      if (result.intent !== 'question' && this.questionAsked) ++this.attempt;
+      if (result.intent === 'question' && stage !== 'CLARIFY') this.answer(result.reply);
+      else this.ask(this.attempt >= 2 ? this.fallback() : result.reply);
+    } else this.answer(result.reply);
   }
   private async plan(transcript: string, generation: number, question?: string) {
     try {

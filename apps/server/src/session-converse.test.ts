@@ -19,7 +19,7 @@ function setup(overrides: Partial<SessionPorts> = {}) {
     runBooking: vi.fn<SessionPorts['runBooking']>().mockImplementation(() => new Promise(() => {})), logger: { error: vi.fn() }, shuttlePublicUrl: () => 'https://shuttle.example', ...overrides,
   };
   const session = new VoilaSession((event) => events.push(event), ports); sessions.push(session);
-  const start = async () => { session.handle({ type: 'hello', profile, gps: null, scenario: 'live' }); session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); };
+  const start = async (language = 'fr') => { session.handle({ type: 'hello', profile: { ...profile, language }, gps: null, scenario: 'live' }); session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); };
   const reply = async (text: string) => { session.handle({ type: 'user_reply', text }); await flush(); };
   return { session, ports, events, start, reply };
 }
@@ -90,5 +90,34 @@ describe('contextual conversation routing', () => {
     const history = s.ports.converse.mock.calls.at(-1)![0].history;
     expect(history).toHaveLength(6); expect(history.some((turn) => turn.text === 'ancienne question ?')).toBe(false);
     expect(history.some((turn) => turn.text === 'Nouveau trajet')).toBe(true);
+  });
+  it.each(['fr', 'en'])('never repeats three unclear CHOOSE replies and changes strategy after two failures in %s', async (language) => {
+    const converse = vi.fn().mockResolvedValue(result({ reply: language === 'fr' ? 'Quel trajet préférez-vous ?' : 'Which journey do you prefer?' }));
+    const s = setup({ converse }); await s.start(language); const replies: string[] = [];
+    for (let i = 0; i < 3; i++) { await s.reply('euh'); const event = s.events.at(-1); if (event?.type === 'say') replies.push(event.text); }
+    expect(new Set(replies).size).toBe(3); expect(replies[1]).toContain('1.');
+    expect(converse.mock.calls.map(([input]) => input.attempt)).toEqual([0, 1, 2]); expect(s.session.stage).toBe('CHOOSE');
+  });
+  it('asks for all missing facts together, then offers a concrete example after two failed clarifications', async () => {
+    const s = setup({ understand: vi.fn().mockResolvedValue({ trip: {}, missing: ['origin', 'destination', 'deadline'] }), converse: vi.fn().mockRejectedValue(new Error('offline')) });
+    await s.start(); await s.reply('euh'); await s.reply('euh');
+    const questions = s.events.filter((event) => event.type === 'clarify').map((event) => event.question);
+    expect(new Set(questions).size).toBe(3);
+    for (const question of questions) expect(question).toMatch(/départ.*destination.*heure/);
+    expect(questions[2]).toContain('CDG'); expect(s.session.stage).toBe('CLARIFY');
+  });
+  it('points to confirmation buttons after two failures without ever approving', async () => {
+    const decision = vi.fn(); const s = setup({ runBooking: async (input) => { decision(await input.confirm('Shuttle')); return new Promise(() => {}); } });
+    await s.start(); await s.reply('shuttle'); await s.reply('euh'); await s.reply('euh');
+    expect(s.events.at(-1)).toEqual({ type: 'say', text: expect.stringContaining('boutons') }); expect(decision).not.toHaveBeenCalled();
+  });
+  it('varies deterministic fallback replies after repeated model timeouts', async () => {
+    const s = setup({ converse: vi.fn(() => new Promise(() => {})) }); await s.start(); const replies: string[] = [];
+    for (let i = 0; i < 3; i++) { await s.reply('euh'); await vi.advanceTimersByTimeAsync(20_500); const event = s.events.at(-1); if (event?.type === 'say') replies.push(event.text); }
+    expect(new Set(replies).size).toBe(3); expect(s.session.stage).toBe('CHOOSE');
+  });
+  it('does not select a journey on bare hesitation even if a model overstates confidence', async () => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'choose', option_id: 'gare-du-nord-taxi', confidence: 1 })) }); await s.start(); await s.reply('euh');
+    expect(s.session.stage).toBe('CHOOSE'); expect(s.ports.runBooking).not.toHaveBeenCalled();
   });
 });

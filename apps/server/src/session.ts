@@ -35,6 +35,7 @@ export class VoilaSession {
   private research?: Promise<Research>;
   private confirmation?: { summary: string; resolve: (decision: { approved: boolean; reply: string }) => void };
   private lastSay: number;
+  private lastHeartbeat = -Infinity;
   private lastAgentSay = -Infinity;
   private heartbeat: ReturnType<typeof setInterval>;
   private readonly ports: SessionPorts;
@@ -44,7 +45,11 @@ export class VoilaSession {
       clock: () => new Date(), timers: globalThis, logger: console, shuttlePublicUrl: () => process.env.SHUTTLE_PUBLIC_URL, ...ports };
     this.lastSay = this.ports.clock().getTime();
     this.heartbeat = this.ports.timers.setInterval(() => {
-      if (['UNDERSTAND', 'RESEARCH', 'EXECUTE'].includes(this.stage) && this.ports.clock().getTime() - this.lastSay >= 4000) this.speak('still-working', {});
+      const now = this.ports.clock().getTime();
+      if (['UNDERSTAND', 'RESEARCH', 'EXECUTE'].includes(this.stage) && now - this.lastSay >= 4000 && now - this.lastHeartbeat >= 15_000) {
+        this.lastHeartbeat = now;
+        this.speak('still-working', {});
+      }
     }, 1000);
     this.heartbeat.unref?.();
   }
@@ -72,6 +77,7 @@ export class VoilaSession {
       if (!event.text.trim()) { this.error('Transcript must not be empty.'); return; }
       this.flow = new AbortController();
       const generation = ++this.generation;
+      this.lastHeartbeat = -Infinity;
       this.trip = this.gpsOrigin ? { origin: this.gpsOrigin } : {};
       this.transition('UNDERSTAND');
       this.speak('acknowledgement', {});

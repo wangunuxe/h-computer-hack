@@ -41,6 +41,26 @@ async function complete(app: App, easy = false) {
 }
 
 describe('four-step booking', () => {
+  it('requires an explicit simulated payment and sends the same authenticated callback as Stripe', async () => {
+    const { app, store, fetcher } = setup({ SERVER_PUBLIC_URL: 'https://server.example/', INTERNAL_CALLBACK_TOKEN: 'demo-token' }); await complete(app);
+    const order = [...store.orders.values()][0]!;
+    const url = '/stub-payment/' + order.id;
+    expect(await (await app.request(url)).text()).toContain('Simulate payment'); expect(order.paid).toBe(false); expect(fetcher).not.toHaveBeenCalled();
+    expect((await app.request(url, { method: 'POST' })).status).toBe(303); expect(order.paid).toBe(true);
+    expect(fetcher).toHaveBeenCalledWith('https://server.example/internal/payment-completed', expect.objectContaining({ headers: { 'Content-Type': 'application/json', Authorization: 'Bearer demo-token' }, body: JSON.stringify({ order_id: order.id, ref: order.ref, status: 'paid' }) }));
+  });
+  it('supports local stub completion without a callback, but never for a real Stripe checkout', async () => {
+    const { app, store, fetcher } = setup(); await complete(app); const order = [...store.orders.values()][0]!;
+    expect((await app.request('/stub-payment/' + order.id, { method: 'POST' })).status).toBe(303); expect(order.paid).toBe(true); expect(fetcher).not.toHaveBeenCalled();
+    const real = createApp({ store, env: { STRIPE_SECRET_KEY: 'sk_test_not_used' } });
+    expect((await real.request('/stub-payment/' + order.id, { method: 'POST' })).status).toBe(404);
+    expect((await app.request('/stub-payment/missing', { method: 'POST' })).status).toBe(404);
+  });
+  it('allows retrying a failed stub callback without losing local paid status', async () => {
+    const { app, store, fetcher } = setup({ SERVER_PUBLIC_URL: 'https://server.example' }); await complete(app); const order = [...store.orders.values()][0]!;
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {}); fetcher.mockResolvedValueOnce(new Response('offline', { status: 503 }));
+    try { expect((await app.request('/stub-payment/' + order.id, { method: 'POST' })).status).toBe(503); expect(order.paid).toBe(true); expect((await app.request('/stub-payment/' + order.id, { method: 'POST' })).status).toBe(303); expect(fetcher).toHaveBeenCalledTimes(2); } finally { log.mockRestore(); }
+  });
   it.each([false, true])('rejects past pickup times on Paris today (easy=%s)', async (easy) => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {

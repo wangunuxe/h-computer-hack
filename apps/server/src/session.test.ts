@@ -36,6 +36,15 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it.each(["j'ai payé", "I've paid", 'I have paid'])('accepts a spoken paid confirmation for a local stub only: %s', async (text) => {
+    const s = setup({ runBooking: async (input) => { await input.onPaymentHandoff({ url: 'https://shuttle.example/stub-payment/demo?mode=no-stripe-key', amount: 65, merchant: 'Demo', summary: 'Demo' }); return completed; } });
+    await s.start(); await s.choose(); expect(s.session.stage).toBe('AWAIT_PAYMENT'); s.session.handle({ type: 'user_reply', text }); await flush();
+    expect(s.session.stage).toBe('DONE'); expect(s.ports.converse).not.toHaveBeenCalled();
+  });
+  it('does not treat a spoken paid claim as verification of Stripe payment', async () => {
+    const s = setup({ runBooking: async (input) => { await input.onPaymentHandoff({ url: 'https://checkout.stripe.com/test', amount: 65, merchant: 'Stripe', summary: 'Transfer' }); return completed; } });
+    await s.start(); await s.choose(); s.session.handle({ type: 'user_reply', text: "I've paid" }); await flush(); expect(s.session.stage).toBe('AWAIT_PAYMENT');
+  });
   it('defers one-field voice profile collection until selection and keeps replies/readbacks out of Gemini history', async () => {
     const s = setup({ runBooking: vi.fn(() => new Promise(() => {})) });
     s.session.handle({ type: 'hello', profile: { language: 'fr' }, gps: null, scenario: 'demo' });

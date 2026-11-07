@@ -64,11 +64,16 @@ export function redactContactText(text: string, profile?: TravelerProfile): stri
     const introduced = /\b(?:call me(?: on| at)?|reach me(?: on| at)?|(?:my )?(?:phone(?: number)?|number)(?: is| s)?|(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:appelez|contactez)(?: moi)?(?: au)?)$/.test(normal(safe.slice(0, offset)));
     const commaRun = introduced ? commaPhoneSpan.exec(safe.slice(offset))?.[0] : undefined;
     if (commaRun) {
+      const fragments = commaRun.split(',');
+      if (/^[ \t]+(?:personnes?|passagers?|passengers?|people|bags?|bagages?|valises?)\b/iu.test(safe.slice(offset + commaRun.length))) fragments.pop();
       value = '';
-      for (const fragment of commaRun.split(',')) {
-        const current = phoneDigits(value);
-        if (current && !current.international && current.digits.length >= 10) break;
-        value += (value ? ',' : '') + fragment;
+      for (const fragment of fragments) {
+        if (temporalFragment.test(fragment.trim())) break;
+        const candidate = value + (value ? ',' : '') + fragment;
+        const current = phoneDigits(candidate);
+        const limit = current && (current.international || current.digits.startsWith('00')) ? 15 : 10;
+        if (!current || current.digits.length > limit) break;
+        value = candidate;
       }
       joined = !!phoneDigits(value);
     }
@@ -84,12 +89,13 @@ const numberWords = [...numbers.keys(), 'plus', 'double', 'triple'].sort((a, b) 
 const separator = '(?:[ \\t]+|[.:-](?!\\s))?';
 const internationalSeparator = '(?:[ \\t]+|[.-](?!\\s))?';
 const temporalToken = `(?:${dateSpan.source}|\\d{1,2}[:h]\\d{2})`;
+const temporalFragment = new RegExp(`^${temporalToken}`, 'iu');
 const internationalDigit = `(?!${temporalToken})\\d`;
 const numericPhone = `(?<![\\p{L}\\d])(?:\\+${internationalDigit}(?:${internationalSeparator}${internationalDigit}){7,14}|(?:\\+33|0033)${separator}\\(?[1-9]\\)?(?:${separator}\\d){8}|0${separator}[1-9](?:${separator}\\d){8}|\\d{10})(?![\\p{L}\\d])`;
 const spokenToken = `(?:\\d{1,2}(?!\\d)|${numberWords})`;
 const spokenRun = `${spokenToken}(?:(?:[ \\t:-]+|\\.(?!\\s))${spokenToken})*`;
-const spokenPhoneSpan = `(?<![\\p{L}\\d])${spokenRun}(?![\\p{L}\\d])`;
-const commaPhoneSpan = new RegExp(`^${spokenRun}(?:,[ \\t]*${spokenRun})+(?![\\p{L}\\d])`, 'iu');
+const spokenPhoneSpan = `(?<![\\p{L}\\d])\\+?${spokenRun}(?![\\p{L}\\d])`;
+const commaPhoneSpan = new RegExp(`^\\+?${spokenRun}(?:,[ \\t]*${spokenRun})+(?![\\p{L}\\d])`, 'iu');
 const contactSpan = new RegExp(`(?<date>${dateSpan.source})|(?<beforePhone>${timeSpan.source})(?=[ \\t]+${numericPhone})|(?<phone>${numericPhone})|(?<time>${timeSpan.source})|(?<spoken>${spokenPhoneSpan})`, 'giu');
 type Field = 'name' | 'phone' | 'email' | 'guide_dog';
 const yes = (text: string) => /^(oui|yes|correct|exactement|c est correct|c est ca|oui c est ca|c est bon|that s right)$/.test(normal(text));

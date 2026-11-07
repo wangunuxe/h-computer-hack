@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { parsePhone, parseEmail, VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 describe('local spoken contact parsers', () => {
+  it.each([
+    ['mon numéro,', 'zéro zéro quatre quatre, sept sept, zéro zéro, neuf zéro, zéro un, deux trois'],
+    ['call me on', 'plus four four, seven seven, zero zero, nine zero, zero one, two three'],
+    ['my number is', '+44, seven seven, zero zero, nine zero, zero one, two three'],
+    ['mon téléphone', 'zéro zéro un, quatre un cinq, cinq cinq cinq, zéro un zéro zéro'],
+    ['mon numéro', 'zéro zéro un, deux trois, quatre cinq, six sept, huit neuf, zéro un, deux trois'],
+    ['my number is', '+1, two three, four five, six seven, eight nine, zero one, two three, four five'],
+  ])('joins the complete introduced international phone after %s', (intro, phone) => {
+    expect(redactContactText(`${intro} ${phone}, 2 personnes à 20:45 le 2027-01-15`)).toBe(`${intro} [phone], 2 personnes à 20:45 le 2027-01-15`);
+    expect(redactContactText(`${intro} ${phone}, 20:45 à CDG`)).toBe(`${intro} [phone], 20:45 à CDG`);
+  });
   it.each(['20:45', '20h45', '2027-01-15', '15/01/2027', '15.01.2027'])('ends an international phone before the temporal token %s', (when) => {
     expect(redactContactText(`+44 7700 900123 ${when}, 2 personnes à CDG`)).toBe(`[phone] ${when}, 2 personnes à CDG`);
     expect(redactContactText(`+1 415-555-0100 ${when}`)).toBe(`[phone] ${when}`);
@@ -114,6 +125,11 @@ describe('local spoken contact parsers', () => {
   });
 });
 describe('one-field-at-a-time voice profile confirmation', () => {
+  it('collects a comma-separated 00 international phone locally without truncating it', () => {
+    const flow = new VoiceProfile({ language: 'fr' }, ['phone']);
+    flow.reply('zéro zéro quatre quatre, sept sept, zéro zéro, neuf zéro, zéro un, deux trois');
+    expect(flow.profile.phone).toBeUndefined(); expect(flow.reply('oui').complete).toBe(true); expect(flow.profile.phone).toBe('+447700900123');
+  });
   it('collects and confirms comma-separated spoken digits after the local phone question', () => {
     const flow = new VoiceProfile({ language: 'fr' }, ['phone']);
     expect(flow.question).toContain('téléphone');

@@ -46,6 +46,9 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
   are disabled. The selected format is YYYY-MM-DD; do not type into it.
 - Easy-mode date: native date input. Addresses accept nonempty free text without
   coordinates in easy mode. All other controls and steps remain unchanged.
+- Both modes reject dates before today in Europe/Paris, returning to step 1 with
+  “Pickup date cannot be before today (Europe/Paris).” Easy mode also sets the
+  native date input minimum to Paris today. Choose today or a later date.
 - Time, vehicle, passengers and luggage are native selects. Use full option text
   below. Time defaults to 00:00; set it explicitly. Times are Paris local time.
 - Passenger count must fit the selected vehicle: Sedan 3, Estate 4, Minivan 8.

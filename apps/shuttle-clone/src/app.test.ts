@@ -3,11 +3,12 @@ import Stripe from 'stripe';
 import { createApp } from './app.js';
 import { createStore, vehicles } from './store.js';
 import { createPayments } from './payments.js';
+import { parisToday } from './dates.js';
 
 const route = {
   pickup: 'Gare du Nord, 18 Rue de Dunkerque, Paris', dropoff: 'CDG Airport Terminal 2E, Roissy-en-France',
   pickup_lat: '48.8809', pickup_lng: '2.3553', dropoff_lat: '49.0038', dropoff_lng: '2.5795',
-  date: '2027-01-15', time: '12:15',
+  date: parisToday(new Date(Date.now() + 86400000)), time: '12:15',
 };
 const info = { name: 'Karim', email: 'karim@example.com', phone: '+33123456789', passengers: '1', luggage: '1', notes: 'Je voyage avec un chien guide.' };
 function setup(env: NodeJS.ProcessEnv = {}) {
@@ -40,6 +41,24 @@ async function complete(app: App, easy = false) {
 }
 
 describe('four-step booking', () => {
+  it.each([false, true])('rejects past dates using Paris today (easy=%s)', async (easy) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-07T23:30:00Z'));
+    try {
+      const { app, store } = setup();
+      const base = await start(app, easy);
+      expect(parisToday()).toBe('2026-11-08');
+      const response = await post(app, base + '/route', { ...route, date: '2026-11-07' });
+      expect(response.status).toBe(400);
+      expect(await response.text()).toContain('Pickup date cannot be before today (Europe/Paris).');
+      expect(store.orders.size).toBe(0);
+      if (easy) expect(await (await app.request(base + '/route')).text()).toContain('min="2026-11-08"');
+      expect((await post(app, base + '/route', { ...route, date: '2026-11-08' })).status).toBe(303);
+      expect((await post(app, base + '/route', { ...route, date: '2026-11-09' })).status).toBe(303);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it.each(vehicles)('enforces advertised capacity for $id', async (vehicle) => {
     const { app, store } = setup();
     const base = await start(app);

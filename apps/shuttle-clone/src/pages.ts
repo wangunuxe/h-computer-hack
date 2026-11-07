@@ -1,4 +1,5 @@
 import { html } from 'hono/html';
+import { parisToday } from './dates.js';
 import { luggageOptions, operatorPhone, passengerOptions, timeOptions, vehicles } from './store.js';
 import type { Draft, Order } from './store.js';
 
@@ -25,7 +26,7 @@ export function routePage(draft: Draft, error = '', values?: Record<string, stri
     <form method="post" action="/fr/reservation/${draft.id}/route">
     ${address('pickup', 'Pickup address')}${address('dropoff', 'Dropoff address')}
     <div class="field"><label>Pickup date</label>${draft.difficulty === 'easy'
-      ? html`<input type="date" name="date" required value="${route?.date ?? ''}">`
+      ? html`<input type="date" name="date" min="${parisToday()}" required value="${route?.date ?? ''}">`
       : html`<input type="text" name="date" id="pickup-date" readonly required value="${route?.date ?? ''}" placeholder="Click calendar to choose">`}</div>
     <div class="field"><label>Pickup time</label><select name="time">${timeOptions.map((time) =>
       html`<option value="${time}" selected=${route?.time === time}>${time}</option>`)}</select></div>

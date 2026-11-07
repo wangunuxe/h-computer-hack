@@ -34,7 +34,7 @@ export class SessionRegistry {
     if (!entry?.claimed || !secureEqual(token, entry.token)) return 'unauthorized';
     const now = this.clock();
     entry.gladiaRequests = entry.gladiaRequests.filter((time) => time > now - 60 * 60_000);
-    if (entry.gladiaRequests.length >= 30 || now - (entry.gladiaRequests.at(-1) ?? -Infinity) < 3000) return 'limited';
+    if (entry.gladiaRequests.length >= 120 || entry.gladiaRequests.filter((time) => time > now - 10_000).length >= 6) return 'limited';
     entry.gladiaRequests.push(now);
     return 'allowed';
   }

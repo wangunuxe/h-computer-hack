@@ -1,9 +1,7 @@
-import { ProfileSchema, type Profile } from '@voila/shared';
+import { TravelerProfileSchema, type TravelerProfile } from '@voila/shared';
 
-export type ClientProfile = Profile & { mic_mode: 'toggle' | 'hold'; tts_enabled: boolean };
-export function clientProfile(value: unknown): ClientProfile | undefined {
-  const parsed = ProfileSchema.safeParse(value);
-  if (!parsed.success) return undefined;
-  const preferences = value as Record<string, unknown>;
-  return { ...parsed.data, mic_mode: preferences.mic_mode === 'hold' ? 'hold' : 'toggle', tts_enabled: preferences.tts_enabled !== false };
+export const deviceLanguage = (language: string): 'fr' | 'en' => language.toLowerCase().startsWith('fr') ? 'fr' : 'en';
+export function clientProfile(value: unknown, language: string): TravelerProfile {
+  const parsed = TravelerProfileSchema.safeParse(value);
+  return { ...(parsed.success ? parsed.data : {}), language: deviceLanguage(language) };
 }

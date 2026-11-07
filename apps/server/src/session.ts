@@ -1,4 +1,4 @@
-import { ScenarioSchema, TripSchema, WebEventSchema, type Booking, type MonitorEvent, type Option, type Profile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
+import { ProfileSchema, ScenarioSchema, TripSchema, WebEventSchema, type Booking, type MonitorEvent, type Option, type Scenario, type ServerEvent, type TravelerProfile, type Trip } from '@voila/shared';
 import { understand } from './understand.js';
 import { getDemoDisruption, type Disruption } from './adapters/disruption.js';
 import { readRerBTraffic, rerBTrafficPage } from './adapters/traffic-h.js';
@@ -12,6 +12,7 @@ import { say, type NarrationParams } from './narrate.js';
 import { converse, type ConfirmationContext, type Turn, type TurnResult } from './converse.js';
 import { sanitizeConfirmationFields } from './confirmation.js';
 import { fallbackQuestion } from './questions.js';
+import { VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 type Research = { disruption: Disruption; extraOptions: Option[] };
@@ -31,7 +32,9 @@ export interface SessionPorts {
 export class VoilaSession {
   get language() { return this.profile?.language ?? 'fr'; }
   stage: Stage = 'LISTEN';
-  private profile?: Profile;
+  private profile?: TravelerProfile;
+  private profileCollector?: VoiceProfile;
+  private pendingProfileOption?: string;
   private scenario: Scenario = 'demo';
   private gpsOrigin?: string;
   private trip: Partial<Trip> = {};
@@ -55,6 +58,8 @@ export class VoilaSession {
   private lastHeartbeat = -Infinity;
   private heartbeat: ReturnType<typeof setInterval>;
   private readonly ports: SessionPorts;
+  private operations = new Set<symbol>();
+  private lastActivity?: boolean;
 
   constructor(private emit: (event: ServerEvent) => void, ports: Partial<SessionPorts> = {}, private observe: (event: ServerEvent | MonitorEvent) => void = () => {}) {
     this.ports = { understand, converse, trafficH: readRerBTraffic, linkup: searchDisruptionAndAlternatives, runBooking,
@@ -77,6 +82,9 @@ export class VoilaSession {
     if (['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) && this.payment) this.send(this.payment);
     if (this.stage === 'CHOOSE') this.send({ type: 'options', items: this.options });
     if (this.stage === 'DONE' && this.booking) this.send({ type: 'booking_card', booking: this.booking });
+    if (this.profile) this.send({ type: 'profile', profile: this.profile });
+    if (this.profileCollector) this.profilePrompt(this.profileCollector.question);
+    this.reportActivity(true);
     return () => { if (this.emit === emit) this.emit = () => {}; };
   }
 
@@ -85,16 +93,38 @@ export class VoilaSession {
     if (!parsed.success) { this.error('Invalid web event.'); return; }
     const event = parsed.data;
     if (event.type === 'stop') { this.stop(); return; }
+    if (event.type === 'language') {
+      if (this.profile) this.profile.language = event.language;
+      if (this.profileCollector) this.profileCollector.profile.language = event.language;
+      return;
+    }
     if (event.type === 'hello') {
       if (this.profile) { this.error('Profile already set; reconnect without restarting the trip.'); return; }
       this.profile = event.profile;
       this.scenario = event.scenario ?? (ScenarioSchema.safeParse(process.env.VOILA_SCENARIO).data ?? 'demo');
       this.gpsOrigin = event.gps ? `${event.gps.latitude}, ${event.gps.longitude}` : undefined;
-      this.observeSafely({ type: 'session', name: this.profile.name, scenario: this.scenario, started_at: this.ports.clock().toISOString() });
+      this.observeSafely({ type: 'session', name: this.profile.name ?? 'User', scenario: this.scenario, started_at: this.ports.clock().toISOString() });
       this.transition('LISTEN');
       return;
     }
     if (!this.profile) { this.error('Send hello first.'); return; }
+    if ((event.type === 'final_transcript' || event.type === 'user_reply') && forgetDetails(event.text)) {
+      this.resetTrip(); this.profile = { language: this.language };
+      this.send({ type: 'profile', profile: this.profile }); this.transition('LISTEN');
+      this.send({ type: 'say', text: this.language.startsWith('fr') ? 'Vos informations sont effacées de cet appareil et de cette session.' : 'Your details are cleared from this device and session.' }); return;
+    }
+    if ((event.type === 'final_transcript' || event.type === 'user_reply') && /^(stop|arrete|arretez|annule|cancel)[.!? ]*$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim())) { this.stop(); return; }
+    if (event.type === 'user_reply' && this.profileCollector) {
+      const response = this.profileCollector.reply(event.text);
+      this.profile = this.profileCollector.profile;
+      if (response.changed) this.send({ type: 'profile', profile: this.profile });
+      if (response.complete) {
+        const id = this.pendingProfileOption!; this.profileCollector = undefined; this.pendingProfileOption = undefined;
+        this.send({ type: 'say', text: this.language.startsWith('fr') ? 'Vos informations sont enregistrées sur cet appareil. Pour les effacer, dites « efface mes informations ».' : 'Your details are saved on this device. To clear them, say “forget my details”.' });
+        this.trip.guide_dog = this.profile.guide_dog ?? false; this.select(id);
+      } else this.profilePrompt(response.text);
+      return;
+    }
     if (event.type === 'final_transcript' && ['LISTEN', 'DONE'].includes(this.stage)) {
       if (!event.text.trim()) { this.error('Transcript must not be empty.'); return; }
       this.observeSafely({ type: 'transcript', text: event.text });
@@ -118,7 +148,6 @@ export class VoilaSession {
       this.turnController?.abort(); ++this.turnVersion;
       this.remember('user', event.text);
       const normalized = event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
-      if (/^(stop|arrete|arretez|annule|cancel)$/.test(normalized)) { this.stop(); return; }
       if (this.stage === 'CHOOSE') {
         const id = chooseOption(event.text, this.options);
         if (id) { this.select(id); return; }
@@ -167,12 +196,23 @@ export class VoilaSession {
   private transition(stage: Stage) {
     if (stage !== this.stage) { this.attempt = 0; this.questionReplies = []; this.questionAsked = ['CHOOSE', 'CONFIRM'].includes(stage); }
     this.lastHeartbeat = -Infinity; this.stage = stage; this.send({ type: 'stage', stage });
+    this.reportActivity();
+  }
+  private reportActivity(force = false) {
+    const cancellable = !['LISTEN', 'DONE'].includes(this.stage) && (this.operations.size > 0 || !!this.confirmation || (!!this.payment && ['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage)));
+    if (force || cancellable !== this.lastActivity) { this.lastActivity = cancellable; this.send({ type: 'activity', cancellable }); }
+  }
+  private beginOperation() {
+    const id = Symbol(); this.operations.add(id); this.reportActivity();
+    return () => { if (this.operations.delete(id)) this.reportActivity(); };
   }
   private speak<K extends keyof NarrationParams>(key: K, params: NarrationParams[K]) {
-    this.answer(say(key, params, this.profile?.language ?? 'en'));
+    this.answer(say(key, params, this.profile?.language ?? 'en'), ['still-working', 'booking-page', 'research-started'].includes(key));
   }
   private active(generation: number) { return generation === this.generation && !this.flow.signal.aborted; }
   private cancel() {
+    this.profileCollector = undefined; this.pendingProfileOption = undefined;
+    this.operations.clear();
     this.turnController?.abort(); ++this.turnVersion;
     ++this.generation;
     this.flow.abort();
@@ -205,6 +245,8 @@ export class VoilaSession {
     finally { this.ports.timers.clearTimeout(timer); parent.removeEventListener('abort', abort); controller.abort(); }
   }
   private async startResearch(transcript: string, generation: number): Promise<Research> {
+    const finish = this.beginOperation();
+    try {
     const parent = this.flow.signal;
     const traffic = async (): Promise<Disruption> => {
       if (this.scenario === 'demo') return getDemoDisruption();
@@ -219,7 +261,7 @@ export class VoilaSession {
       return disruption;
     });
     const linkup = this.scenario === 'demo' ? Promise.resolve([] as Option[]) : this.limited((signal) => this.ports.linkup({
-      query: `Transport disruption and alternatives for this request today ${this.ports.clock().toISOString()}. ${transcript}`, signal,
+      query: `Transport disruption and alternatives for this request today ${this.ports.clock().toISOString()}. ${redactContactText(transcript, this.profile)}`, signal,
     }), 9000, parent).then((result) => {
       if (this.active(generation)) for (const item of result.corroboration) {
         for (const source of item.sources) this.send({ type: 'feed', kind: 'research', text: item.text, source });
@@ -228,12 +270,14 @@ export class VoilaSession {
     }).catch(() => { if (this.active(generation)) this.ports.logger.error('Linkup research unavailable; retaining preset options.'); return []; });
     const [disruption, extraOptions] = await Promise.all([trafficResult, linkup]);
     return { disruption, extraOptions };
+    } finally { finish(); }
   }
   private async interpret(transcript: string, generation: number) {
+    const finish = this.beginOperation();
     try {
-      const result = await this.limited((signal) => this.ports.understand({ transcript, profile: this.profile!, now: this.ports.clock(), previous: this.trip, signal }), 20_500, this.flow.signal);
+      const result = await this.limited((signal) => this.ports.understand({ transcript: redactContactText(transcript, this.profile), profile: this.profile!, now: this.ports.clock(), previous: this.trip, signal }), 20_500, this.flow.signal);
       if (!this.active(generation)) return;
-      this.trip = { passengers: 1, luggage: 0, guide_dog: this.profile!.guide_dog, ...this.trip, ...result.trip };
+      this.trip = { passengers: 1, luggage: 0, guide_dog: this.profile!.guide_dog ?? false, ...this.trip, ...result.trip };
       this.observeSafely({ type: 'trip', trip: { ...this.trip } });
       await this.plan(transcript, generation);
     } catch {
@@ -242,13 +286,21 @@ export class VoilaSession {
       this.error('Could not understand the trip. Please try again.');
       this.answer(this.fallback());
       this.cancel(); this.transition('LISTEN');
-    }
+    } finally { finish(); }
   }
   private missing() { return (['origin', 'destination', 'deadline'] as const).filter((key) => !this.trip[key]); }
-  private remember(role: Turn['role'], text: string) { this.history = [...this.history, { role, text }].slice(-10); }
+  private remember(role: Turn['role'], text: string) { this.history = [...this.history, { role, text: redactContactText(text, this.profile) }].slice(-10); }
+  private profilePrompt(question: string) {
+    this.lastSay = this.ports.clock().getTime();
+    this.send({ type: 'profile_request', question }); this.send({ type: 'say', text: question });
+  }
   private select(id: string) {
     const method = bookingMethods[id];
     if (!method || !this.options.some((option) => option.id === id)) { this.error('No supported booking method for this option.'); return; }
+    const collector = new VoiceProfile(this.profile!, method.kind === 'h_agent' ? ['name', 'phone', 'email', 'guide_dog'] : ['guide_dog']);
+    if (collector.field) { this.profileCollector = collector; this.pendingProfileOption = id; this.profilePrompt(collector.question); return; }
+    const option = this.options.find((item) => item.id === id)!;
+    if (this.trip.guide_dog && option.guide_dog_status === 'refused') { this.speak('choose-again', {}); return; }
     this.attempt = 0;
     if (method.kind === 'manual') { this.speak('manual-instructions', { id, instructions: method.instructions }); this.transition('DONE'); }
     else void this.execute(id, this.generation);
@@ -257,8 +309,8 @@ export class VoilaSession {
     const pending = this.confirmation; if (!pending) return;
     this.confirmation = undefined; this.attempt = 0; this.transition('EXECUTE'); pending.resolve({ approved, reply });
   }
-  private answer(text: string) {
-    if (text === this.lastText) text = `${this.language === 'fr' ? 'Autrement dit, ' : 'In other words, '}${text}`;
+  private answer(text: string, progress = false) {
+    if (!progress && text === this.lastText) text = `${this.language === 'fr' ? 'Autrement dit, ' : 'In other words, '}${text.charAt(0).toLocaleLowerCase(this.language) + text.slice(1)}`;
     this.lastText = text;
     this.lastSay = this.ports.clock().getTime(); this.remember('assistant', text); this.send({ type: 'say', text });
   }
@@ -278,10 +330,11 @@ export class VoilaSession {
     const generation = this.generation, stage = this.stage, version = this.turnVersion;
     const controller = new AbortController(); this.turnController = controller;
     let result: TurnResult;
+    const finish = this.beginOperation();
     try {
-      result = await this.limited((signal) => this.ports.converse({ transcript, stage, language: this.language, trip: { ...this.trip }, missing: this.missing(), options: this.options, confirmation: this.confirmation ? { ...this.confirmation.details } : undefined, history: [...this.history], attempt: this.attempt, now: this.ports.clock(), signal }), 20_500, controller.signal);
+      result = await this.limited((signal) => this.ports.converse({ transcript: redactContactText(transcript, this.profile), stage, language: this.language, trip: { ...this.trip }, missing: this.missing(), options: this.options, confirmation: this.confirmation ? { ...this.confirmation.details } : undefined, history: [...this.history], attempt: this.attempt, now: this.ports.clock(), signal }), 20_500, controller.signal);
     } catch { result = { intent: 'unclear', confidence: 0, reply: this.fallback() }; }
-    finally { if (this.turnController === controller) this.turnController = undefined; }
+    finally { finish(); if (this.turnController === controller) this.turnController = undefined; }
     if (!this.active(generation) || this.stage !== stage || this.turnVersion !== version || controller.signal.aborted) return;
     if (result.intent !== 'unclear' && /^(euh|uh|um|hmm|(?:euh[, ]+)?je (?:ne )?sais pas|i don.t know|not sure)[.!? ]*$/i.test(transcript.trim())) result = { intent: 'unclear', confidence: 0, reply: this.fallback() };
     if (result.intent === 'stop' && result.confidence >= .65) { this.stop(); return; }
@@ -341,6 +394,7 @@ export class VoilaSession {
     this.paidRefs.clear();
     this.payment = undefined;
     this.transition('EXECUTE');
+    const finish = this.beginOperation();
     const controller = new AbortController();
     this.bookingController = controller;
     const current = () => this.active(generation) && !controller.signal.aborted;
@@ -351,7 +405,7 @@ export class VoilaSession {
       const startUrl = base.pathname === '/' ? new URL('/fr/reservation/', base) : base;
       if (base.searchParams.get('difficulty') === 'easy') startUrl.searchParams.set('difficulty', 'easy');
       const result = await this.ports.runBooking({
-        trip, profile: this.profile!, startUrl: startUrl.href, signal: controller.signal,
+        trip, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
         onProgress: (text) => {
           if (!current()) return;
           this.send({ type: 'feed', kind: 'agent', text });
@@ -363,6 +417,9 @@ export class VoilaSession {
         confirm: (summary, details) => {
           if (!current()) return Promise.resolve({ approved: false, reply: 'Stopped' });
           if (this.confirmation) throw new Error('A confirmation is already pending.');
+          details = sanitizeConfirmationFields(details);
+          if (details.total_price === undefined || details.currency !== 'EUR') return Promise.resolve({ approved: false, reply: 'Read the transfer total price and EUR currency before asking for approval.' });
+          summary = say('confirm', { trip, option, details, now: this.ports.clock() }, this.language);
           const decision = new Promise<{ approved: boolean; reply: string }>((resolve) => { this.confirmation = { summary, details: { ...sanitizeConfirmationFields(details), option_name: option.name, guide_dog_status: option.guide_dog_status }, resolve }; });
           this.transition('CONFIRM'); this.send({ type: 'confirm', summary }); this.speak('confirm', { trip, option, details, now: this.ports.clock() });
           return decision;
@@ -389,6 +446,6 @@ export class VoilaSession {
       this.options = this.options.filter((option) => option.id !== id);
       this.send({ type: 'options', items: this.options });
       this.transition('CHOOSE');
-    } finally { controller.abort(); if (this.bookingController === controller) this.bookingController = undefined; }
+    } finally { controller.abort(); if (this.bookingController === controller) this.bookingController = undefined; finish(); }
   }
 }

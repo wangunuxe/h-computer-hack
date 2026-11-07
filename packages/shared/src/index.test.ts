@@ -12,6 +12,7 @@ describe('server events', () => {
     expect(new TextEncoder().encode(JSON.stringify(event)).byteLength).toBeLessThan(64 * 1024);
   });
   const events = [
+    { type: 'activity', cancellable: true },
     { type: 'stage', stage: 'LISTEN' },
     { type: 'say', text: 'Bonjour' },
     { type: 'feed', kind: 'research', text: 'Checking trains', source: 'https://example.com' },
@@ -31,6 +32,12 @@ describe('server events', () => {
 });
 
 describe('web events', () => {
+  it('accepts deferred profile fields but still validates supplied contacts', () => {
+    expect(WebEventSchema.safeParse({ type: 'hello', profile: { language: 'fr' }, gps: null }).success).toBe(true);
+    expect(WebEventSchema.safeParse({ type: 'hello', profile: { language: 'fr', email: 'invalid' }, gps: null }).success).toBe(false);
+    expect(ServerEventSchema.safeParse({ type: 'profile', profile: { language: 'en', guide_dog: false } }).success).toBe(true);
+    expect(ServerEventSchema.safeParse({ type: 'profile_request', question: 'Your name?' }).success).toBe(true);
+  });
   const events = [
     { type: 'hello', profile, gps: { latitude: 48.88, longitude: 2.35 } },
     { type: 'final_transcript', text: 'Take me to CDG' },

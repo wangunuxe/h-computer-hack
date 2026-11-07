@@ -21,6 +21,8 @@ export const ProfileSchema = z.object({
   language: text,
 });
 export type Profile = z.infer<typeof ProfileSchema>;
+export const TravelerProfileSchema = ProfileSchema.partial({ name: true, phone: true, email: true, guide_dog: true });
+export type TravelerProfile = z.infer<typeof TravelerProfileSchema>;
 
 export const OptionSchema = z.object({
   id: text,
@@ -51,6 +53,9 @@ export const StageSchema = z.enum([
 export const ScenarioSchema = z.enum(['demo', 'live']);
 export type Scenario = z.infer<typeof ScenarioSchema>;
 export const ServerEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('profile'), profile: TravelerProfileSchema }),
+  z.object({ type: z.literal('profile_request'), question: text }),
+  z.object({ type: z.literal('activity'), cancellable: z.boolean() }),
   z.object({ type: z.literal('stage'), stage: StageSchema }),
   z.object({ type: z.literal('say'), text }),
   z.object({ type: z.literal('feed'), kind: text, text, source: z.url().optional(), mode: z.enum(['demo', 'live']).optional(), status: z.enum(['normal', 'disrupted', 'unknown']).optional() }),
@@ -68,7 +73,7 @@ export type ServerEvent = z.infer<typeof ServerEventSchema>;
 
 export const WebEventSchema = z.discriminatedUnion('type', [
   z.object({
-    type: z.literal('hello'), profile: ProfileSchema,
+    type: z.literal('hello'), profile: TravelerProfileSchema,
     scenario: ScenarioSchema.optional(),
     gps: z.object({
       latitude: z.number().min(-90).max(90),
@@ -78,6 +83,7 @@ export const WebEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('final_transcript'), text }),
   z.object({ type: z.literal('user_reply'), text }),
   z.object({ type: z.literal('stop') }),
+  z.object({ type: z.literal('language'), language: z.enum(['fr', 'en']) }),
   z.object({ type: z.literal('paid') }),
 ]);
 export type WebEvent = z.infer<typeof WebEventSchema>;

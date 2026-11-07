@@ -179,6 +179,29 @@ describe('real WebSocket round-trip', () => {
     expect((await request('203.0.113.8, 10.0.0.1')).status).toBe(trustProxy === '1' ? 201 : 429);
     expect((await request('203.0.113.7, 10.0.0.9')).status).toBe(429);
   });
+  it('replays the paid booking after the payment callback arrives while the browser is disconnected', async () => {
+    const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports, token: 'test' }); cleanup.push(running.close);
+    if (!running.server.listening) await once(running.server, 'listening');
+    const address = running.server.address(); if (!address || typeof address === 'string') throw new Error('Expected TCP port');
+    const issued = await (await running.app.request('/session', { method: 'POST' })).json();
+    const connect = async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws/session/${issued.id}?token=${issued.resume_token}`);
+      const messages: ServerEvent[] = []; ws.on('message', (data) => messages.push(ServerEventSchema.parse(JSON.parse(data.toString()))));
+      await once(ws, 'open');
+      const until = async (check: () => boolean) => { while (!check()) await once(ws, 'message'); };
+      return { ws, messages, until };
+    };
+    const first = await connect(); first.ws.send(JSON.stringify(hello)); first.ws.send(JSON.stringify({ type: 'final_transcript', text: 'CDG' }));
+    await first.until(() => first.messages.some((event) => event.type === 'stage' && event.stage === 'CHOOSE'));
+    first.ws.send(JSON.stringify({ type: 'user_reply', text: 'la navette' }));
+    await first.until(() => first.messages.some((event) => event.type === 'stage' && event.stage === 'AWAIT_PAYMENT'));
+    first.ws.close(); await once(first.ws, 'close');
+    const response = await running.app.request('/internal/payment-completed', { method: 'POST', headers: { Authorization: 'Bearer test' }, body: JSON.stringify({ order_id: 'paid-order', ref: booking.ref, status: 'paid' }) });
+    expect(response.status).toBe(200);
+    const resumed = await connect(); await resumed.until(() => resumed.messages.some((event) => event.type === 'booking_card'));
+    expect(resumed.messages.slice(0, 2)).toEqual([{ type: 'stage', stage: 'DONE' }, { type: 'booking_card', booking }]);
+    expect(running.sessions.size).toBe(1);
+  });
   it('validates JSON, streams events, and reattaches an existing session with its stage replayed', async () => {
     const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports, token: 'test' });
     cleanup.push(running.close);
@@ -223,7 +246,10 @@ describe('real WebSocket round-trip', () => {
     first.ws.send(JSON.stringify({ type: 'final_transcript', text: 'CDG' }));
     await first.until(() => first.messages.some((e) => e.type === 'stage' && e.stage === 'CHOOSE'));
     const session = running.sessions.get(issued.id);
+    const evicted = once(first.ws, 'close');
     const second = await connect(issued.resume_token);
+    const [code, reason] = await evicted;
+    expect(code).toBe(4409); expect(reason.toString()).toBe('Session active in another connection');
     await second.until(() => second.messages.length > 0);
     expect(running.sessions.get(issued.id)).toBe(session);
     expect(second.messages[0]).toEqual({ type: 'stage', stage: 'CHOOSE' });
@@ -231,5 +257,9 @@ describe('real WebSocket round-trip', () => {
     await second.until(() => second.messages.some((e) => e.type === 'stage' && e.stage === 'DONE'));
     expect(second.messages).toContainEqual({ type: 'say', text: expect.stringContaining('Appelez G7') });
     expect(running.sessions.size).toBe(1);
+    const fresh = await connect(another.resume_token, another.id);
+    await fresh.until(() => fresh.messages.length > 0);
+    expect(fresh.messages[0]).toEqual({ type: 'stage', stage: 'LISTEN' });
+    expect(second.ws.readyState).toBe(WebSocket.OPEN); expect(running.sessions.size).toBe(2);
   });
 });

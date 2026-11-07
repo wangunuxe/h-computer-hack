@@ -347,6 +347,7 @@ let sessionActive=false,sessionStartedAt=0,lastServerStage='',liveTrip={},liveMe
 let liveAgentLines=0,liveLastAgentText='',liveAgentView='',livePayment=null,liveBooking=null;
 let liveFrameImage='',liveFrameUrl='',liveFrameVisible=false,liveError=false,liveStatusSignature='';
 let liveExecStarted=false,liveExecPhase='idle',liveExecElapsed=0,liveExecLastAt=performance.now(),liveExecQueue=[];
+let liveHearWho='',liveHearText='';
 
 if(LIVE){
   $('play').disabled=true;$('prev').disabled=true;$('next').disabled=true;$('restart').disabled=true;$('speed').disabled=true;
@@ -498,7 +499,7 @@ function resetLiveSession(name,startedAt){
   const parsed=Date.parse(startedAt);sessionStartedAt=Number.isFinite(parsed)?parsed:Date.now();
   lastServerStage='';liveError=false;clearLiveBooking();si=-1;te=0;paintChips();logEl.replaceChildren();
   cam={x:0,y:0,z:1};camT={x:0,y:0,z:1};
-  hearEl.replaceChildren();capEl.textContent='Live monitor · waiting for a session from the phone…';
+  hearEl.replaceChildren();liveHearWho='';liveHearText='';capEl.textContent='Live monitor · waiting for a session from the phone…';
   $('budget').textContent='—';
   if(footnote)footnote.textContent=`Live monitor: every node, line and screenshot comes from the Voilà server's events for ${PERSON}'s session. The screen-reader comparison is illustrative.`;
   liveStatusSignature='';renderLiveStatus();
@@ -511,12 +512,19 @@ function applyLiveEvent(event){
     return;
   }
   if(!sessionActive)return;
-  if(event.type==='stage'){
+  if(event.type==='profile'){
+    if(!isRecord(event.profile)||typeof event.profile.name!=='string'||!event.profile.name.trim())return;
+    const previous=PERSON;PERSON=event.profile.name;personLabel.textContent=PERSON;
+    if(footnote)footnote.textContent=`Live monitor: every node, line and screenshot comes from the Voilà server's events for ${PERSON}'s session. The screen-reader comparison is illustrative.`;
+    if(liveHearWho===previous){liveHearWho=PERSON;say(PERSON,liveHearText)}
+    if(!liveError&&si>=0)capEl.textContent=nm(liveCaption(si));
+    renderLiveStatus();
+  }else if(event.type==='stage'){
     if(typeof event.stage==='string')setLiveStage(event.stage);
   }else if(event.type==='transcript'){
     if(typeof event.text!=='string')return;
     appendLiveLog(`gladia  final  "${event.text}"`);
-    say(PERSON,event.text);
+    liveHearWho=PERSON;liveHearText=event.text;say(liveHearWho,event.text);
   }else if(event.type==='trip'){
     if(!isRecord(event.trip))return;
     const partial={};
@@ -543,7 +551,7 @@ function applyLiveEvent(event){
     try{const url=new URL(event.url);if(url.protocol==='https:'&&!url.username&&!url.password)liveAgentView=url.href}catch{}
     renderLiveStatus();
   }else if(event.type==='say'){
-    if(typeof event.text==='string')say('Voilà',event.text);
+    if(typeof event.text==='string'){liveHearWho='Voilà';liveHearText=event.text;say(liveHearWho,liveHearText)}
   }else if(event.type==='feed'){
     if(typeof event.kind!=='string'||typeof event.text!=='string')return;
     const mode=typeof event.mode==='string'?event.mode:undefined,status=typeof event.status==='string'?event.status:undefined;

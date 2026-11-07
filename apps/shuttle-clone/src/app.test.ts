@@ -67,7 +67,7 @@ describe('four-step booking', () => {
     const checkout = await app.request('/checkout/' + order.id, { method: 'POST' });
     expect(checkout.status).toBe(303);
     expect(checkout.headers.get('x-payment-mode')).toBe('fake-local-stub');
-    expect(checkout.headers.get('location')).toBe('http://localhost/stub-payment/' + order.id + '?mode=no-stripe-key');
+    expect(checkout.headers.get('location')).toBe('http://localhost:3001/stub-payment/' + order.id + '?mode=no-stripe-key');
     const stub = await app.request(checkout.headers.get('location')!);
     expect(await stub.text()).toContain('FAKE PAYMENT — LOCAL STUB');
     const confirmation = await app.request('/fr/reservation/confirmation/' + order.id);
@@ -121,6 +121,25 @@ describe('four-step booking', () => {
 });
 
 describe('payments', () => {
+  it('ignores forged request origins and Host headers when building Stripe redirects', async () => {
+    const stripe = new Stripe('sk_test_mock');
+    const create = vi.spyOn(stripe.checkout.sessions, 'create').mockResolvedValue({
+      id: 'cs_mock', url: 'https://checkout.stripe.com/mock',
+    } as Stripe.Response<Stripe.Checkout.Session>);
+    const store = createStore();
+    const env = { STRIPE_SECRET_KEY: 'sk_test_mock', PORT: '3456' };
+    const app = createApp({ store, env, payments: createPayments(env, stripe) });
+    await complete(app);
+    const order = [...store.orders.values()][0]!;
+    await app.request('https://attacker.example/checkout/' + order.id, {
+      method: 'POST', headers: { Host: 'attacker.example', 'X-Forwarded-Host': 'attacker.example' },
+    });
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      success_url: `http://localhost:3456/fr/reservation/confirmation/${order.id}`,
+      cancel_url: `http://localhost:3456/fr/reservation/payment/${order.id}`,
+    }), expect.anything());
+    expect(JSON.stringify(create.mock.calls)).not.toContain('attacker.example');
+  });
   it('redirects through an injected gateway and caches the checkout URL', async () => {
     const store = createStore();
     const checkout = vi.fn().mockResolvedValue('https://checkout.stripe.com/c/pay/test_session');

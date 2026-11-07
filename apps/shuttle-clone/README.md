@@ -12,7 +12,8 @@ Static files are resolved relative to this app, including committed local jQuery
 
 Environment:
 - `PORT`: default 3001.
-- `SHUTTLE_PUBLIC_URL`: canonical public origin for Checkout redirects; otherwise request origin.
+- `SHUTTLE_PUBLIC_URL`: canonical public origin for Checkout redirects; otherwise
+  `http://localhost:<PORT>` (default 3001). Request headers are never trusted.
 - `STRIPE_SECRET_KEY`: Stripe test key. If absent, Checkout redirects to a clearly
   marked local stub that never marks the order paid.
 - `STRIPE_WEBHOOK_SECRET`: raw-body signature verification secret. Without it the

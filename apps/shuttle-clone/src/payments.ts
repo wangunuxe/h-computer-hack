@@ -5,8 +5,8 @@ export interface PaymentGateway {
   checkout(order: Order, baseUrl: string): Promise<string>;
   verify(rawBody: string, signature: string): Stripe.Event;
 }
-export function createPayments(env: NodeJS.ProcessEnv = process.env): PaymentGateway {
-  const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : undefined;
+export function createPayments(env: NodeJS.ProcessEnv = process.env, client?: Stripe): PaymentGateway {
+  const stripe = client ?? (env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : undefined);
   return {
     async checkout(order, baseUrl) {
       if (!stripe) return `${baseUrl}/stub-payment/${order.id}?mode=no-stripe-key`;

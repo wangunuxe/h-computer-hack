@@ -274,6 +274,23 @@ describe('H booking runner', () => {
     expect(mock.cancel).toHaveBeenCalledOnce();
   });
 
+  it('returns a never-yielding stream on abort without waiting for its pending next', async () => {
+    const controller = new AbortController();
+    const mock = setup();
+    mock.input.signal = controller.signal;
+    const returned = vi.fn(async () => ({ done: true, value: undefined }));
+    const next = vi.fn(() => {
+      controller.abort(new Error('stop pending stream'));
+      return new Promise<IteratorResult<HaiAgents.SessionEvent>>(() => {});
+    });
+    mock.handle.stream.mockReturnValue({ next, return: returned } as unknown as AsyncGenerator<HaiAgents.SessionEvent>);
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow('stop pending stream');
+    expect(returned).toHaveBeenCalledOnce();
+    expect(next).toHaveBeenCalledOnce();
+    expect(mock.cancel).toHaveBeenCalledOnce();
+    expect(mock.handle.waitForCompletion).not.toHaveBeenCalled();
+  });
+
   it('does not create a session when already aborted or out of quota', async () => {
     const mock = setup();
     mock.getSessionQuota.mockResolvedValue({ available: 0 });

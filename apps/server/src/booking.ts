@@ -106,44 +106,53 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
     input.signal?.throwIfAborted();
     const handle = session;
     const work = async () => {
-      const envelope = await handle.get();
+      const envelope = await Promise.race([handle.get(), failure]);
       input.signal?.throwIfAborted();
-      for await (const event of handle.stream({ tools, timeoutMs: 300_000 })) {
-        input.signal?.throwIfAborted();
-        if (event.type === 'AgentEvent') {
-          const { kind } = z.object({ kind: z.string() }).parse(event.data);
-          if (kind === 'observation_event') {
-            const { metadata } = z.object({ metadata: z.record(z.string(), z.unknown()).optional() }).parse(event.data);
-            observedUrl = typeof metadata?.url === 'string' ? metadata.url : undefined;
+      const iterator = handle.stream({ tools, timeoutMs: 300_000 });
+      try {
+        while (true) {
+          const next = await Promise.race([iterator.next(), failure]);
+          if (next.done) break;
+          const event = next.value;
+          input.signal?.throwIfAborted();
+          if (event.type === 'AgentEvent') {
+            const { kind } = z.object({ kind: z.string() }).parse(event.data);
+            if (kind === 'observation_event') {
+              const { metadata } = z.object({ metadata: z.record(z.string(), z.unknown()).optional() }).parse(event.data);
+              observedUrl = typeof metadata?.url === 'string' ? metadata.url : undefined;
+            }
+            if (kind === 'policy_event') {
+              const { content, toolReqs } = z.object({
+                content: z.string().nullish(),
+                toolReqs: z.array(z.object({ toolName: z.string(), args: z.record(z.string(), z.unknown()).optional() })).optional(),
+              }).parse(event.data);
+              steps++;
+              const line = content?.replace(/\s+/g, ' ').trim().slice(0, 240);
+              const actions = toolReqs?.map(({ toolName, args }) =>
+                typeof args?.element === 'string' ? `${toolName} — ${args.element}` : toolName,
+              ).join('; ');
+              input.onProgress(line || `Step ${steps}: ${actions || 'Working on booking'}`.replace(/\s+/g, ' ').trim().slice(0, 240));
+            }
+            if (kind === 'error_event') {
+              const { error } = z.object({ error: z.string() }).parse(event.data);
+              input.onProgress(`H step error (recoverable): ${error.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+            }
           }
-          if (kind === 'policy_event') {
-            const { content, toolReqs } = z.object({
-              content: z.string().nullish(),
-              toolReqs: z.array(z.object({ toolName: z.string(), args: z.record(z.string(), z.unknown()).optional() })).optional(),
-            }).parse(event.data);
-            steps++;
-            const line = content?.replace(/\s+/g, ' ').trim().slice(0, 240);
-            const actions = toolReqs?.map(({ toolName, args }) =>
-              typeof args?.element === 'string' ? `${toolName} — ${args.element}` : toolName,
-            ).join('; ');
-            input.onProgress(line || `Step ${steps}: ${actions || 'Working on booking'}`.replace(/\s+/g, ' ').trim().slice(0, 240));
-          }
-          if (kind === 'error_event') {
-            const { error } = z.object({ error: z.string() }).parse(event.data);
-            input.onProgress(`H step error (recoverable): ${error.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+          if (event.type === 'AgentErrorEvent') throw new Error(z.object({ error: z.string() }).parse(event.data).error);
+          if (event.type === 'MetricsUpdateEvent') {
+            const { metrics } = z.object({ metrics: z.object({ steps: z.number().optional(), totalCost: z.number().nullish() }) }).parse(event.data);
+            steps = metrics.steps ?? steps;
+            costUsd = metrics.totalCost ?? costUsd;
           }
         }
-        if (event.type === 'AgentErrorEvent') throw new Error(z.object({ error: z.string() }).parse(event.data).error);
-        if (event.type === 'MetricsUpdateEvent') {
-          const { metrics } = z.object({ metrics: z.object({ steps: z.number().optional(), totalCost: z.number().nullish() }) }).parse(event.data);
-          steps = metrics.steps ?? steps;
-          costUsd = metrics.totalCost ?? costUsd;
-        }
+      } finally {
+        // SDK iterators cannot abort an in-flight poll; do not await its queued return.
+        void iterator.return(undefined).catch(() => {});
       }
-      const result = await handle.waitForCompletion({ timeoutMs: 30_000 });
+      const result = await Promise.race([handle.waitForCompletion({ timeoutMs: 30_000 }), failure]);
       if (result.status !== 'completed' && result.status !== 'idle') throw new Error(`H booking ${result.status}: ${result.error || 'session did not finish successfully'}`);
       if (!paymentUrl) throw new Error('Booking failed: agent finished without payment handoff.');
-      const rawAnswer = result.answer ?? result.finalChanges?.answer ?? (await handle.get()).latestAnswer;
+      const rawAnswer = result.answer ?? result.finalChanges?.answer ?? (await Promise.race([handle.get(), failure])).latestAnswer;
       if (rawAnswer == null) throw new Error(`H booking ${result.status}: no booking answer returned.`);
       const parsedAnswer = typeof rawAnswer === 'string' ? JSON.parse(rawAnswer) as unknown : rawAnswer;
       const booking: Booking = BookingSchema.parse({ ...BookingAnswerSchema.parse(parsedAnswer), payment_url: paymentUrl });

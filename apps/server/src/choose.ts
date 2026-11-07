@@ -9,6 +9,7 @@ const ordinals: Record<string, number> = {
 };
 
 export function chooseOption(reply: string, options: readonly Option[]): string | null {
+  if (/\?|\b(?:combien|accepte|does|can|what|how|demain|tomorrow|instead|moins|plus|cheapest|fastest|cher|rapide|pourquoi|why|stop|arrete|annule|cancel|no|non|pas|not)\b/.test(normalize(reply))) return null;
   const words = normalize(reply).match(/[a-z0-9]+/g) ?? [];
   const matches = new Set<string>();
   for (const word of words) {

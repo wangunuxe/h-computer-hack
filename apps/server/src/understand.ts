@@ -17,7 +17,7 @@ const extractionSchema = z.object({
   departure: z.iso.datetime({ offset: true }).optional(),
 });
 
-function parisIso(date: Date): string {
+export function parisIso(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'longOffset',

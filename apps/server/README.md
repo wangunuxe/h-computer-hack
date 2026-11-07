@@ -1,3 +1,17 @@
+# Conversation turns
+
+Initial trip extraction and non-exact follow-up turns use Gemini 3.6 Flash with
+minimal thinking, structured JSON and cancellation. Exact option selection and
+yes/no confirmation stay local. Questions and corrections are not selections.
+Turn context includes Paris time, offered options, structured confirmation,
+missing facts and at most ten recent messages. A new trip clears history.
+Only explicit, high-confidence confirmation can approve; hesitation cannot.
+Corrections at confirmation return the user's original words to the booking
+agent as a rejection. Status answers do not restart an active booking/payment.
+Model failures/timeouts retain the current question and never approve payment
+or booking. Turn requests have a 20-second SDK timeout and a bounded session
+timeout, and stop cancels both model and booking work.
+
 # H shuttle booking runner (M2)
 
 From the workspace root:

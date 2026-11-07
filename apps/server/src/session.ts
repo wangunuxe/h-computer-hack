@@ -9,12 +9,15 @@ import { assessOptions } from './feasibility.js';
 import { bookingMethods, matchesPresetRoute, mergeOptions, presetOptions } from './options.js';
 import { chooseOption } from './choose.js';
 import { say, type NarrationParams } from './narrate.js';
+import { converse, type Turn, type TurnResult } from './converse.js';
+import type { ConfirmationFields } from './confirmation.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 type Research = { disruption: Disruption; extraOptions: Option[] };
 const userPayment = Symbol('user-payment');
 export interface SessionPorts {
   understand: typeof understand;
+  converse: typeof converse;
   trafficH: typeof readRerBTraffic;
   linkup: typeof searchDisruptionAndAlternatives;
   runBooking: typeof runBooking;
@@ -39,14 +42,18 @@ export class VoilaSession {
   private flow = new AbortController();
   private bookingController?: AbortController;
   private research?: Promise<Research>;
-  private confirmation?: { summary: string; resolve: (decision: { approved: boolean; reply: string }) => void };
+  private confirmation?: { summary: string; details?: ConfirmationFields; resolve: (decision: { approved: boolean; reply: string }) => void };
+  private history: Turn[] = [];
+  private turnVersion = 0;
+  private turnController?: AbortController;
+  private attempt = 0;
   private lastSay: number;
   private lastHeartbeat = -Infinity;
   private heartbeat: ReturnType<typeof setInterval>;
   private readonly ports: SessionPorts;
 
   constructor(private emit: (event: ServerEvent) => void, ports: Partial<SessionPorts> = {}) {
-    this.ports = { understand, trafficH: readRerBTraffic, linkup: searchDisruptionAndAlternatives, runBooking,
+    this.ports = { understand, converse, trafficH: readRerBTraffic, linkup: searchDisruptionAndAlternatives, runBooking,
       clock: () => new Date(), timers: globalThis, logger: console, shuttlePublicUrl: () => process.env.SHUTTLE_PUBLIC_URL, ...ports };
     this.lastSay = this.ports.clock().getTime();
     this.heartbeat = this.ports.timers.setInterval(() => {
@@ -92,34 +99,30 @@ export class VoilaSession {
       const generation = ++this.generation;
       this.lastHeartbeat = -Infinity;
       this.trip = this.gpsOrigin ? { origin: this.gpsOrigin } : {};
+      this.remember('user', event.text);
       this.transition('UNDERSTAND');
       this.speak('acknowledgement', {});
       this.speak('research-started', {});
       this.research = this.startResearch(event.text, generation);
       void this.research.catch(() => {});
       void this.interpret(event.text, generation);
-    } else if (event.type === 'user_reply' && this.stage === 'CLARIFY') {
+    } else if (event.type === 'user_reply') {
       if (!event.text.trim()) { this.error('Reply must not be empty.'); return; }
-      this.transition('UNDERSTAND');
-      void this.interpret(event.text, this.generation);
-    } else if (event.type === 'user_reply' && this.stage === 'CHOOSE') {
-      const id = chooseOption(event.text, this.options);
-      if (!id) { this.speak('choose-again', {}); return; }
-      const method = bookingMethods[id];
-      if (!method) { this.error('No supported booking method for this option.'); return; }
-      if (method.kind === 'manual') {
-        this.speak('manual-instructions', { id, instructions: method.instructions });
-        this.transition('DONE');
-      } else void this.execute(id, this.generation);
-    } else if (event.type === 'user_reply' && this.stage === 'CONFIRM' && this.confirmation) {
-      const reply = event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
-      const yes = /^(oui|yes|y|ouais|ok|okay|d accord|vas y|go ahead|yes please|bien sur)$/.test(reply);
-      const no = /^(non|no|n|attends|attendez|wait|not yet|pas encore|stop)$/.test(reply);
-      if (!yes && !no) { this.speak('confirm-again', {}); return; }
-      const pending = this.confirmation;
-      this.confirmation = undefined;
-      this.transition('EXECUTE');
-      pending.resolve({ approved: yes, reply: event.text });
+      this.turnController?.abort(); ++this.turnVersion;
+      this.remember('user', event.text);
+      const normalized = event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
+      if (/^(stop|arrete|arretez|annule|cancel)$/.test(normalized)) { this.stop(); return; }
+      if (this.stage === 'CHOOSE') {
+        const id = chooseOption(event.text, this.options);
+        if (id) { this.select(id); return; }
+      }
+      if (this.stage === 'CONFIRM' && this.confirmation) {
+        const yes = /^(oui|yes|y|ouais|ok|okay|d accord|vas y|go ahead|yes please|bien sur)$/.test(normalized);
+        const no = /^(non|no|n|attends|attendez|wait|not yet|pas encore)$/.test(normalized);
+        if ((yes || no) && !event.text.includes('?')) { this.decide(yes, event.text); return; }
+      }
+      if (['CLARIFY', 'CHOOSE', 'CONFIRM', 'UNDERSTAND', 'PRESENT', 'RESEARCH', 'EXECUTE', 'HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage)) void this.interpretTurn(event.text);
+      else this.error(`Event ${event.type} is not allowed in ${this.stage}.`);
     } else if (event.type === 'paid' && this.stage === 'HANDOFF' && this.payment) {
       this.paidRefs.add(userPayment);
     } else if (event.type === 'paid' && this.stage === 'AWAIT_PAYMENT' && this.booking) {
@@ -150,11 +153,11 @@ export class VoilaSession {
   private error(message: string) { this.send({ type: 'error', message }); }
   private transition(stage: Stage) { this.lastHeartbeat = -Infinity; this.stage = stage; this.send({ type: 'stage', stage }); }
   private speak<K extends keyof NarrationParams>(key: K, params: NarrationParams[K]) {
-    this.lastSay = this.ports.clock().getTime();
-    this.send({ type: 'say', text: say(key, params, this.profile?.language ?? 'en') });
+    this.answer(say(key, params, this.profile?.language ?? 'en'));
   }
   private active(generation: number) { return generation === this.generation && !this.flow.signal.aborted; }
   private cancel() {
+    this.turnController?.abort(); ++this.turnVersion;
     ++this.generation;
     this.flow.abort();
     this.bookingController?.abort();
@@ -164,6 +167,7 @@ export class VoilaSession {
   }
   private resetTrip() {
     this.cancel();
+    this.history = []; this.attempt = 0;
     this.research = undefined; this.booking = undefined; this.payment = undefined; this.options = []; this.trip = {};
   }
   private stop() {
@@ -214,13 +218,74 @@ export class VoilaSession {
       const result = await this.limited((signal) => this.ports.understand({ transcript, profile: this.profile!, now: this.ports.clock(), previous: this.trip, signal }), 20_500, this.flow.signal);
       if (!this.active(generation)) return;
       this.trip = { passengers: 1, luggage: 0, guide_dog: this.profile!.guide_dog, ...this.trip, ...result.trip };
-      const missing = (['origin', 'destination', 'deadline'] as const).filter((key) => !this.trip[key]);
-      if (missing.length) {
+      await this.plan(transcript, generation);
+    } catch {
+      if (!this.active(generation)) return;
+      this.ports.logger.error('Trip understanding failed.');
+      this.error('Could not understand the trip. Please try again.');
+      this.cancel(); this.transition('LISTEN');
+    }
+  }
+  private missing() { return (['origin', 'destination', 'deadline'] as const).filter((key) => !this.trip[key]); }
+  private remember(role: Turn['role'], text: string) { this.history = [...this.history, { role, text }].slice(-10); }
+  private select(id: string) {
+    const method = bookingMethods[id];
+    if (!method || !this.options.some((option) => option.id === id)) { this.error('No supported booking method for this option.'); return; }
+    this.attempt = 0;
+    if (method.kind === 'manual') { this.speak('manual-instructions', { id, instructions: method.instructions }); this.transition('DONE'); }
+    else void this.execute(id, this.generation);
+  }
+  private decide(approved: boolean, reply: string) {
+    const pending = this.confirmation; if (!pending) return;
+    this.confirmation = undefined; this.attempt = 0; this.transition('EXECUTE'); pending.resolve({ approved, reply });
+  }
+  private answer(text: string) {
+    this.lastSay = this.ports.clock().getTime(); this.remember('assistant', text); this.send({ type: 'say', text });
+  }
+  private ask(text: string) { this.send({ type: 'clarify', question: text }); this.answer(text); }
+  private fallback() {
+    if (this.stage === 'CLARIFY') {
+      const fields = this.missing().map((key) => this.language === 'fr' ? ({ origin: 'votre lieu de départ', destination: 'votre destination', deadline: 'votre heure limite d’arrivée' })[key] : ({ origin: 'your starting point', destination: 'your destination', deadline: 'your arrival cutoff' })[key]);
+      return this.language === 'fr' ? `Pouvez-vous préciser ${fields.join(' et ')} ?` : `Could you provide ${fields.join(' and ')}?`;
+    }
+    if (this.stage === 'CONFIRM') return say('confirm-again', {}, this.language);
+    if (this.stage === 'CHOOSE') return say('choose-again', {}, this.language);
+    return this.language === 'fr' ? 'Votre demande est toujours en cours. Vous pouvez dire arrêter.' : 'Your request is still in progress. You can say stop.';
+  }
+  private async interpretTurn(transcript: string) {
+    const generation = this.generation, stage = this.stage, version = this.turnVersion;
+    const controller = new AbortController(); this.turnController = controller;
+    let result: TurnResult;
+    try {
+      result = await this.limited((signal) => this.ports.converse({ transcript, stage, language: this.language, trip: { ...this.trip }, missing: this.missing(), options: this.options, confirmation: this.confirmation ? { summary: this.confirmation.summary, ...this.confirmation.details } : undefined, history: [...this.history], attempt: this.attempt, now: this.ports.clock(), signal }), 20_500, controller.signal);
+    } catch { result = { intent: 'unclear', confidence: 0, reply: this.fallback() }; }
+    finally { if (this.turnController === controller) this.turnController = undefined; }
+    if (!this.active(generation) || this.stage !== stage || this.turnVersion !== version || controller.signal.aborted) return;
+    if (result.intent === 'stop' && result.confidence >= .65) { this.stop(); return; }
+    if (stage === 'CONFIRM') {
+      const uncertain = /\b(euh|maybe|perhaps|unsure|not|non|no|pas|attends|demain|tomorrow)\b/i.test(transcript);
+      if (result.intent === 'confirm' && result.confidence >= .9 && !uncertain && !Object.keys(result.trip_patch ?? {}).length) { this.decide(true, transcript); return; }
+      if (['decline', 'correct'].includes(result.intent) && result.confidence >= .65) { this.answer(result.reply); this.decide(false, transcript); return; }
+      if (result.intent === 'confirm') result = { intent: 'unclear', reply: this.fallback(), confidence: 0 };
+    }
+    if (['CLARIFY', 'CHOOSE', 'UNDERSTAND', 'RESEARCH', 'PRESENT'].includes(stage) && ['provide_info', 'correct'].includes(result.intent) && result.confidence >= .65 && result.trip_patch && Object.keys(result.trip_patch).length) {
+      const before = this.trip;
+      this.trip = TripSchema.partial().parse({ ...this.trip, ...result.trip_patch }); this.attempt = 0;
+      const changedRoute = ['origin', 'destination', 'deadline'].some((key) => before[key as keyof Trip] !== undefined && before[key as keyof Trip] !== this.trip[key as keyof Trip]);
+      const next = ++this.generation;
+      if (changedRoute || !this.research) { this.flow.abort(); this.flow = new AbortController(); this.research = this.startResearch(transcript, next); void this.research.catch(() => {}); }
+      this.options = [];
+      await this.plan(transcript, next, result.reply); return;
+    }
+    if (stage === 'CHOOSE' && result.intent === 'choose' && result.confidence >= .65 && result.option_id && this.options.some((option) => option.id === result.option_id)) { this.answer(result.reply); this.select(result.option_id); return; }
+    ++this.attempt;
+    if (stage === 'CLARIFY') this.ask(result.reply); else this.answer(result.reply);
+  }
+  private async plan(transcript: string, generation: number, question?: string) {
+    try {
+      if (this.missing().length) {
         this.transition('CLARIFY');
-        const key = missing[0] === 'origin' ? 'clarify-origin' : missing[0] === 'destination' ? 'clarify-destination' : 'clarify-deadline';
-        const question = say(key, {}, this.profile!.language);
-        this.send({ type: 'clarify', question });
-        this.speak(key, {});
+        if (question) this.ask(question); else await this.interpretTurn(transcript);
         return;
       }
       const trip = TripSchema.parse(this.trip);
@@ -267,7 +332,7 @@ export class VoilaSession {
         confirm: (summary, details) => {
           if (!current()) return Promise.resolve({ approved: false, reply: 'Stopped' });
           if (this.confirmation) throw new Error('A confirmation is already pending.');
-          const decision = new Promise<{ approved: boolean; reply: string }>((resolve) => { this.confirmation = { summary, resolve }; });
+          const decision = new Promise<{ approved: boolean; reply: string }>((resolve) => { this.confirmation = { summary, details, resolve }; });
           this.transition('CONFIRM'); this.send({ type: 'confirm', summary }); this.speak('confirm', { trip, option, details, now: this.ports.clock() });
           return decision;
         },

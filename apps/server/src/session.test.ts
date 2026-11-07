@@ -17,6 +17,7 @@ function setup(overrides: Partial<SessionPorts> = {}) {
   const events: ServerEvent[] = [];
   const ports = {
     understand: vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip, missing: [] }),
+    converse: vi.fn<SessionPorts['converse']>().mockRejectedValue(new Error('offline')),
     trafficH: vi.fn<SessionPorts['trafficH']>().mockResolvedValue(disruption),
     linkup: vi.fn<SessionPorts['linkup']>().mockResolvedValue({ corroboration: [], extraOptions: [] }),
     runBooking: vi.fn<SessionPorts['runBooking']>().mockResolvedValue(completed),
@@ -243,8 +244,9 @@ describe('VoilaSession', () => {
   });
   it('runs research while clarifying and merges the reply without restarting research', async () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['trafficH']>>>();
-    const understanding = vi.fn<SessionPorts['understand']>().mockResolvedValueOnce({ trip: { origin: trip.origin, destination: trip.destination }, missing: ['deadline'] }).mockResolvedValueOnce({ trip, missing: [] });
-    const s = setup({ understand: understanding, trafficH: vi.fn(() => pending.promise) });
+    const understanding = vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip: { origin: trip.origin, destination: trip.destination }, missing: ['deadline'] });
+    const converse = vi.fn<SessionPorts['converse']>().mockResolvedValueOnce({ intent: 'unclear', confidence: .1, reply: 'What time is your flight?' }).mockResolvedValueOnce({ intent: 'provide_info', confidence: .95, trip_patch: { deadline: trip.deadline }, reply: 'Thank you.' });
+    const s = setup({ understand: understanding, converse, trafficH: vi.fn(() => pending.promise) });
     await s.start();
     expect(s.session.stage).toBe('CLARIFY');
     expect(s.ports.trafficH).toHaveBeenCalled(); expect(s.ports.linkup).toHaveBeenCalled();
@@ -252,7 +254,7 @@ describe('VoilaSession', () => {
     expect(s.session.stage).toBe('CLARIFY');
     expect(s.events.some((e) => e.type === 'options')).toBe(false);
     await s.choose('My flight is at 21h');
-    expect(understanding.mock.calls[1]![0].previous).toMatchObject({ origin: trip.origin, destination: trip.destination, luggage: 0 });
+    expect(converse.mock.calls[1]![0].trip).toMatchObject({ origin: trip.origin, destination: trip.destination, luggage: 0 });
     expect(s.session.stage).toBe('CHOOSE');
     expect(s.ports.trafficH).toHaveBeenCalledTimes(1);
   });

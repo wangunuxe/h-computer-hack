@@ -1,0 +1,94 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type ServerEvent, type Trip } from '@voila/shared';
+import { VoilaSession, type SessionPorts } from './session.js';
+import type { TurnResult } from './converse.js';
+import type { BookingInput } from './booking.js';
+
+const trip: Trip = { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T21:00:00+01:00', guide_dog: true, passengers: 1, luggage: 0 };
+const profile = { name: 'Karim', phone: '+33612345678', email: 'karim@example.com', guide_dog: true, language: 'fr' };
+const result = (value: Partial<TurnResult>): TurnResult => ({ intent: 'unclear', reply: 'Quel trajet choisissez-vous ?', confidence: .95, ...value });
+const sessions: VoilaSession[] = [];
+async function flush() { for (let i = 0; i < 100; i++) await Promise.resolve(); }
+function setup(overrides: Partial<SessionPorts> = {}) {
+  const events: ServerEvent[] = [];
+  const ports = {
+    understand: vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip, missing: [] }),
+    converse: vi.fn<SessionPorts['converse']>().mockResolvedValue(result({})),
+    trafficH: vi.fn<SessionPorts['trafficH']>().mockResolvedValue({ status: 'normal', mode: 'live', summary: 'Normal', cause: '', source: 'https://www.ratp.fr', recorded: false }),
+    linkup: vi.fn<SessionPorts['linkup']>().mockResolvedValue({ corroboration: [], extraOptions: [] }),
+    runBooking: vi.fn<SessionPorts['runBooking']>().mockImplementation(() => new Promise(() => {})), logger: { error: vi.fn() }, shuttlePublicUrl: () => 'https://shuttle.example', ...overrides,
+  };
+  const session = new VoilaSession((event) => events.push(event), ports); sessions.push(session);
+  const start = async () => { session.handle({ type: 'hello', profile, gps: null, scenario: 'live' }); session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); };
+  const reply = async (text: string) => { session.handle({ type: 'user_reply', text }); await flush(); };
+  return { session, ports, events, start, reply };
+}
+beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00+01:00')); });
+afterEach(() => { sessions.splice(0).forEach((session) => session.dispose()); vi.useRealTimers(); });
+describe('contextual conversation routing', () => {
+  it('keeps ordinal selection instant without calling Gemini', async () => {
+    const s = setup(); await s.start(); await s.reply('2'); expect(s.session.stage).toBe('DONE'); expect(s.ports.converse).not.toHaveBeenCalled();
+  });
+  it.each(['le moins cher', 'le plus rapide', 'celui qui accepte le chien'])('routes semantic choice %s through Gemini', async (text) => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'choose', option_id: 'gare-du-nord-taxi' })) }); await s.start(); await s.reply(text);
+    expect(s.ports.converse).toHaveBeenCalledOnce(); expect(s.session.stage).toBe('DONE'); expect(s.ports.runBooking).not.toHaveBeenCalled();
+  });
+  it.each(['le taxi accepte mon chien ?', 'does the shuttle accept my dog?'])('answers option questions without choosing: %s', async (text) => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply: 'Les deux taxis acceptent les chiens guides.' })) }); await s.start(); await s.reply(text);
+    expect(s.session.stage).toBe('CHOOSE'); expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Les deux taxis acceptent les chiens guides.' });
+  });
+  it('merges clarification patches, asks all remaining fields, and resumes planning', async () => {
+    const converse = vi.fn<SessionPorts['converse']>().mockResolvedValueOnce(result({ reply: 'D’où partez-vous et à quelle heure devez-vous arriver ?' }))
+      .mockResolvedValueOnce(result({ intent: 'provide_info', trip_patch: { origin: trip.origin }, reply: 'À quelle heure devez-vous arriver ?' }))
+      .mockResolvedValueOnce(result({ intent: 'provide_info', trip_patch: { deadline: trip.deadline }, reply: 'Merci.' }));
+    const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { destination: 'CDG' }, missing: ['origin', 'deadline'] }), converse }); await s.start();
+    expect(converse.mock.calls[0]![0].missing).toEqual(['origin', 'deadline']); expect(s.session.stage).toBe('CLARIFY');
+    await s.reply('Je suis gare du Nord'); expect(s.events.at(-1)).toEqual({ type: 'say', text: 'À quelle heure devez-vous arriver ?' });
+    await s.reply('à 21h'); expect(s.session.stage).toBe('CHOOSE'); expect(converse.mock.calls[2]![0].history.some((turn) => turn.text === 'Je suis gare du Nord')).toBe(true);
+  });
+  it.each([
+    ['oui vas-y c’est bon', 'confirm', .99, true], ['euh je sais pas', 'confirm', .99, undefined],
+    ['maybe', 'confirm', .5, undefined], ['attends, c’est pour demain', 'correct', .99, false], ['pas maintenant', 'decline', .99, false],
+    ['quel est le prix ?', 'question', .99, undefined],
+  ] as const)('safely interprets confirmation %s', async (text, intent, confidence, approved) => {
+    const decision = vi.fn(); const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent, confidence })), runBooking: async (input) => { decision(await input.confirm('Shuttle', { pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR' })); return new Promise(() => {}); } });
+    await s.start(); await s.reply('shuttle'); await s.reply(text);
+    if (approved === undefined) { expect(decision).not.toHaveBeenCalled(); expect(s.session.stage).toBe('CONFIRM'); }
+    else expect(decision).toHaveBeenCalledWith({ approved, reply: text });
+    expect(s.ports.converse).toHaveBeenCalledWith(expect.objectContaining({ confirmation: expect.objectContaining({ pickup_date: '2027-01-15', total_price: 65 }) }));
+  });
+  it.each(['oui', 'non'])('keeps exact confirmation %s instant', async (text) => {
+    const decision = vi.fn(); const s = setup({ runBooking: async (input) => { decision(await input.confirm('Shuttle')); return new Promise(() => {}); } }); await s.start(); await s.reply('shuttle'); await s.reply(text);
+    expect(s.ports.converse).not.toHaveBeenCalled(); expect(decision).toHaveBeenCalledWith({ approved: text === 'oui', reply: text });
+  });
+  it('re-runs research and feasibility after a route correction', async () => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'correct', trip_patch: { destination: 'Orly' } })) }); await s.start(); await s.reply('plutôt Orly');
+    expect(s.ports.trafficH).toHaveBeenCalledTimes(2); expect(s.session.stage).toBe('CHOOSE'); expect(s.events.filter((e) => e.type === 'options').at(-1)).toEqual({ type: 'options', items: [] });
+  });
+  it.each(['RESEARCH', 'EXECUTE', 'HANDOFF', 'AWAIT_PAYMENT'] as const)('answers status in %s without changing flow', async (stage) => {
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply: 'Votre demande est en cours.' })) }); await s.start(); s.session.stage = stage; await s.reply('où en est-on ?');
+    expect(s.session.stage).toBe(stage); expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Votre demande est en cours.' }); expect(s.ports.runBooking).not.toHaveBeenCalled();
+  });
+  it('honours model stop and cancels a pending booking', async () => {
+    let booking!: BookingInput; const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'stop' })), runBooking: async (input) => { booking = input; return new Promise(() => {}); } });
+    await s.start(); await s.reply('shuttle'); await s.reply('je voudrais tout arrêter'); expect(s.session.stage).toBe('LISTEN'); expect(booking.signal?.aborted).toBe(true);
+  });
+  it('times out an unresponsive model without approving or altering the booking flow', async () => {
+    const decision = vi.fn(); const s = setup({ converse: vi.fn(() => new Promise(() => {})), runBooking: async (input) => { decision(await input.confirm('Shuttle')); return new Promise(() => {}); } });
+    await s.start(); await s.reply('shuttle'); await s.reply('euh'); await vi.advanceTimersByTimeAsync(20_500);
+    expect(s.session.stage).toBe('CONFIRM'); expect(decision).not.toHaveBeenCalled(); expect(s.events.at(-1)?.type).toBe('say');
+  });
+  it('ignores a late model confirmation after stop', async () => {
+    let resolve!: (value: TurnResult) => void; const decision = vi.fn();
+    const s = setup({ converse: () => new Promise((r) => { resolve = r; }), runBooking: async (input) => { decision(await input.confirm('Shuttle')); return new Promise(() => {}); } });
+    await s.start(); await s.reply('shuttle'); await s.reply('vas-y alors'); s.session.handle({ type: 'stop' }); resolve(result({ intent: 'confirm' })); await flush();
+    expect(s.session.stage).toBe('LISTEN'); expect(decision).toHaveBeenCalledExactlyOnceWith({ approved: false, reply: 'Stopped' });
+  });
+  it('clears previous conversation history when starting another trip', async () => {
+    const s = setup(); await s.start(); await s.reply('ancienne question ?'); await s.reply('1');
+    s.session.handle({ type: 'final_transcript', text: 'Nouveau trajet' }); await flush(); await s.reply('nouvelle question ?');
+    const history = s.ports.converse.mock.calls.at(-1)![0].history;
+    expect(history).toHaveLength(6); expect(history.some((turn) => turn.text === 'ancienne question ?')).toBe(false);
+    expect(history.some((turn) => turn.text === 'Nouveau trajet')).toBe(true);
+  });
+});

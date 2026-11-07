@@ -402,17 +402,18 @@ describe('VoilaSession', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Still working. One moment.' });
   });
-  it('backs off EXECUTE heartbeats to fifteen seconds after the first at four seconds', async () => {
+  it.each(['fr', 'en'])('backs off unprefixed EXECUTE heartbeats in %s', async (language) => {
     const s = setup({ runBooking: () => new Promise(() => {}) });
-    await s.start(); await s.choose();
-    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text.includes('Still working. One moment.'));
+    s.hello(language); s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
+    const text = language === 'fr' ? 'Je continue, un instant.' : 'Still working. One moment.';
+    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text === text);
     await vi.advanceTimersByTimeAsync(3999); expect(heartbeats()).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1); expect(heartbeats()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(14_999); expect(heartbeats()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1); expect(heartbeats()).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(15_000); expect(heartbeats()).toHaveLength(3);
     const spoken = heartbeats().map((event) => event.type === 'say' ? event.text : '');
-    expect(spoken[0]).not.toBe(spoken[1]); expect(spoken[1]).not.toBe(spoken[2]);
+    expect(spoken).toEqual(Array(3).fill(text));
     s.session.handle({ type: 'stop' });
     s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
     await vi.advanceTimersByTimeAsync(4000); expect(heartbeats()).toHaveLength(4);

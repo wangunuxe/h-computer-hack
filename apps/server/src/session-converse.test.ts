@@ -163,6 +163,12 @@ describe('contextual conversation routing', () => {
     for (let i = 0; i < 3; i++) { await s.reply('euh'); await vi.advanceTimersByTimeAsync(20_500); const event = s.events.at(-1); if (event?.type === 'say') replies.push(event.text); }
     expect(new Set(replies).size).toBe(3); expect(s.session.stage).toBe('CHOOSE');
   });
+  it.each(['fr', 'en'])('lowercases a repeated answer after the comma in %s', async (language) => {
+    const reply = language === 'fr' ? 'Voici les prix.' : 'Here are the prices.';
+    const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply })) }); await s.start(language);
+    await s.reply('prix ?'); await s.reply('prix ?');
+    expect(s.events.at(-1)).toEqual({ type: 'say', text: language === 'fr' ? 'Autrement dit, voici les prix.' : 'In other words, here are the prices.' });
+  });
   it('does not select a journey on bare hesitation even if a model overstates confidence', async () => {
     const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'choose', option_id: 'gare-du-nord-taxi', confidence: 1 })) }); await s.start(); await s.reply('euh');
     expect(s.session.stage).toBe('CHOOSE'); expect(s.ports.runBooking).not.toHaveBeenCalled();

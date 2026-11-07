@@ -160,7 +160,7 @@ export class VoilaSession {
     this.lastHeartbeat = -Infinity; this.stage = stage; this.send({ type: 'stage', stage });
   }
   private speak<K extends keyof NarrationParams>(key: K, params: NarrationParams[K]) {
-    this.answer(say(key, params, this.profile?.language ?? 'en'));
+    this.answer(say(key, params, this.profile?.language ?? 'en'), ['still-working', 'booking-page', 'research-started'].includes(key));
   }
   private active(generation: number) { return generation === this.generation && !this.flow.signal.aborted; }
   private cancel() {
@@ -247,8 +247,8 @@ export class VoilaSession {
     const pending = this.confirmation; if (!pending) return;
     this.confirmation = undefined; this.attempt = 0; this.transition('EXECUTE'); pending.resolve({ approved, reply });
   }
-  private answer(text: string) {
-    if (text === this.lastText) text = `${this.language === 'fr' ? 'Autrement dit, ' : 'In other words, '}${text}`;
+  private answer(text: string, progress = false) {
+    if (!progress && text === this.lastText) text = `${this.language === 'fr' ? 'Autrement dit, ' : 'In other words, '}${text.charAt(0).toLocaleLowerCase(this.language) + text.slice(1)}`;
     this.lastText = text;
     this.lastSay = this.ports.clock().getTime(); this.remember('assistant', text); this.send({ type: 'say', text });
   }

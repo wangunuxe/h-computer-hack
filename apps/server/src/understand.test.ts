@@ -9,6 +9,11 @@ const clientWith = (value: unknown) => ({ models: { generateContent: vi.fn<Under
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe('understand', () => {
+  it('keeps a mixed spoken/literal email out of Gemini while preserving the route', async () => {
+    const client = clientWith({ trip: {} });
+    await understand({ transcript: 'my email is anna at gmail.com, from Gare du Nord to CDG 2E', profile, now }, client);
+    const payload = JSON.stringify(client.models.generateContent.mock.calls[0]![0]); expect(payload).not.toMatch(/anna|gmail/); expect(payload).toContain('Gare du Nord to CDG 2E');
+  });
   it('redacts spoken and saved contacts in the actual Gemini request without losing the route', async () => {
     const client = clientWith({ trip: {} });
     await understand({ transcript: "I'm Marie, from Gare du Nord to CDG 2E. Call me on zero six twelve thirty four fifty six seventy eight. My email is marie at gmail dot com. Karim +33612345678 karim@example.com", profile, now }, client);

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { parsePhone, parseEmail, VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 describe('local spoken contact parsers', () => {
+  it.each(['anna at gmail.com', 'anna arobase gmail.com', 'anna.smith at gmail.com', 'anna point smith arobase gmail.com', 'anna@gmail dot com', 'anna at example dot co.uk'])('redacts mixed spoken/literal email %s', (email) => {
+    const text = `my email is ${email}, from Gare du Nord to CDG 2E`;
+    const safe = redactContactText(text); expect(safe).toContain('[email]'); expect(safe).not.toContain('anna'); expect(safe).not.toContain('gmail'); expect(safe).toContain('Gare du Nord to CDG 2E');
+  });
   it.each([
     ['Call me on zero six twelve thirty four fifty six seventy eight, take me from Gare du Nord to CDG 2E', 'zero six twelve'],
     ['Call me on zero six twelve, take me from Gare du Nord to CDG 2E', 'zero six twelve'],

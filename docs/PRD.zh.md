@@ -76,7 +76,7 @@ RER B 是巴黎市区去 CDG 机场唯一的铁路主干线，经常在几乎没
 
 | 角色 | 说明 | 是否付费 |
 | - | - | - |
-| 终端用户 | 视障/低视力旅客（主要）；以及老年、运动障碍、不懂法语的用户 | 假设：核心功能免费，见 §14 |
+| 终端用户 | 视障/低视力旅客（主要）；以及老年、运动障碍、不懂法语的用户 | 用户付费（B2C），见 §14 |
 | 照护者/家属 | 接收摘要或共享的预订卡片，必要时可以被叫来帮忙 | 否 |
 | 合作方（B2B2C，假设） | 希望在交通中断时提供协助的交通运营商、机场、航司、旅行保险、残障协会 | 待验证 |
 
@@ -171,7 +171,7 @@ RER B 是巴黎市区去 CDG 机场唯一的铁路主干线，经常在几乎没
 | FR-20 | 在选定网站上启动 H agent，task 和 `instructions` 中包含：行程、用户档案、导盲犬备注，以及"绝不付款；到付款页时调用 `handoff_payment`" | P0 |
 | FR-21 | 流式读取 `changes`，把 `policy_event.content` 转成简短的语音进度 | P0 |
 | FR-22 | 提交预订前调用自定义工具 `confirm_with_user(summary)`；摘要包含日期、时间、地址、价格、导盲犬备注 | P0 |
-| FR-23 | 自定义工具 `handoff_payment(amount, merchant, summary)`：后端读取当前页面 URL 推送到手机，agent 随后等待 | P0 |
+| FR-23 | 自定义工具 `handoff_payment`：demo 传预订号，后端查出仿真站创建的 Checkout URL；真实站传 `payment_url`，后端校验域名（如 `checkout.stripe.com`）后推送手机；agent 随后等待 | P0 |
 | FR-24 | 用 `answer_format` 返回结构化结果：`{ref, pickup_time, pickup_point, price, operator_phone, payment_url, guide_dog_status}` | P0 |
 | FR-25 | 导盲犬：有备注栏就写进去；没有就在预订后给商家发邮件或打电话；如实告知确认状态 | P1 |
 | FR-26 | 兜底：遇到反爬挑战、验证码、无车或超时，改走下一个可行方案；每次尝试都限时 | P1 |
@@ -242,10 +242,10 @@ v0.1 在 12 步仿真药房下单上的实测（2026-11-07）：
 - 原生 `<select>` 必须给出完整选项文字；接送站表单有很多下拉框（乘客数、行李数、接送类型），要把选项全文写进站点手册。
 - 接送站流程比药房更长、更难（地址自动补全、日期/时间选择器），预计 20–40 步，**需在仿真克隆站上实测**。
 
-## 14. 商业模式（假设）
+## 14. 商业模式
 
-- **B2B2C（首选）**：合作方按每次协助出行或按席位付费，包括交通运营商与机场（交通中断时为行动不便旅客提供协助）、航司（减少误机）、旅行保险、残障协会。
-- **B2C**：紧急场景免费，日常任务可选订阅。
+- **B2C（已定）**：用户付费，具体定价待验证。
+- **B2B2C（后续可选渠道）**：交通运营商、机场、航司、旅行保险或残障协会合作。
 - 单位成本：agent 几美分 + STT/TTS/搜索，远低于一次人工协助电话。
 - 护城河：本地运营商的站点手册积累 + 交通中断处理逻辑。
 
@@ -258,7 +258,8 @@ v0.1 在 12 步仿真药房下单上的实测（2026-11-07）：
 | 自定义选择器选错日期/时间 | 确认摘要必须包含日期和时间；同时校验结构化结果 |
 | 订单已生成但未付款 | 告知用户；付款链接过期前一直可以继续付；用户放弃则取消订单 |
 | 商家没开通 Apple Pay | 在商家页面上填卡（仍在用户手机上），或在商家提供时选择上车付款 |
-| 上车时导盲犬被拒 | 预订时备注 + 商家明确确认；告知用户确认状态；提醒相关导盲犬通行规定（法律条款待核实） |
+| 上车时导盲犬被拒 | 预订时备注 + 商家明确确认；告知用户确认状态；引用 Loi n°87-588 art. 88 / CASF R241-23（[通行权与拒绝处罚](https://www.service-public.gouv.fr/particuliers/vosdroits/F35787)） |
+| agent 抄错付款 URL（长片段） | demo 按预订号从后端查 URL；真实站由 `payment_url` 传入并校验域名，不假设 API 提供当前页面 URL |
 | 订到车仍误机 | 绝不承诺；说明时间余量；优先推荐最快方案（北站出租车站） |
 | 嘈杂环境识别错误 | 降噪 + Gladia；关键信息（航站楼、时间）要确认；用录音做测试 |
 | 延迟导致冷场 | 每个阶段都播报；追问缺失信息的同时并行调研；`start_url` 直达表单 |
@@ -276,15 +277,15 @@ v0.1 在 12 步仿真药房下单上的实测（2026-11-07）：
 | 周日上午 | 数据流面板、回放、导盲犬跟进、预录备用视频 | 可上台 |
 | 周日下午 | Pitch、排练 | 3 分钟内讲完 |
 
-## 17. 待定问题
+## 17. 已决 / 调研结论
 
-1. 真实站点的 Stripe 账户是否开通了 Apple Pay？付款链接有效期多长？（影响真实世界的叙事，不影响 demo。）
-2. Stripe 托管的 Checkout 在测试模式下，能否在我们不做域名验证、没有 Apple 开发者账号的情况下使用 Apple Pay？（预期可以，周五验证。）
-3. PRIM API 的访问方式（token），以及哪个接口提供 RER B 的中断信息。
-4. Gladia 在高噪音车站环境下的准确率如何？是否需要额外的客户端降噪？
-5. H agent 能否可靠地报告付款页 URL，还是应该由后端从 session 事件中读取？
-6. 法国关于导盲犬乘坐出租车/VTC/接送车的法律依据（以便准确引用）。
-7. 谁来付费（B2B2C 合作方还是用户本人）？
+1. 真实站用 Chauffeur Booking System 跳转 Stripe Checkout；card 支付可包含 Apple Pay，但须商家启用，未下真实订单无法确认；Session 默认 24 h，可设 30 min–24 h（[Stripe](https://docs.stripe.com/payments/checkout/managing-limited-inventory)）。
+2. 托管 Checkout 无需注册域名或 Apple 开发者账号，Stripe 处理商户验证；Safari + Dashboard 启用 Apple Pay + 测试密钥 + iPhone Wallet 真实卡可测试且不扣款，测试卡不能加入 Wallet（[Stripe](https://docs.stripe.com/apple-pay)）。
+3. PRIM 账号 →「Mes jetons d'authentification」→ `apikey` 请求头，默认 5 次/s、1000 次/日；RER B 为 C01743，优先 Messages Info Trafic v2 / Navitia `line_reports`（`line:IDFM:C01743`），备用 `GET /general-message?LineRef=STIF:Line::C01743:`；北站–CDG 由 SNCF 运营，其实时 API 不含 SNCF 媒体发布的信息，必须用 Linkup 交叉核实（[PRIM](https://prim.iledefrance-mobilites.fr/)）。
+4. 无公开车站噪音基准，须录音实测；Gladia live v2 用 `pre_processing.audio_enhancer: true`、`speech_threshold: 0.7`（默认 0.6，测试 0.5–0.8）、`custom_vocabulary`（CDG、2E、Gare du Nord、RER B、G7）、法语；客户端先只开浏览器 `noiseSuppression`（[Gladia](https://docs.gladia.io/api-reference/v2/live/init)）。
+5. agent 可看地址栏，但 API 文档无后端可读的当前 URL 字段，Stripe 长 `#…` 易抄错；demo 由 `handoff_payment` 传预订号、后端查 Checkout URL，真实站传 `payment_url` 并校验域名（[H Agents API](https://docs.hcompany.ai/)）。
+6. Loi n°87-588 art. 88 保障 CMI 持有者携导盲犬进入交通工具及公共场所且不加价；拒绝按 CASF R241-23 属三级违警，个人最高 €450、法人 €2,250（[Service Public](https://www.service-public.gouv.fr/particuliers/vosdroits/F35787)）；MLD-2013-88 记录巴黎出租车 13/30 拒载；Légifrance 原文抓取受阻，不作逐字引用。
+7. **已定：用户付费（B2C）**（[商业模式](#14-商业模式)）。
 
 ## 附录 A：真实站点观察
 

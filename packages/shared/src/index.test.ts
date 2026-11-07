@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BookingSchema, OptionSchema, ProfileSchema, ServerEventSchema, TripSchema, WebEventSchema } from './index.js';
+import { BookingSchema, MonitorEventSchema, MonitorMessageSchema, OptionSchema, ProfileSchema, ServerEventSchema, TripSchema, WebEventSchema } from './index.js';
 
 const profile = { name: 'Karim', phone: '+33123456789', email: 'karim@example.com', guide_dog: true, language: 'fr' };
 const option = { id: 'shuttle', name: 'Airport shuttle', pickup_wait_minutes: 5, journey_minutes: 45, price: 65, guide_dog_status: 'unknown' };
@@ -47,6 +47,30 @@ describe('web events', () => {
   it('accepts an optional demo/live scenario and rejects unknown values', () => {
     for (const scenario of ['demo', 'live']) expect(WebEventSchema.parse({ type: 'hello', profile, gps: null, scenario })).toMatchObject({ scenario });
     expect(WebEventSchema.safeParse({ type: 'hello', profile, gps: null, scenario: 'staging' }).success).toBe(false);
+  });
+});
+
+describe('monitor events', () => {
+  const events = [
+    { type: 'session', name: 'Amina Benali', scenario: 'demo', started_at: '2026-11-07T12:00:00Z' },
+    { type: 'transcript', text: 'Take me to CDG' },
+    { type: 'trip', trip: { origin: 'Gare du Nord', destination: 'CDG 2E' } },
+    { type: 'agent_frame', image: 'data:image/png;base64,abc', url: 'https://shuttle.example', step: 2 },
+    { type: 'agent_metrics', steps: 2, cost_usd: 0.01 },
+    { type: 'agent_view', url: 'https://h.example/view/123' },
+  ];
+  it.each(events)('parses $type', (event) => {
+    expect(MonitorEventSchema.parse(event)).toEqual(event);
+  });
+  it('wraps phone and monitor events in a timestamped session message', () => {
+    const message = { session: 'session-1', at: '2026-11-07T12:00:00Z', event: { type: 'stage', stage: 'LISTEN' } };
+    expect(MonitorMessageSchema.parse(message)).toEqual(message);
+    expect(MonitorMessageSchema.parse({ ...message, event: events[0] })).toEqual({ ...message, event: events[0] });
+  });
+  it('rejects invalid monitor values and malformed envelopes', () => {
+    expect(MonitorEventSchema.safeParse({ type: 'agent_frame', image: '', step: -1 }).success).toBe(false);
+    expect(MonitorEventSchema.safeParse({ type: 'agent_view', url: 'not-a-url' }).success).toBe(false);
+    expect(MonitorMessageSchema.safeParse({ session: '', at: 'not a date', event: {} }).success).toBe(false);
   });
 });
 

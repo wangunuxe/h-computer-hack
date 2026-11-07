@@ -23,6 +23,8 @@ services:
         sync: false
       - key: INTERNAL_CALLBACK_TOKEN
         generateValue: true
+      - key: MONITOR_TOKEN
+        generateValue: true
       - key: SHUTTLE_PUBLIC_URL
         sync: false
       - key: VOILA_SCENARIO

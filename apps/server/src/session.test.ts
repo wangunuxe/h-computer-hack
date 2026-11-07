@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ServerEventSchema, type ServerEvent, type Trip } from '@voila/shared';
+import { ServerEventSchema, type MonitorEvent, type ServerEvent, type Trip } from '@voila/shared';
 import { VoilaSession, type SessionPorts } from './session.js';
 import type { BookingInput } from './booking.js';
 import { presetOptions } from './options.js';
@@ -15,6 +15,7 @@ async function flush() { for (let i = 0; i < 60; i++) await Promise.resolve(); }
 const sessions: VoilaSession[] = [];
 function setup(overrides: Partial<SessionPorts> = {}) {
   const events: ServerEvent[] = [];
+  const observed: (ServerEvent | MonitorEvent)[] = [];
   const ports = {
     understand: vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip, missing: [] }),
     converse: vi.fn<SessionPorts['converse']>().mockRejectedValue(new Error('offline')),
@@ -23,17 +24,56 @@ function setup(overrides: Partial<SessionPorts> = {}) {
     runBooking: vi.fn<SessionPorts['runBooking']>().mockResolvedValue(completed),
     logger: { error: vi.fn() }, shuttlePublicUrl: () => 'https://shuttle.example', ...overrides,
   };
-  const session = new VoilaSession((event) => { ServerEventSchema.parse(event); events.push(event); }, ports);
+  const session = new VoilaSession((event) => { ServerEventSchema.parse(event); events.push(event); }, ports, (event) => observed.push(event));
   sessions.push(session);
   const hello = (language = 'en', gps: { latitude: number; longitude: number } | null = null) => session.handle({ type: 'hello', profile: { ...profile, language }, gps, scenario: 'live' });
   const start = async () => { hello(); session.handle({ type: 'final_transcript', text: 'CDG from Gare du Nord' }); await flush(); };
   const choose = async (text = 'shuttle') => { session.handle({ type: 'user_reply', text }); await flush(); };
-  return { session, events, ports, hello, start, choose };
+  return { session, events, observed, ports, hello, start, choose };
 }
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00+01:00')); });
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it('observes the registered profile, accepted transcripts, and understood trip', async () => {
+    const s = setup();
+    s.hello();
+    expect(s.observed.slice(0, 2)).toEqual([
+      { type: 'session', name: profile.name, scenario: 'live', started_at: '2027-01-15T09:00:00.000Z' },
+      { type: 'stage', stage: 'LISTEN' },
+    ]);
+    s.session.handle({ type: 'final_transcript', text: 'CDG from Gare du Nord' }); await flush();
+    expect(s.observed).toContainEqual({ type: 'transcript', text: 'CDG from Gare du Nord' });
+    expect(s.observed).toContainEqual({ type: 'trip', trip: { ...trip } });
+    s.session.handle({ type: 'user_reply', text: 'The first shuttle' }); await flush();
+    expect(s.observed).toContainEqual({ type: 'transcript', text: 'The first shuttle' });
+  });
+  it('observes every phone event and forwards booking frames, metrics, and agent view', async () => {
+    const s = setup({
+      runBooking: async (input) => {
+        input.onFrame?.({ image: 'data:image/png;base64,abc', url: 'https://shuttle.example/page', step: 3 });
+        input.onMetrics?.({ steps: 3, costUsd: 0.02 });
+        input.onAgentView?.('https://h.example/view/123');
+        await input.confirm('Ready to book');
+        await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: 'Ready' });
+        return completed;
+      },
+    });
+    s.session.handle(null);
+    await s.start();
+    await s.choose();
+    expect(s.session.stage).toBe('CONFIRM');
+    await s.choose('yes');
+    expect(s.session.stage).toBe('AWAIT_PAYMENT');
+    s.session.markPaid(booking.ref);
+    expect(s.session.stage).toBe('DONE');
+    expect(s.observed).toContainEqual({ type: 'agent_frame', image: 'data:image/png;base64,abc', url: 'https://shuttle.example/page', step: 3 });
+    expect(s.observed).toContainEqual({ type: 'agent_metrics', steps: 3, cost_usd: 0.02 });
+    expect(s.observed).toContainEqual({ type: 'agent_view', url: 'https://h.example/view/123' });
+    for (const type of ['error', 'stage', 'say', 'feed', 'options', 'confirm', 'payment_handoff', 'booking_card']) {
+      expect(s.observed.some((event) => event.type === type), `missing ${type}`).toBe(true);
+    }
+  });
   it.each(['demo', 'live'] as const)('starts a new trip from a paid DONE booking, preserving profile and %s scenario', async (scenario) => {
     const understand = vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip, missing: [] });
     const s = setup({ understand });

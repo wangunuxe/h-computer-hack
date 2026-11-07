@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { VoilaSession, type SessionPorts } from './session.js';
 import { SessionRegistry, secureEqual } from './session-registry.js';
 import { createGladiaSession } from './adapters/gladia.js';
+import { MonitorHub } from './monitor.js';
 
 const paymentSchema = z.object({ order_id: z.string().min(1), ref: z.string().min(1), status: z.literal('paid') });
 
@@ -72,8 +73,8 @@ export function createApp({ registry = new SessionRegistry(), token = process.en
   return app;
 }
 
-export function createSessionServer({ port = Number(process.env.PORT ?? 3000), hostname = '0.0.0.0', ports, token }: {
-  port?: number; hostname?: string; ports?: Partial<SessionPorts>; token?: string;
+export function createSessionServer({ port = Number(process.env.PORT ?? 3000), hostname = '0.0.0.0', ports, token, monitorToken = process.env.MONITOR_TOKEN }: {
+  port?: number; hostname?: string; ports?: Partial<SessionPorts>; token?: string; monitorToken?: string;
 } = {}) {
   const clients = new Map<string, WebSocket>();
   const registry = new SessionRegistry(new Map(), ports?.timers);
@@ -81,9 +82,23 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
   const app = createApp({ registry, token });
   const server = serve({ fetch: app.fetch, port, hostname });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  const monitorSockets = new WebSocketServer({ noServer: true, maxPayload: 1024 });
+  const monitor = new MonitorHub();
   server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
     const pathname = url.pathname;
+    if (pathname === '/ws/monitor') {
+      monitorSockets.handleUpgrade(request, socket, head, (ws) => {
+        ws.on('error', () => (ports?.logger ?? console).error('Monitor WebSocket error.'));
+        if (!monitorToken) { ws.close(4403, 'Monitor disabled'); return; }
+        const key = url.searchParams.get('key');
+        if (!key || !secureEqual(key, monitorToken)) { ws.close(4401, 'Invalid monitor key'); return; }
+        const detach = monitor.subscribe(ws, url.searchParams.has('session') ? url.searchParams.get('session')! : undefined);
+        ws.on('message', () => {});
+        ws.on('close', detach);
+      });
+      return;
+    }
     const match = /^\/ws\/session\/([^/]+)$/.exec(pathname);
     if (!match) { socket.destroy(); return; }
     const id = match[1]!;
@@ -99,7 +114,7 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
       const emit = (event: ServerEvent) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
       };
-      const session = existing ?? new VoilaSession(emit, ports);
+      const session = existing ?? new VoilaSession(emit, ports, (event) => monitor.publish(id, event));
       sessions.set(id, session);
       const detach = session.attach(emit);
       ws.on('close', () => {
@@ -118,10 +133,12 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
   const close = async () => {
     registry.dispose();
     for (const client of sockets.clients) client.terminate();
+    for (const client of monitorSockets.clients) client.terminate();
     await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    await new Promise<void>((resolve) => monitorSockets.close(() => resolve()));
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   };
-  return { app, server, sockets, sessions, close };
+  return { app, server, sockets, monitorSockets, monitor, sessions, close };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) createSessionServer();

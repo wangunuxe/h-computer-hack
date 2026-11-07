@@ -19,8 +19,40 @@ export interface BookingInput {
   signal?: AbortSignal;
   onProgress(text: string): void;
   onPage?(page: BookingPage): void;
+  onFrame?(frame: { image: string; url?: string; step: number }): void;
+  onMetrics?(metrics: { steps: number; costUsd: number | null }): void;
+  onAgentView?(url: string): void;
   confirm(summary: string, details?: ConfirmationFields): Promise<{ approved: boolean; reply: string }>;
   onPaymentHandoff(payment: { url: string; amount: number; merchant: string; summary: string }): void | Promise<void>;
+}
+
+const imageContentSchema = z.union([
+  z.string(),
+  z.object({
+    source: z.string(),
+    type: z.enum(['url', 'base64']),
+    mediaType: z.string().nullable().optional(),
+    media_type: z.string().nullable().optional(),
+  }),
+]);
+
+function normalizeImage(value: unknown): string | undefined {
+  const parsed = imageContentSchema.safeParse(value);
+  if (!parsed.success) return undefined;
+  const image = parsed.data;
+  let normalized: string | undefined;
+  if (typeof image === 'string') {
+    if (image.startsWith('https:') || image.startsWith('data:image/')) normalized = image;
+    else normalized = `data:image/png;base64,${image}`;
+  } else if (image.type === 'url') {
+    if (image.source.startsWith('https:')) normalized = image.source;
+  } else if (image.source.startsWith('data:image/')) {
+    normalized = image.source;
+  } else {
+    const mediaType = image.mediaType ?? image.media_type ?? 'image/png';
+    if (/^image\/[a-z0-9.+-]+$/i.test(mediaType)) normalized = `data:${mediaType};base64,${image.source}`;
+  }
+  return normalized?.startsWith('data:') && normalized.length > 1_500_000 ? undefined : normalized;
 }
 
 export async function runBooking(input: BookingInput, client: BookingClient = new HaiAgentsClient()) {
@@ -44,6 +76,7 @@ export async function runBooking(input: BookingInput, client: BookingClient = ne
   let approved = false;
   let steps = 0;
   let costUsd: number | null | undefined;
+  let lastFrameAt = -Infinity;
   let rejectFailure!: (error: unknown) => void;
   const failure = new Promise<never>((_, reject) => { rejectFailure = reject; });
   // Attach a handler even while session creation is still pending.
@@ -111,6 +144,9 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
     const handle = session;
     const work = async () => {
       const envelope = await Promise.race([handle.get(), failure]);
+      if (envelope.agentViewUrl) {
+        try { input.onAgentView?.(envelope.agentViewUrl); } catch { /* Monitor callbacks never affect booking. */ }
+      }
       input.signal?.throwIfAborted();
       const iterator = handle.stream({ tools, timeoutMs: 300_000 });
       try {
@@ -122,8 +158,17 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
           if (event.type === 'AgentEvent') {
             const { kind } = z.object({ kind: z.string() }).parse(event.data);
             if (kind === 'observation_event') {
-              const { metadata } = z.object({ metadata: z.record(z.string(), z.unknown()).optional() }).parse(event.data);
+              const observation = z.object({ metadata: z.record(z.string(), z.unknown()).optional() }).safeParse(event.data);
+              const metadata = observation.success ? observation.data.metadata : undefined;
               observedUrl = typeof metadata?.url === 'string' ? metadata.url : undefined;
+              const image = normalizeImage(metadata?.image);
+              if (image) {
+                const now = Date.now();
+                if (now - lastFrameAt >= 1000) {
+                  lastFrameAt = now;
+                  try { input.onFrame?.({ image, url: observedUrl, step: steps }); } catch { /* Monitor callbacks never affect booking. */ }
+                }
+              }
               let url: URL | undefined;
               try { url = new URL(observedUrl ?? ''); } catch { /* No recognizable browser URL. */ }
               let page: BookingPage | undefined;
@@ -158,6 +203,7 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
             const { metrics } = z.object({ metrics: z.object({ steps: z.number().optional(), totalCost: z.number().nullish() }) }).parse(event.data);
             steps = metrics.steps ?? steps;
             costUsd = metrics.totalCost ?? costUsd;
+            try { input.onMetrics?.({ steps, costUsd: costUsd ?? null }); } catch { /* Monitor callbacks never affect booking. */ }
           }
         }
       } finally {

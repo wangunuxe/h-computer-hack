@@ -8,6 +8,7 @@ const answer = { ref: 'PAS-123', pickup_time: '2027-01-15T12:15:00+01:00', picku
 const stub = 'https://shuttle.example/stub-payment/order-123?mode=no-stripe-key';
 const stripe = 'https://checkout.stripe.com/c/pay/cs_test_123#long-fragment';
 const observation = (url?: string): HaiAgents.SessionEvent => ({ type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', metadata: url ? { url } : {} } });
+const imageObservation = (image: unknown, url?: string): HaiAgents.SessionEvent => ({ type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', metadata: { image, ...(url ? { url } : {}) } } });
 const call = async (tools: readonly Tool[], name: string, args: Record<string, unknown>) => tools.find((item) => item.name === name)!.fn(args);
 const confirmationFields = { pickup_date: '2027-01-15', pickup_time: '12:15', total_price: 65, currency: 'EUR' };
 const confirm = (tools: readonly Tool[]) => call(tools, 'confirm_with_user', { summary: 'Karim to CDG, EUR 65, guide dog', ...confirmationFields });
@@ -38,6 +39,77 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it.each([
+    [{ source: 'https://images.example/frame.png', type: 'url' }, 'https://images.example/frame.png'],
+    [{ source: 'AAAA', type: 'base64', mediaType: 'image/jpeg' }, 'data:image/jpeg;base64,AAAA'],
+    [{ source: 'data:image/webp;base64,AAAA', type: 'base64' }, 'data:image/webp;base64,AAAA'],
+    ['https://images.example/string.png', 'https://images.example/string.png'],
+    ['data:image/png;base64,AAAA', 'data:image/png;base64,AAAA'],
+    ['AAAA', 'data:image/png;base64,AAAA'],
+  ])('normalizes observation images %j', async (image, expected) => {
+    const mock = setup(async function* (tools) {
+      yield imageObservation(image, 'https://shuttle.example/fr/reservation/draft/route');
+      await confirm(tools); yield observation(stub); await handoff(tools);
+    });
+    mock.input.onFrame = vi.fn();
+    await runBooking(mock.input, mock.client);
+    expect(mock.input.onFrame).toHaveBeenCalledWith({ image: expected, url: 'https://shuttle.example/fr/reservation/draft/route', step: 0 });
+  });
+  it('ignores malformed and oversized image values without interrupting booking', async () => {
+    const mock = setup(async function* (tools) {
+      yield imageObservation({ source: 123, type: 'base64' });
+      yield imageObservation(`data:image/png;base64,${'a'.repeat(1_500_000)}`);
+      await confirm(tools); yield observation(stub); await handoff(tools);
+    });
+    mock.input.onFrame = vi.fn();
+    await expect(runBooking(mock.input, mock.client)).resolves.toMatchObject({ booking: { ref: answer.ref } });
+    expect(mock.input.onFrame).not.toHaveBeenCalled();
+  });
+  it('throttles observation frames to one per second', async () => {
+    const now = vi.spyOn(Date, 'now');
+    let current = 10_000;
+    now.mockImplementation(() => current);
+    try {
+      const mock = setup(async function* (tools) {
+        yield imageObservation('first');
+        current += 500;
+        yield imageObservation('second');
+        current += 500;
+        yield imageObservation('third');
+        await confirm(tools); yield observation(stub); await handoff(tools);
+      });
+      mock.input.onFrame = vi.fn();
+      await runBooking(mock.input, mock.client);
+      expect(mock.input.onFrame).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(mock.input.onFrame).mock.calls.map(([frame]) => frame.image)).toEqual([
+        'data:image/png;base64,first', 'data:image/png;base64,third',
+      ]);
+    } finally {
+      now.mockRestore();
+    }
+  });
+  it('reports metrics updates and the agent view URL', async () => {
+    const mock = setup(async function* (tools) {
+      yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 4, totalCost: 0.12 } } };
+      await confirm(tools); yield observation(stub); await handoff(tools);
+    });
+    mock.input.onMetrics = vi.fn();
+    mock.input.onAgentView = vi.fn();
+    await runBooking(mock.input, mock.client);
+    expect(mock.input.onMetrics).toHaveBeenCalledWith({ steps: 4, costUsd: 0.12 });
+    expect(mock.input.onAgentView).toHaveBeenCalledWith('https://h.example/view/123');
+  });
+  it('swallows throwing monitor callbacks without affecting booking', async () => {
+    const mock = setup(async function* (tools) {
+      yield imageObservation('frame');
+      yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 4, totalCost: 0.12 } } };
+      await confirm(tools); yield observation(stub); await handoff(tools);
+    });
+    mock.input.onFrame = () => { throw new Error('frame callback failed'); };
+    mock.input.onMetrics = () => { throw new Error('metrics callback failed'); };
+    mock.input.onAgentView = () => { throw new Error('view callback failed'); };
+    await expect(runBooking(mock.input, mock.client)).resolves.toMatchObject({ booking: { ref: answer.ref } });
+  });
   it.each([{}, { pickup_date: '2027-02-30', pickup_time: '24:00', total_price: '65', currency: 'USD' }])('omits missing or invalid structured confirmation fields without reading the summary: %j', async (fields) => {
     const mock = setup(async function* (tools) {
       await call(tools, 'confirm_with_user', { summary: 'Flight Price: 400 EUR. Time: 23:00', ...fields });

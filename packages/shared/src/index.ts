@@ -81,3 +81,20 @@ export const WebEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('paid') }),
 ]);
 export type WebEvent = z.infer<typeof WebEventSchema>;
+
+export const MonitorEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('session'), name: text, scenario: ScenarioSchema, started_at: z.iso.datetime({ offset: true }) }),
+  z.object({ type: z.literal('transcript'), text }),
+  z.object({ type: z.literal('trip'), trip: TripSchema.partial() }),
+  z.object({ type: z.literal('agent_frame'), image: text, url: z.string().optional(), step: z.number().int().nonnegative() }),
+  z.object({ type: z.literal('agent_metrics'), steps: z.number().int().nonnegative(), cost_usd: z.number().nullable() }),
+  z.object({ type: z.literal('agent_view'), url: z.url() }),
+]);
+export type MonitorEvent = z.infer<typeof MonitorEventSchema>;
+
+export const MonitorMessageSchema = z.object({
+  session: text,
+  at: z.iso.datetime({ offset: true }),
+  event: z.union([ServerEventSchema, MonitorEventSchema]),
+});
+export type MonitorMessage = z.infer<typeof MonitorMessageSchema>;

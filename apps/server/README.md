@@ -74,3 +74,48 @@ response. Keep this file available alongside the repo when running built code.
 `narrate.ts` exports typed `say(key, params, language)` templates; option arrival
 times are spoken in Europe/Paris, prices in EUR, and recorded disruptions are
 explicitly labelled. Unsupported languages fall back to English.
+
+## M4 real understanding and search adapters
+
+`understand({ transcript, profile, now, previous? }, client?)` uses the official
+`@google/genai` SDK and `GEMINI_API_KEY`. `previous` is the earlier `result.trip`.
+It returns `{ trip, missing, notes? }`; passengers default to 1 and guide-dog
+status defaults to the profile, while unknown origin/destination/deadline/luggage
+remain missing. An unspecified “airport” is not silently turned into CDG.
+Flight departure is extracted separately; code subtracts 60 elapsed minutes to
+derive check-in cutoff and labels that assumption in `notes`. Times are serialized
+with Europe/Paris's seasonal offset. The profile's contact details are not sent
+to Gemini. Timeout (8 seconds), invalid output and provider errors have typed
+`UnderstandError.code` values. Inject `UnderstandingClient` for offline tests.
+
+The default model `gemini-3.6-flash` was verified against the authenticated model
+list. `GEMINI_MODEL` can override it, but must select Gemini 3.x or newer.
+SDK 3.0.0 uses `config.thinkingConfig.thinkingLevel: ThinkingLevel.MINIMAL`
+(the enum serializes as uppercase `MINIMAL`), `responseMimeType`,
+`responseJsonSchema`, and `abortSignal`. Real smoke requests accepted this config.
+
+`searchDisruptionAndAlternatives({ query, context?, signal?, ... })` uses
+`LINKUP_API_KEY` and accepts injectable `fetch`, `apiKey`, and `timeoutMs`
+(default 8 seconds). The documented contract is POST
+`https://api.linkup.so/v1/search`, Bearer authentication, and JSON
+`{ q, depth: 'fast', outputType: 'searchResults', maxResults: 5 }`.
+Text results provide `name`, `url`, `content`; image results are ignored.
+Reference: https://docs.linkup.so/pages/documentation/endpoints/search/reference.md
+
+Corroboration preserves sources but is evidence to evaluate, not a claim that a
+disruption is confirmed today. The real smoke returned general travel articles,
+not a dated official disruption confirmation. Only clear matches on the known
+operator/station domains become extra options; their timing/fare values remain
+catalogue estimates, not extracted live quotes or availability. HTTP, parse,
+timeout and abort errors throw so orchestration can choose its fallback.
+
+Run one smoke batch (three utterances) and one search, with keys in the environment:
+
+```sh
+pnpm exec tsx apps/server/src/smoke-adapters.ts gemini
+pnpm exec tsx apps/server/src/smoke-adapters.ts linkup
+```
+
+The search smoke uses a 15-second timeout, prints only the first three snippets
+(400 characters each), and includes the Paris date in its query. No state machine,
+HTTP routes, or live H browser sessions are added by these adapters.

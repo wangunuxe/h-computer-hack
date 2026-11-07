@@ -29,6 +29,9 @@ Endpointing is 0.5 s; on release we send `stop_recording`, then collect final
 `transcript.data.utterance.text` messages until `end_session`/normal closure.
 Unfinalized partials are never submitted. Setup cancellation stops late microphone
 tracks, recording is bounded to 60 s, and finalization is bounded to 10 s.
+Microphone capture starts alongside URL initialization. PCM is buffered (up to
+1 MB) until the Gladia socket opens, then flushed in order. Releasing during setup
+stops capture but preserves the buffered audio and sends `stop_recording` after it.
 
 Official contracts checked:
 - https://docs.gladia.io/api-reference/v2/live/init

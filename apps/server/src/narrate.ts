@@ -1,4 +1,4 @@
-import type { Option } from '@voila/shared';
+import type { Option, Trip } from '@voila/shared';
 import type { BookingPage } from './booking.js';
 
 type Empty = Record<string, never>;
@@ -9,7 +9,7 @@ export interface NarrationParams {
   disruption: { cause: string; recorded: boolean };
   'present-options': { options: readonly Option[]; now: Date };
   'still-working': Empty;
-  confirm: { summary: string };
+  confirm: { trip: Trip; option: Option; summary: string; now: Date };
   'payment-handoff': { merchant: string; amount: number };
   'booking-done': { ref: string };
   stopped: Empty;
@@ -21,6 +21,32 @@ export interface NarrationParams {
   'booking-page': { page: BookingPage };
   'manual-instructions': { id: string; instructions: string };
   'no-feasible-options': { rejected: { name: string; reason: 'too_late' | 'guide_dog_refused' }[] };
+}
+
+function confirmationDetails(summary: string) {
+  const text = summary.replace(/[*_`#]/g, '');
+  const iso = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})\b/.exec(text)?.[0];
+  const instant = iso ? new Date(iso) : undefined;
+  let date = /\b\d{4}-\d{2}-\d{2}\b/.exec(text)?.[0];
+  const labelledTime = /\b(?:pickup(?:\s+time)?|time|heure|prise en charge)\s*[:=-]?\s*(\d{1,2})\s*(?::(\d{2})|h(?:\s*(\d{2}))?)(?!\d)/i.exec(text);
+  let hour = labelledTime ? Number(labelledTime[1]) : undefined;
+  let minute = labelledTime ? Number(labelledTime[2] ?? labelledTime[3] ?? 0) : undefined;
+  if (!labelledTime && instant && Number.isFinite(instant.getTime())) {
+    date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(instant);
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(instant);
+    hour = Number(parts.find((p) => p.type === 'hour')!.value);
+    minute = Number(parts.find((p) => p.type === 'minute')!.value);
+  }
+  if (date) {
+    const value = new Date(`${date}T00:00:00Z`);
+    if (!Number.isFinite(value.getTime()) || value.toISOString().slice(0, 10) !== date) date = undefined;
+  }
+  if (hour === undefined || hour > 23 || minute === undefined || minute > 59) { hour = undefined; minute = undefined; }
+  const currency = /(?:EUR\b|€)\s*(\d+(?:[.,]\d{1,2})?)(?![\d.,])|(?<![\d.,+-])(\d+(?:[.,]\d{1,2})?)\s*(?:EUR\b|€)/gi;
+  const total = /\b(?:total|prix|price|montant)\s*[:=-]?\s*((?:EUR\b|€)\s*\d+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?\s*(?:EUR\b|€))/i.exec(text)?.[1];
+  const amounts = [...new Set([...((total ?? text).matchAll(currency))].map((match) => Number((match[1] ?? match[2])!.replace(',', '.'))))];
+  const price = amounts.length === 1 && Number.isFinite(amounts[0]) ? amounts[0] : undefined;
+  return { date, hour, minute, price };
 }
 
 export function say<K extends keyof NarrationParams>(key: K, params: NarrationParams[K], language: string): string {
@@ -41,7 +67,20 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
       }).join(' ');
     },
     'still-working': () => fr ? 'Je continue, un instant.' : 'Still working. One moment.',
-    confirm: ({ summary }) => fr ? `${summary} Confirmez-vous cette réservation ?` : `${summary} Shall I make this booking?`,
+    confirm: ({ trip, option, summary, now }) => {
+      const { date, hour, minute, price } = confirmationDetails(summary);
+      const parts = [`${option.name}, ${fr ? 'vers' : 'to'} ${trip.destination}`];
+      if (hour !== undefined && minute !== undefined) {
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+        const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+        const day = !date ? '' : date === today ? (fr ? 'aujourd’hui ' : 'today ') : date === tomorrow ? (fr ? 'demain ' : 'tomorrow ') :
+          `${fr ? 'le ' : 'on '}${new Intl.DateTimeFormat(locale, { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${date}T00:00:00Z`))} `;
+        parts.push(fr ? `${day}à ${hour} h${minute ? ` ${minute.toString().padStart(2, '0')}` : ''}` : `${day}at ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`);
+      }
+      if (price !== undefined) parts.push(new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(price));
+      if (trip.guide_dog) parts.push(fr ? 'avec votre chien guide' : 'with your guide dog');
+      return `${parts.join(', ')}. ${fr ? 'Je confirme ?' : 'Shall I confirm?'}`;
+    },
     'payment-handoff': ({ merchant, amount }) => fr ? `${money(amount)} chez ${merchant}. Ouvrez le paiement sur votre téléphone.` : `${money(amount)} with ${merchant}. Open payment on your phone.`,
     'booking-done': ({ ref }) => fr ? `Réservation ${ref}. Voici votre fiche.` : `Booking ${ref}. Here are your details.`,
     stopped: () => fr ? 'J’arrête. Aucune autre action.' : 'Stopped. No further actions.',

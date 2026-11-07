@@ -212,11 +212,13 @@ export class VoilaSession {
     this.bookingController = controller;
     const current = () => this.active(generation) && !controller.signal.aborted;
     try {
+      const option = this.options.find((item) => item.id === id)!;
+      const trip = TripSchema.parse(this.trip);
       const base = publicShuttleUrl(this.ports.shuttlePublicUrl());
       const startUrl = base.pathname === '/' ? new URL('/fr/reservation/', base) : base;
       if (base.searchParams.get('difficulty') === 'easy') startUrl.searchParams.set('difficulty', 'easy');
       const result = await this.ports.runBooking({
-        trip: TripSchema.parse(this.trip), profile: this.profile!, startUrl: startUrl.href, signal: controller.signal,
+        trip, profile: this.profile!, startUrl: startUrl.href, signal: controller.signal,
         onProgress: (text) => {
           if (!current()) return;
           this.send({ type: 'feed', kind: 'agent', text });
@@ -226,7 +228,7 @@ export class VoilaSession {
           if (!current()) return Promise.resolve({ approved: false, reply: 'Stopped' });
           if (this.confirmation) throw new Error('A confirmation is already pending.');
           const decision = new Promise<{ approved: boolean; reply: string }>((resolve) => { this.confirmation = { summary, resolve }; });
-          this.transition('CONFIRM'); this.send({ type: 'confirm', summary }); this.speak('confirm', { summary });
+          this.transition('CONFIRM'); this.send({ type: 'confirm', summary }); this.speak('confirm', { trip, option, summary, now: this.ports.clock() });
           return decision;
         },
         onPaymentHandoff: (payment) => {

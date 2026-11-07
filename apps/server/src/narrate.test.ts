@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { say } from './narrate.js';
 import { presetOptions } from './options.js';
 
+const confirmation = { trip: { origin: 'Gare du Nord', destination: 'CDG', deadline: '2027-01-15T22:00:00+01:00', passengers: 1, luggage: 1, guide_dog: true }, option: presetOptions[2]!, now: new Date('2027-01-15T10:00:00Z') };
+
 describe('say', () => {
   it.each(['route', 'vehicle', 'info', 'payment'] as const)('localizes the %s milestone without raw tool text', (page) => {
     const fr = say('booking-page', { page }, 'fr');
@@ -14,7 +16,7 @@ describe('say', () => {
     const lines = [
       say('acknowledgement', {}, language), say('clarify-deadline', {}, language),
       say('research-started', {}, language), say('disruption', { cause: 'Incident.', recorded: false }, language),
-      say('still-working', {}, language), say('confirm', { summary: 'Taxi, 56 EUR.' }, language),
+      say('still-working', {}, language), say('confirm', { ...confirmation, summary: 'Taxi, 56 EUR.' }, language),
       say('payment-handoff', { merchant: 'Shuttle', amount: 65 }, language),
       say('booking-done', { ref: 'PAS-123' }, language), say('stopped', {}, language),
       say('booking-failed', { reason: 'Timeout.' }, language),
@@ -39,5 +41,20 @@ describe('say', () => {
   it('handles no options and no failure reason without empty or undefined speech', () => {
     expect(say('present-options', { options: [], now: new Date() }, 'fr')).toContain('Aucune option');
     expect(say('booking-failed', {}, 'en')).toBe('Booking failed.');
+  });
+  it('summarizes the booking in French without reading English markdown or contact details', () => {
+    const summary = '**Booking summary:**\n- Date: Saturday 2027-01-15, Time: 20:00 (Paris)\n- Vehicle: Sedan, 63 EUR\n- Total: 65 EUR\n- Contact: karim@example.com\n- Notes: PAY NOW';
+    expect(say('confirm', { ...confirmation, summary }, 'fr')).toBe('Paris Airport Shuttle, vers CDG, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?');
+  });
+  it('supports English, tomorrow and an ISO pickup instant across Paris DST', () => {
+    expect(say('confirm', { ...confirmation, summary: 'Pickup time: 20h30, Date: 2027-01-16. Total: EUR 65.50' }, 'en')).toContain('tomorrow at 20:30, €65.5');
+    const text = say('confirm', { ...confirmation, now: new Date('2027-03-27T23:00:00Z'), summary: 'Pickup: 2027-03-28T01:30:00Z, total 65 €' }, 'fr');
+    expect(text).toContain('aujourd’hui à 3 h 30');
+  });
+  it('omits missing or invalid time/price instead of using deadline, catalogue price or raw text', () => {
+    for (const summary of ['', 'Time: 29:99, total: many EUR', 'Flight departs at 23:00, 60 EUR or 90 EUR']) {
+      const text = say('confirm', { ...confirmation, trip: { ...confirmation.trip, guide_dog: false }, summary }, 'en');
+      expect(text).toBe('Paris Airport Shuttle, to CDG. Shall I confirm?');
+    }
   });
 });

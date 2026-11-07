@@ -15,8 +15,8 @@ for (let n = 0; n < 100; n++) {
   const fr = frNumber(n); numbers.set(fr, String(n)); numbers.set(fr.replace(' et ', ' '), String(n));
   numbers.set(n < 20 ? english[n]! : `${['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'][Math.floor(n / 10)]}${n % 10 ? ` ${english[n % 10]}` : ''}`, String(n));
 }
-export function parsePhone(text: string): string | undefined {
-  let value = normal(text).replace(/^(?:(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est)?|(?:my )?(?:phone(?: number)?|number)(?: is)?|c est|it is)\s+/, '').replace(/\bvingts\b/g, 'vingt');
+function phoneDigits(text: string): { digits: string; international: boolean } | undefined {
+  let value = normal(text).replace(/\bvingts\b/g, 'vingt');
   const international = value.startsWith('+') || value.startsWith('plus ');
   value = value.replace(/^(?:\+|plus\s+)/, '').trim();
   const tokens = value.split(' '); let digits = '';
@@ -32,6 +32,12 @@ export function parsePhone(text: string): string | undefined {
     if (part === undefined || (repeat > 1 && part.length !== 1)) return;
     digits += part.repeat(repeat); i += count;
   }
+  return { digits, international };
+}
+export function parsePhone(text: string): string | undefined {
+  const value = phoneDigits(normal(text).replace(/^(?:(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:my )?(?:phone(?: number)?|number)(?: is)?|c est|it is)\s+/, ''));
+  if (!value) return;
+  const { digits, international } = value;
   if (!international && digits.startsWith('00')) return digits.length >= 10 && digits.length <= 17 ? '+' + digits.slice(2) : undefined;
   if (international) return /^[1-9]\d{7,14}$/.test(digits) ? '+' + digits : undefined;
   return /^\d{10}$/.test(digits) ? digits : undefined;
@@ -45,15 +51,19 @@ export function forgetDetails(text: string): boolean {
   return /^(?:please )?(?:efface mes informations|oublie mes informations|forget my details|delete my details)(?: s il vous plait| please)?$/.test(normal(text));
 }
 export function redactContactText(text: string, profile?: TravelerProfile): string {
-  let safe = text.replace(/\b(je m['’]appelle|mon nom est|my name is)\s+[\p{L}\p{M}'’-]+(?:[ \t]+[\p{L}\p{M}'’-]+)*?(?=[,;.!?]|\s+(?:(?:et|and|avec|with|pour|for|from|at|to|depuis|vers)\b|je (?:suis|vais|dois|pars|veux)\b|j['’]ai\b|i (?:am|need|want|have)\b|i['’]m\b|à\s)|$)/giu, '$1 [name]');
+  let safe = text.replace(/\b(je m['’]appelle|mon nom est|my name is|i['’]m|i am|c['’]est|call me)\s+(?!(?:on|at|in|from|to|going|travelling|traveling|with|without|blind|late|lost|looking|trying|ready|not|le|la|les|un|une|bien|bon|à|a|en|dans|au|aux|avec|sans|gare|airport|station|terminal|CDG|Orly|Paris)\b)[\p{L}\p{M}'’-]+(?:[ \t]+[\p{L}\p{M}'’-]+)*?(?=[,;.!?]|\s+(?:(?:et|and|avec|with|pour|for|from|at|to|depuis|vers|take|emmenez|amenez)\b|je (?:suis|vais|dois|pars|veux)\b|j['’]ai\b|i (?:am|need|want|have)\b|i['’]m\b|à\s)|$)/giu, '$1 [name]');
   for (const value of [profile?.name, profile?.phone, profile?.email]) if (value) safe = safe.replace(new RegExp(`(?<![\\p{L}\\p{N}])${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'giu'), '[contact]');
   safe = safe.replace(/[a-z\d.!#$%&'*+/=?^_`{|}~-]+@[a-z\d.-]+\.[a-z]{2,}/gi, '[email]')
     .replace(/\b[\p{L}\d_+-]+(?:\s+(?:point|dot|tiret|dash|underscore)\s+[\p{L}\d_+-]+)*\s+(?:arobase|at)\s+[\p{L}\d-]+(?:\s+(?:point|dot)\s+[\p{L}\d-]+)+\b/giu, (value) => parseEmail(value) ? '[email]' : value)
     .replace(/(?:\+\d(?:[\s().-]*\d){7,14}|\b\d(?:[\s().-]*\d){9}\b)/g, '[phone]');
-  return safe.replace(spokenPhoneSpan, (value) => parsePhone(value) ? '[phone]' : value);
+  return safe.replace(spokenPhoneSpan, (value: string, offset: number) => {
+    const digits = phoneDigits(value)?.digits;
+    const introduced = /\b(?:call me(?: on| at)?|reach me(?: on| at)?|(?:my )?(?:phone(?: number)?|number)(?: is| s)?|(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:appelez|contactez)(?: moi)?(?: au)?)$/.test(normal(safe.slice(0, offset)));
+    return digits && (digits.length >= 7 || introduced) ? '[phone]' : value;
+  });
 }
 const numberWords = [...numbers.keys(), 'plus', 'double', 'triple'].sort((a, b) => b.length - a.length).map((word) => word.replace(/zero/g, 'z[eé]ro').replace(/ /g, '\\s+')).join('|');
-const spokenPhoneSpan = new RegExp(`(?<![\\p{L}\\p{N}])(?:\\d+|${numberWords})(?:[\\s().-]+(?:\\d+|${numberWords}))*(?![\\p{L}\\p{N}])`, 'giu');
+const spokenPhoneSpan = new RegExp(`(?<![\\p{L}\\p{N}])\\+?(?:\\d+|${numberWords})(?:[\\s().,;:-]+(?:\\d+|${numberWords}))*(?![\\p{L}\\p{N}])`, 'giu');
 type Field = 'name' | 'phone' | 'email' | 'guide_dog';
 const yes = (text: string) => /^(oui|yes|correct|exactement|c est correct|c est ca|oui c est ca|c est bon|that s right)$/.test(normal(text));
 const no = (text: string) => /^(non|no|non merci|no thanks)$/.test(normal(text));

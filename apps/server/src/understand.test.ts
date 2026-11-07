@@ -9,6 +9,13 @@ const clientWith = (value: unknown) => ({ models: { generateContent: vi.fn<Under
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe('understand', () => {
+  it('redacts spoken and saved contacts in the actual Gemini request without losing the route', async () => {
+    const client = clientWith({ trip: {} });
+    await understand({ transcript: "I'm Marie, from Gare du Nord to CDG 2E. Call me on zero six twelve thirty four fifty six seventy eight. My email is marie at gmail dot com. Karim +33612345678 karim@example.com", profile, now }, client);
+    const payload = JSON.stringify(client.models.generateContent.mock.calls[0]![0]);
+    for (const secret of ['Marie', 'marie', profile.name, profile.phone, profile.email, 'zero six twelve']) expect(payload).not.toContain(secret);
+    expect(payload).toContain('Gare du Nord'); expect(payload).toContain('CDG 2E');
+  });
   it('preserves a relative arrival cutoff across midnight without treating it as flight departure', async () => {
     const client = clientWith({ trip: { origin: 'Gare du Nord', destination: 'CDG 2E', deadline: '2026-11-08T00:41:46+01:00' } });
     const result = await understand({ transcript: 'Je dois arriver dans deux heures, trois heures au maximum.', profile, now: new Date('2026-11-07T21:41:46Z') }, client);

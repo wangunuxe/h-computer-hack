@@ -7,7 +7,7 @@ const registries: SessionRegistry[] = [];
 const setup = () => { const registry = new SessionRegistry(new Map(), globalThis); registries.push(registry); return registry; };
 const reserve = (registry: SessionRegistry) => { const issued = registry.issue(); if ('error' in issued) throw new Error(issued.error); return issued; };
 beforeEach(() => { vi.useFakeTimers(); });
-afterEach(() => { for (const registry of registries.splice(0)) registry.dispose(); vi.useRealTimers(); });
+afterEach(() => { for (const registry of registries.splice(0)) registry.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('session lifetimes', () => {
   it('expires unclaimed tokens after two minutes without allowing invalid connects to renew them', async () => {
@@ -33,6 +33,7 @@ describe('session lifetimes', () => {
     expect(registry.connect(issued.id, issued.resume_token)).toBe(false);
   });
   it('returns 503 at one hundred reservations, and recovers capacity after expiry', async () => {
+    vi.stubEnv('TRUST_PROXY', '1');
     const registry = setup(); const app = createApp({ registry });
     for (let i = 0; i < 100; i++) expect((await app.request('/session', { method: 'POST', headers: { 'x-forwarded-for': `198.51.100.${i + 1}` } })).status).toBe(201);
     expect((await app.request('/session', { method: 'POST' })).status).toBe(503);
@@ -60,6 +61,7 @@ describe('session lifetimes', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
   it('limits unclaimed reservations by the first forwarded IP and frees capacity on expiry', async () => {
+    vi.stubEnv('TRUST_PROXY', '1');
     const registry = setup(); const app = createApp({ registry });
     const request = (forwarded: string) => app.request('/session', { method: 'POST', headers: { 'x-forwarded-for': forwarded } });
     for (let i = 0; i < 3; i++) expect((await request('203.0.113.7, 10.0.0.1')).status).toBe(201);

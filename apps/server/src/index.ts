@@ -17,7 +17,7 @@ export function createApp({ registry = new SessionRegistry(), token = process.en
   app.get('/health', (c) => c.json({ status: 'ok' }));
   app.post('/session', (c) => {
     c.header('Cache-Control', 'no-store');
-    let clientIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
+    let clientIp = process.env.TRUST_PROXY === '1' ? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() : undefined;
     if (!clientIp) {
       try { clientIp = getConnInfo(c).remote.address; } catch { clientIp = 'unknown'; }
     }

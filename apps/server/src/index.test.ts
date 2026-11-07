@@ -1,5 +1,5 @@
 import { once } from 'node:events';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { ServerEventSchema, type ServerEvent } from '@voila/shared';
 import { createApp, createSessionServer } from './index.js';
@@ -21,7 +21,7 @@ const ports: Partial<SessionPorts> = {
 };
 async function flush() { for (let i = 0; i < 60; i++) await Promise.resolve(); }
 const cleanup: (() => void | Promise<void>)[] = [];
-afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
+afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.unstubAllEnvs(); });
 
 describe('payment callback', () => {
   it('finds registry-only sessions for authenticated callbacks and marks paid idempotently', async () => {
@@ -53,7 +53,8 @@ describe('payment callback', () => {
 });
 
 describe('real WebSocket round-trip', () => {
-  it('uses the socket address for pending limits when no forwarded IP is supplied', async () => {
+  it.each([undefined, '1'])('uses the socket address without a forwarded header with TRUST_PROXY=%s', async (trustProxy) => {
+    vi.stubEnv('TRUST_PROXY', trustProxy);
     const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports }); cleanup.push(running.close);
     if (!running.server.listening) await once(running.server, 'listening');
     const address = running.server.address();
@@ -61,6 +62,17 @@ describe('real WebSocket round-trip', () => {
     const request = () => fetch(`http://127.0.0.1:${address.port}/session`, { method: 'POST' });
     for (let i = 0; i < 3; i++) expect((await request()).status).toBe(201);
     expect((await request()).status).toBe(429);
+  });
+  it.each([undefined, '0', 'true', '1'])('trusts the first forwarded IP only with TRUST_PROXY=1, configured %s', async (trustProxy) => {
+    vi.stubEnv('TRUST_PROXY', trustProxy);
+    const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports }); cleanup.push(running.close);
+    if (!running.server.listening) await once(running.server, 'listening');
+    const address = running.server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP port');
+    const request = (forwarded: string) => fetch(`http://127.0.0.1:${address.port}/session`, { method: 'POST', headers: { 'x-forwarded-for': forwarded } });
+    for (let i = 0; i < 3; i++) expect((await request('203.0.113.7, 10.0.0.1')).status).toBe(201);
+    expect((await request('203.0.113.8, 10.0.0.1')).status).toBe(trustProxy === '1' ? 201 : 429);
+    expect((await request('203.0.113.7, 10.0.0.9')).status).toBe(429);
   });
   it('validates JSON, streams events, and reattaches an existing session with its stage replayed', async () => {
     const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports, token: 'test' });

@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { parsePhone, parseEmail, VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 describe('local spoken contact parsers', () => {
+  it.each(['mon numéro', 'mon téléphone est', "mon numéro c'est", 'call me on', 'my number is', 'appelez-moi au'])('joins comma-separated phone groups only after the introducer %s', (intro) => {
+    const phone = 'zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit';
+    expect(redactContactText(`${intro} ${phone}, 2 personnes à CDG à 20:45 le 2027-01-15`)).toBe(`${intro} [phone], 2 personnes à CDG à 20:45 le 2027-01-15`);
+  });
+  it('retains comma boundaries without a phone introducer', () => {
+    const text = 'zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit, 2 personnes';
+    expect(redactContactText(text)).toBe(text);
+    expect(redactContactText('06 12 34 56 78, 2 personnes')).toBe('[phone], 2 personnes');
+  });
   it.each(['06:12 34 56 78', '06:12:34 56 78'])('does not protect a temporal prefix of a phone-shaped sequence: %s', (phone) => {
     expect(redactContactText(phone)).toBe('[phone]');
     expect(redactContactText(`Call me on ${phone}, from Gare du Nord to CDG 2E`)).toBe('Call me on [phone], from Gare du Nord to CDG 2E');
@@ -95,6 +104,12 @@ describe('local spoken contact parsers', () => {
   });
 });
 describe('one-field-at-a-time voice profile confirmation', () => {
+  it('collects and confirms comma-separated spoken digits after the local phone question', () => {
+    const flow = new VoiceProfile({ language: 'fr' }, ['phone']);
+    expect(flow.question).toContain('téléphone');
+    expect(flow.reply('zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit').text).toContain('zero, six, un, deux, trois, quatre, cinq, six, sept, huit');
+    expect(flow.profile.phone).toBeUndefined(); expect(flow.reply('oui').complete).toBe(true); expect(flow.profile.phone).toBe('0612345678');
+  });
   it("accepts c'est Marie only in the local name-question context and confirms it before saving", () => {
     const flow = new VoiceProfile({ language: 'fr' }, ['name']);
     expect(flow.question).toContain('nom'); expect(flow.reply("c'est Marie").text).toContain('Marie.'); expect(flow.profile.name).toBeUndefined();

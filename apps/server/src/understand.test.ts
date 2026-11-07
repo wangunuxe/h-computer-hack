@@ -9,6 +9,12 @@ const clientWith = (value: unknown) => ({ models: { generateContent: vi.fn<Under
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe('understand', () => {
+  it('keeps every introduced comma-separated phone group out of Gemini without losing passenger counts', async () => {
+    const client = clientWith({ trip: {} });
+    await understand({ transcript: 'Mon téléphone est zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit, 2 personnes de Gare du Nord à CDG à 20:45', profile, now }, client);
+    const payload = JSON.parse(String(client.models.generateContent.mock.calls[0]![0].contents));
+    expect(payload.transcript).toBe('Mon téléphone est [phone], 2 personnes de Gare du Nord à CDG à 20:45');
+  });
   it('preserves dates, times and passenger counts surrounding a phone in the SDK payload', async () => {
     const client = clientWith({ trip: {} });
     await understand({ transcript: '2027-01-15 2 personnes, à 20:45 06 12 34 56 78, 2 personnes depuis gare du Nord vers CDG', profile, now }, client);

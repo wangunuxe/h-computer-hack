@@ -37,6 +37,29 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it('reports observed booking page changes once, without trusting policy text or unrelated URLs', async () => {
+    const mock = setup(async function* (tools) {
+      yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'policy_event', content: 'Now on the payment page' } };
+      for (const url of [undefined, 'not a URL', 'https://other.example/fr/reservation/draft/info',
+        'https://shuttle.example/fr/reservation/draft/route', 'https://shuttle.example/fr/reservation/draft/route?x=1',
+        'https://shuttle.example/fr/reservation/draft/vehicle', 'https://shuttle.example/fr/reservation/draft/info',
+        'https://shuttle.example/fr/reservation/draft/vehicle', 'https://shuttle.example/fr/reservation/draft/info',
+        'https://shuttle.example/fr/reservation/payment/order-123', stub, stripe,
+      ]) yield observation(url);
+      await confirm(tools); await handoff(tools);
+    });
+    mock.input.onPage = vi.fn();
+    await runBooking(mock.input, mock.client);
+    expect(mock.input.onPage).toHaveBeenCalledTimes(6);
+    expect(vi.mocked(mock.input.onPage).mock.calls.flat()).toEqual(['route', 'vehicle', 'info', 'vehicle', 'info', 'payment']);
+    expect(mock.input.onProgress).toHaveBeenCalledWith('Now on the payment page');
+  });
+  it('cancels the H session if the optional page callback fails', async () => {
+    const mock = setup(async function* () { yield observation('https://shuttle.example/fr/reservation/draft/route'); });
+    mock.input.onPage = () => { throw new Error('Page callback failed'); };
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow('Page callback failed');
+    expect(mock.cancel).toHaveBeenCalledOnce();
+  });
   it('includes the complete playbook and safety rules, configures H and returns a shared booking', async () => {
     const mock = setup();
     const result = await runBooking(mock.input, mock.client);

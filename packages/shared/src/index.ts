@@ -49,7 +49,7 @@ export const StageSchema = z.enum([
   'EXECUTE', 'CONFIRM', 'HANDOFF', 'AWAIT_PAYMENT', 'DONE',
 ]);
 export const ServerEventSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('stage'), stage: StageSchema }),
+  z.object({ type: z.literal('stage'), stage: StageSchema, resume_token: text.optional() }),
   z.object({ type: z.literal('say'), text }),
   z.object({ type: z.literal('feed'), kind: text, text, source: z.url().optional() }),
   z.object({ type: z.literal('clarify'), question: text }),

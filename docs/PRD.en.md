@@ -4,7 +4,7 @@
 
 | Item | Value |
 | - | - |
-| Product | Voilà (voice assistant app for blind and low-vision users) |
+| Product | Voilà (voice assistant for blind and low-vision users; a mobile web page for the hackathon) |
 | Version | v0.2 (hackathon MVP), replaces v0.1 "Voilà Button" (B2B merchant widget) |
 | Date | 2026-11-07 |
 | Status | Draft |
@@ -18,7 +18,7 @@
 
 Voilà is a mobile voice assistant. The user speaks in a noisy place. Voilà checks what is going on, works out which options are still feasible and reads them aloud. It then sends H Company's computer-use agent to book the chosen option on a **third-party website that was never designed for them**. The agent stops at payment and hands the merchant's payment page to the user's phone, so the user pays with Apple Pay. Card details never reach Voilà or the agent.
 
-What changed from v0.1: the product used to be a button that merchants embed on their own site (B2B, merchant-provided site description). It is now the **user's own app**, acting on sites that have not integrated anything. See [Appendix B](#appendix-b-changes-from-v01).
+What changed from v0.1: the product used to be a button that merchants embed on their own site (B2B, merchant-provided site description). It is now the **user's own voice assistant** (a mobile web page for the hackathon), acting on sites that have not integrated anything. See [Appendix B](#appendix-b-changes-from-v01).
 
 ## 2. Hero Scenario: RER B Is Down
 
@@ -101,8 +101,10 @@ The RER B is the only rail trunk line from central Paris to CDG airport, and it 
 
 ## 8. Product Shape & Architecture
 
+**Phone client:** for the hackathon, to avoid the overhead of shipping an app (store review, signing, installs), the phone client is **just a mobile web page**. The user opens a link in the phone's browser (iOS Safari / Android Chrome); nothing to install. The page provides every phone-side feature: big talk button, spoken progress, data stream, payment handoff, booking card. A native app is left for a later version.
+
 ```
-Phone app (PWA): big talk button · spoken progress · data stream · payment handoff · booking card
+Phone web page (opened in browser, no install): big talk button · spoken progress · data stream · payment handoff · booking card
         │ audio stream                                  ▲ payment URL / booking card
         ▼                                               │
                        Voilà backend (orchestrator)
@@ -128,7 +130,7 @@ Every phase is narrated (no more than ~5 s of silence) and shown in the data str
 
 | Option | How | Verdict |
 | - | - | - |
-| **A. Hand off the merchant's payment URL** | The agent reaches the merchant's hosted payment page (the real site redirects to Stripe). The backend takes the URL and the app opens it in an in-app browser (SFSafariViewController / Custom Tabs, or Safari for a PWA). The user pays with Apple Pay if the merchant has enabled it, otherwise with a card on that page. | **Chosen.** Card data never touches Voilà. Hosted pages such as Stripe Checkout don't depend on the agent's browser cookies. |
+| **A. Hand off the merchant's payment URL** | The agent reaches the merchant's hosted payment page (the real site redirects to Stripe). The backend takes the URL and the phone web page opens it in a new browser tab (iOS Safari / Android Chrome). The user pays with Apple Pay if the merchant has enabled it, otherwise with a card on that page. | **Chosen.** Card data never touches Voilà. Hosted pages such as Stripe Checkout don't depend on the agent's browser cookies. |
 | B. Mirror the agent's live view on the phone | Stream the cloud browser to the phone | Rejected: a video stream can't be read by VoiceOver, so it hands the inaccessible page straight back to the blind user. |
 | C. Voilà as merchant of record | User pays Voilà via Stripe/Apple Pay; Voilà pays the merchant with a single-use virtual card (e.g. Stripe Issuing) | Later: clean UX, but Voilà handles funds (compliance, refunds, disputes). Not in the MVP. |
 | D. Pay the driver | Choose cash or pay-on-board if the merchant offers it | Fallback only; can't be assumed. |
@@ -139,14 +141,14 @@ Notes: payment-page links usually expire (merchant-configured). The real site cr
 
 Priority: P0 = MVP must-have; P1 = MVP should-have; P2 = later.
 
-### 9.1 Phone app
+### 9.1 Phone web page
 
 | ID | Requirement | Priority |
 | - | - | - |
 | FR-1 | Full-screen talk button; fully usable with VoiceOver/TalkBack; haptic feedback for start, stop and done | P0 |
 | FR-2 | Audio streamed to Gladia (WebSocket) with `getUserMedia` `noiseSuppression` + `echoCancellation`; live transcript on screen | P0 |
 | FR-3 | TTS for progress, options, confirmation prompts and results; no silent gap > ~5 s | P0 |
-| FR-4 | Payment handoff screen: opens the payment URL in an in-app browser, announces the amount and merchant, returns to Voilà afterwards | P0 |
+| FR-4 | Payment handoff screen: opens the payment URL in a new browser tab, announces the amount and merchant, returns to the Voilà page afterwards | P0 |
 | FR-5 | Booking card: pickup point, time, reference, price, operator phone (one-tap call), guide-dog status; read aloud | P0 |
 | FR-6 | Data stream panel: research steps with sources, agent progress, optional live view | P1 (P0 for demo) |
 | FR-7 | Voice "stop" / corrections at any time | P1 |
@@ -193,7 +195,7 @@ Priority: P0 = MVP must-have; P1 = MVP should-have; P2 = later.
 | Cost | < €0.30 per assisted journey (agent + STT/TTS + search) |
 | Security | Never handle card data; agent forbidden from paying; every booking submission confirmed by voice |
 | Privacy | Location and voice used only for the current task; configurable screenshot retention (`delete_after_min`); profile stored on device where possible |
-| Accessibility | App meets WCAG 2.2 AA and is tested with VoiceOver |
+| Accessibility | Phone web page meets WCAG 2.2 AA and is tested with VoiceOver |
 | Concurrency | Free plan: 3 concurrent H sessions per org; make sure none are left running before the demo |
 
 ## 11. Demo Design
@@ -268,7 +270,7 @@ From the v0.1 experiments on a 12-step mock pharmacy checkout (2026-11-07):
 | Slot | Deliverable | Acceptance |
 | - | - | - |
 | Fri evening | Mock shuttle site (bad UI kept) + Stripe Checkout test mode with Apple Pay; H agent books up to the payment page and calls `handoff_payment` | One command returns a payment URL |
-| Sat morning | PWA: push-to-talk → Gladia (tested on station noise) → transcript; TTS progress | Noisy sentence → correct trip request |
+| Sat morning | Phone web page: push-to-talk → Gladia (tested on station noise) → transcript; TTS progress | Noisy sentence → correct trip request |
 | Sat afternoon | Research phase (PRIM + Linkup + feasibility filter) → options read aloud → voice choice | Options in ≤ 30 s |
 | Sat evening | End-to-end: confirm → handoff → Apple Pay on phone → booking card; fallback path | Full flow ≤ 5 min, 3 runs in a row |
 | Sun morning | Data stream panel, replay, guide-dog follow-up, pre-recorded backup video | Stage-ready |
@@ -298,7 +300,7 @@ From the v0.1 experiments on a 12-step mock pharmacy checkout (2026-11-07):
 
 | v0.1 Voilà Button | v0.2 Voilà |
 | - | - |
-| Merchant embeds a `<script>` button (B2B) | User's own phone app (B2C / B2B2C) |
+| Merchant embeds a `<script>` button (B2B) | User's own voice assistant, a mobile web page for the hackathon (B2C / B2B2C) |
 | Merchant-provided site description, `start_url`, forbidden areas, amount cap (FR-20–24) | Removed; replaced by internal site playbooks + agent never pays |
 | Linkup for quick Q&A | Linkup + PRIM for real-time research and option feasibility |
 | Card filled via H vault (`fill_secret_at`) | Removed; `handoff_payment` → user pays on own phone (Apple Pay) |

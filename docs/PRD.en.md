@@ -76,7 +76,7 @@ The RER B is the only rail trunk line from central Paris to CDG airport, and it 
 
 | Role | Description | Pays? |
 | - | - | - |
-| End user | Blind/low-vision travellers (primary); also elderly, motor-impaired, non-French speakers | Hypothesis: free core, see §13 |
+| End user | Blind/low-vision travellers (primary); also elderly, motor-impaired, non-French speakers | User pays (B2C), see §14 |
 | Caregiver / family | Receives a summary or shared booking card, can be called in | No |
 | Partner (B2B2C, hypothesis) | Transport operators, airports, airlines, travel insurers, disability associations who want to offer assistance during disruptions | To validate |
 
@@ -171,7 +171,7 @@ Priority: P0 = MVP must-have; P1 = MVP should-have; P2 = later.
 | FR-20 | Launch the H agent on the chosen site with task + `instructions`: trip request, user profile, guide-dog note, "never pay; call `handoff_payment` at the payment page" | P0 |
 | FR-21 | Stream `changes`, turn `policy_event.content` into short spoken progress | P0 |
 | FR-22 | Custom tool `confirm_with_user(summary)` before submitting the booking; summary includes date, time, address, price, guide-dog note | P0 |
-| FR-23 | Custom tool `handoff_payment(amount, merchant, summary)`: backend reads the current page URL and pushes it to the phone; the agent then waits | P0 |
+| FR-23 | Custom tool `handoff_payment`: demo passes the booking reference and the backend looks up the mock site's Checkout URL; real sites pass `payment_url`, whose domain the backend validates (e.g. `checkout.stripe.com`) before pushing to the phone; the agent then waits | P0 |
 | FR-24 | Structured result via `answer_format`: `{ref, pickup_time, pickup_point, price, operator_phone, payment_url, guide_dog_status}` | P0 |
 | FR-25 | Guide dog: put it in a comments field if one exists; otherwise send an email or call the operator after booking; report the status honestly | P1 |
 | FR-26 | Fallback: bot challenge, CAPTCHA, no availability or time-out → next feasible option; every attempt is time-boxed | P1 |
@@ -242,10 +242,10 @@ From the v0.1 experiments on a 12-step mock pharmacy checkout (2026-11-07):
 - Native `<select>` needs the full option text; the shuttle form has many selects (passengers, bags, transfer type), so put their full option texts in the site playbook.
 - The shuttle flow is longer and harder than the pharmacy (autocomplete, pickers). Expect 20–40 steps. **To measure on the mock clone.**
 
-## 14. Business Model (hypotheses)
+## 14. Business Model
 
-- **B2B2C (preferred):** partners pay per assisted journey or per seat: transport operators and airports (assistance to travellers with reduced mobility during disruptions), airlines (fewer missed connections), travel insurers, disability associations.
-- **B2C:** free for emergencies, optional subscription for everyday tasks.
+- **B2C (decided):** the user pays; pricing to validate.
+- **B2B2C (optional later channel):** partnerships with transport operators, airports, airlines, travel insurers or disability associations.
 - Unit cost: a few cents of agent time plus STT/TTS/search, far cheaper than a human assistance call.
 - Moat: site playbooks for local operators plus disruption-handling logic.
 
@@ -258,7 +258,8 @@ From the v0.1 experiments on a 12-step mock pharmacy checkout (2026-11-07):
 | Wrong date/time in custom pickers | Read-back confirmation includes date and time; check the structured result |
 | Booking created but not paid | Tell the user; the handoff stays available until the link expires; cancel if abandoned |
 | Merchant hasn't enabled Apple Pay | Card form on the merchant's page (still on the user's phone) or pay-on-board if offered |
-| Guide dog refused at pickup | Note in the booking + explicit operator confirmation; tell the user the status; remind them of the guide-dog access rules (legal reference to verify) |
+| Guide dog refused at pickup | Note in the booking + explicit operator confirmation; tell the user the status; cite Loi n°87-588 art. 88 / CASF R241-23 ([access rights and refusal penalties](https://www.service-public.gouv.fr/particuliers/vosdroits/F35787)) |
+| Agent mis-copies payment URL (long fragment) | Demo looks up the URL by booking reference; real sites pass `payment_url` with domain validation; do not assume the API exposes the current page URL |
 | Missed flight despite booking | Never promise; show margins; offer the fastest option first (station taxi rank) |
 | Voice misrecognition in noise | Noise suppression + Gladia; confirm critical slots (terminal, time); test on recordings |
 | Latency / dead air | Narrate every phase; research while asking for missing slots; direct `start_url` |
@@ -276,15 +277,15 @@ From the v0.1 experiments on a 12-step mock pharmacy checkout (2026-11-07):
 | Sun morning | Data stream panel, replay, guide-dog follow-up, pre-recorded backup video | Stage-ready |
 | Sun afternoon | Pitch, rehearsals | Fits in 3 minutes |
 
-## 17. Open Questions
+## 17. Decisions / Research Findings
 
-1. Does the real site's Stripe account have Apple Pay enabled? How long is its payment link valid? (Affects the real-world story, not the demo.)
-2. Is Apple Pay on Stripe-hosted Checkout available in test mode with no domain verification or Apple developer account on our side? (Expected yes; verify Friday.)
-3. PRIM API access (token) and which endpoint gives RER B disruption messages.
-4. Gladia accuracy on loud station noise; do we need extra client-side denoising?
-5. Can the H agent reliably report the payment page URL, or should the backend read it from session events?
-6. Legal reference for guide-dog access in taxis/VTC/shuttles in France (to cite correctly).
-7. Who pays (B2B2C partner vs user)?
+1. The real site's Chauffeur Booking System redirects to Stripe Checkout; card payments can include Apple Pay if merchant-enabled, unverified without a real order; Session expiry defaults to 24 h, configurable 30 min–24 h ([Stripe](https://docs.stripe.com/payments/checkout/managing-limited-inventory)).
+2. Hosted Checkout needs no domain registration or Apple developer account; Stripe handles merchant validation; test with Safari, Apple Pay enabled in Dashboard, test keys and a real card in iPhone Wallet (not charged); test cards cannot be added to Wallet ([Stripe](https://docs.stripe.com/apple-pay)).
+3. PRIM account → “Mes jetons d'authentification” → `apikey` header; default 5 req/s, 1,000/day; RER B is C01743: primary Messages Info Trafic v2 / Navitia `line_reports` (`line:IDFM:C01743`), fallback `GET /general-message?LineRef=STIF:Line::C01743:`; Nord–CDG is SNCF-operated and its realtime APIs omit information published on SNCF media, so Linkup cross-checking is mandatory ([PRIM](https://prim.iledefrance-mobilites.fr/)).
+4. No public station-noise benchmark: test recordings; Gladia live v2: `pre_processing.audio_enhancer: true`, `speech_threshold: 0.7` (default 0.6, test 0.5–0.8), `custom_vocabulary` (CDG, 2E, Gare du Nord, RER B, G7), French; start with browser `noiseSuppression` only on the client ([Gladia](https://docs.gladia.io/api-reference/v2/live/init)).
+5. The agent can see the address bar, but API docs expose no backend-readable current URL field; Stripe's long `#…` fragment is error-prone to copy; demo `handoff_payment` passes the booking reference for backend Checkout URL lookup; real sites pass `payment_url` with domain validation ([H Agents API](https://hub.hcompany.ai/agents-api/browser/configuration.md)).
+6. Loi n°87-588 art. 88 grants CMI holders guide-dog access to transport and public places without surcharge; refusal under CASF R241-23 is a third-class contravention, up to €450 individual / €2,250 legal entity ([Service Public](https://www.service-public.gouv.fr/particuliers/vosdroits/F35787)); MLD-2013-88 recorded 13/30 Paris taxis refusing; Légifrance text retrieval was blocked, so no verbatim quotation.
+7. **Decided: the user pays (B2C)** ([business model](#14-business-model)).
 
 ## Appendix A: Real-Site Observations
 

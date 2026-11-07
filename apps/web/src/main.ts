@@ -1,5 +1,5 @@
 import { ProfileSchema, ScenarioSchema, ServerEventSchema, type Profile, type WebEvent } from '@voila/shared';
-import { initialState, reduce, transcriptEvent } from './state.js';
+import { initialState, optionEvent, reduce, transcriptEvent } from './state.js';
 import { SpeechQueue } from './speech.js';
 import { Recorder, type Credentials } from './recorder.js';
 import { labels, optionNames, stages } from './labels.js';
@@ -121,7 +121,7 @@ function render() {
   const actions = $('actions'); actions.replaceChildren();
   if (['PRESENT', 'CHOOSE'].includes(state.stage)) {
     actions.append(element('h2', t().options)); const list = element('ul');
-    for (const option of state.options) { const row = element('li'); row.append(button(`${optionNames[option.id]?.[language] ?? option.name} — ${money(option.price)} — ${t().arrival} ${option.pickup_wait_minutes} / ${option.journey_minutes} ${t().minutes} — ${t().dogStatus} : ${t()[option.guide_dog_status]}`, () => send({ type: 'user_reply', text: option.name }))); list.append(row); }
+    for (const option of state.options) { const row = element('li'); row.append(button(`${optionNames[option.id]?.[language] ?? option.name} — ${money(option.price)} — ${t().arrival} ${option.pickup_wait_minutes} / ${option.journey_minutes} ${t().minutes} — ${t().dogStatus} : ${t()[option.guide_dog_status]}`, () => { const event = optionEvent(state.options, option.id); if (event) send(event); })); list.append(row); }
     actions.append(list);
   }
   if (state.stage === 'CONFIRM' && state.summary) { actions.append(element('h2', t().confirm), element('p', state.summary), button(t().yes, () => send({ type: 'user_reply', text: 'oui' })), button(t().no, () => send({ type: 'user_reply', text: 'non' }))); }

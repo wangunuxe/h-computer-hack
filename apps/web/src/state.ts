@@ -22,3 +22,7 @@ export function transcriptEvent(stage: Stage, text: string): WebEvent | undefine
   const trimmed = text.trim();
   return trimmed ? { type: stage === 'LISTEN' ? 'final_transcript' : 'user_reply', text: trimmed } : undefined;
 }
+export function optionEvent(options: State['options'], id: string): WebEvent | undefined {
+  const index = options.findIndex((option) => option.id === id);
+  return index < 0 ? undefined : { type: 'user_reply', text: String(index + 1) };
+}

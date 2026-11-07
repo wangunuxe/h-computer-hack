@@ -70,6 +70,14 @@ describe('preset options and merge', () => {
 });
 
 describe('chooseOption', () => {
+  it('selects either feasible taxi by ordinal even when the taxi-rank name is ambiguous', () => {
+    const options = assessOptions(presetOptions, trip, now).feasible;
+    for (const id of ['gare-du-nord-taxi', 'g7-phone']) {
+      const index = options.findIndex((option) => option.id === id); expect(index).toBeGreaterThanOrEqual(0);
+      expect(chooseOption(String(index + 1), options)).toBe(id);
+    }
+    expect(chooseOption('Gare du Nord taxi rank', options)).toBeNull();
+  });
   it.each(['le premier', 'LA PREMIÈRE', 'first', '1', 'option 1'])('maps %s to the first option', (reply) => {
     expect(chooseOption(reply, presetOptions)).toBe(presetOptions[0]!.id);
   });

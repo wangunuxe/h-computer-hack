@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { initialState, reduce, transcriptEvent, type Stage } from './state.js';
+import { initialState, optionEvent, reduce, transcriptEvent, type Stage } from './state.js';
 describe('event state and routing', () => {
+  it('selects each taxi unambiguously by its current one-based ordinal rather than its name', () => {
+    const taxi = { pickup_wait_minutes: 10, journey_minutes: 45, price: 56, guide_dog_status: 'accepted' as const };
+    const options = [{ ...taxi, id: 'gare-du-nord-taxi', name: 'Gare du Nord taxi rank' }, { ...taxi, id: 'g7-phone', name: 'G7 by phone' }];
+    expect(optionEvent(options, options[0]!.id)).toEqual({ type: 'user_reply', text: '1' });
+    expect(optionEvent(options, options[1]!.id)).toEqual({ type: 'user_reply', text: '2' });
+    expect(optionEvent([...options].reverse(), options[0]!.id)).toEqual({ type: 'user_reply', text: '2' });
+    expect(optionEvent([], options[0]!.id)).toBeUndefined(); expect(optionEvent(options, 'missing')).toBeUndefined();
+  });
   it('reduces stage, options, confirmation, payment, booking, feed and errors', () => {
     let state = reduce(initialState(), { type: 'stage', stage: 'CHOOSE' }); expect(state.stage).toBe('CHOOSE');
     const items = [{ id: 'taxi', name: 'Taxi', pickup_wait_minutes: 5, journey_minutes: 40, price: 65, guide_dog_status: 'unknown' as const }];

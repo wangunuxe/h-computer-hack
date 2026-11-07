@@ -3,19 +3,19 @@ import type { VoilaSession } from './session.js';
 
 export const secureEqual = (a: string, b: string) => timingSafeEqual(createHash('sha256').update(a).digest(), createHash('sha256').update(b).digest());
 type Timers = Pick<typeof globalThis, 'setTimeout' | 'clearTimeout'>;
-type Entry = { token: string; clientIp: string; claimed: boolean; timer?: ReturnType<typeof setTimeout> };
+type Entry = { token: string; clientIp: string; claimed: boolean; gladiaRequests: number[]; timer?: ReturnType<typeof setTimeout> };
 
 export class SessionRegistry {
   private entries = new Map<string, Entry>();
 
-  constructor(readonly sessions = new Map<string, VoilaSession>(), private timers: Timers = globalThis, private capacity = 100) {}
+  constructor(readonly sessions = new Map<string, VoilaSession>(), private timers: Timers = globalThis, private capacity = 100, private clock = () => Date.now()) {}
 
   issue(clientIp = 'unknown') {
     if (this.entries.size >= this.capacity) return { error: 'capacity' as const };
     if ([...this.entries.values()].filter((entry) => !entry.claimed && entry.clientIp === clientIp).length >= 3) return { error: 'client-limit' as const };
     const id = randomBytes(24).toString('base64url');
     const resume_token = randomBytes(32).toString('base64url');
-    this.entries.set(id, { token: resume_token, clientIp, claimed: false });
+    this.entries.set(id, { token: resume_token, clientIp, claimed: false, gladiaRequests: [] });
     this.expireAfter(id, 2 * 60_000);
     return { id, resume_token };
   }
@@ -29,9 +29,14 @@ export class SessionRegistry {
     return true;
   }
 
-  authenticate(id: string, token: string): boolean {
+  authorizeGladia(id: string, token: string): 'unauthorized' | 'limited' | 'allowed' {
     const entry = this.entries.get(id);
-    return !!entry && secureEqual(token, entry.token);
+    if (!entry?.claimed || !secureEqual(token, entry.token)) return 'unauthorized';
+    const now = this.clock();
+    entry.gladiaRequests = entry.gladiaRequests.filter((time) => time > now - 60 * 60_000);
+    if (entry.gladiaRequests.length >= 30 || now - (entry.gladiaRequests.at(-1) ?? -Infinity) < 3000) return 'limited';
+    entry.gladiaRequests.push(now);
+    return 'allowed';
   }
 
   disconnect(id: string) { this.expireAfter(id, 30 * 60_000); }

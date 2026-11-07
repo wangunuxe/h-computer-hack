@@ -21,7 +21,10 @@ export function createApp({ registry = new SessionRegistry(), token = process.en
     let body: unknown;
     try { body = await c.req.json(); } catch { return c.json({ error: 'Invalid JSON' }, 400); }
     const parsed = z.object({ id: z.string(), resume_token: z.string() }).safeParse(body);
-    if (!parsed.success || !registry.authenticate(parsed.data.id, parsed.data.resume_token)) return c.json({ error: 'Unauthorized' }, 401);
+    if (!parsed.success) return c.json({ error: 'Unauthorized' }, 401);
+    const authorization = registry.authorizeGladia(parsed.data.id, parsed.data.resume_token);
+    if (authorization === 'unauthorized') return c.json({ error: 'Unauthorized' }, 401);
+    if (authorization === 'limited') return c.json({ error: 'Speech session rate limit reached' }, 429);
     try { return c.json(await gladia(registry.sessions.get(parsed.data.id)?.language ?? 'fr')); }
     catch { return c.json({ error: 'Speech recognition unavailable' }, 502); }
   });

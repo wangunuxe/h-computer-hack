@@ -19,6 +19,10 @@ Stop cancels recording/speech, and sends `stop` (or retries it on reconnection).
 Payment uses a real new-tab link, never a programmatic popup.
 
 `POST /gladia/session` accepts `{id, resume_token}` and exposes only `{url}`.
+The session must have connected over WebSocket at least once. Initialization
+attempts (including upstream failures) are limited per session to one every 3 s
+and 30 per rolling hour; excess attempts return 429. Reconnecting does not reset
+these limits.
 The API key remains server-side. Audio is raw little-endian signed PCM16, mono,
 16 kHz. Gladia names this encoding `wav/pcm` (a WAV header is not required).
 Endpointing is 0.5 s; on release we send `stop_recording`, then collect final

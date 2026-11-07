@@ -150,7 +150,7 @@ describe('payments', () => {
     }), expect.anything());
     expect(JSON.stringify(create.mock.calls)).not.toContain('attacker.example');
   });
-  it('redirects through an injected gateway and caches the checkout URL', async () => {
+  it('delegates each checkout request to the gateway for session validation', async () => {
     const store = createStore();
     const checkout = vi.fn().mockResolvedValue('https://checkout.stripe.com/c/pay/test_session');
     const app = createApp({ store, env: { STRIPE_SECRET_KEY: 'test', SHUTTLE_PUBLIC_URL: 'https://shuttle.example/' }, payments: { checkout, verify: vi.fn() } });
@@ -159,7 +159,8 @@ describe('payments', () => {
     const first = await app.request('/checkout/' + order.id, { method: 'POST' });
     expect(first.headers.get('location')).toBe('https://checkout.stripe.com/c/pay/test_session');
     await app.request('/checkout/' + order.id, { method: 'POST' });
-    expect(checkout).toHaveBeenCalledExactlyOnceWith(order, 'https://shuttle.example');
+    expect(checkout).toHaveBeenCalledTimes(2);
+    expect(checkout).toHaveBeenLastCalledWith(order, 'https://shuttle.example');
   });
   it('returns a retryable error if the gateway fails', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});

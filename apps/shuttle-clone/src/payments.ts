@@ -10,6 +10,11 @@ export function createPayments(env: NodeJS.ProcessEnv = process.env, client?: St
   return {
     async checkout(order, baseUrl) {
       if (!stripe) return `${baseUrl}/stub-payment/${order.id}?mode=no-stripe-key`;
+      const previousSessionId = order.checkoutSessionId;
+      if (previousSessionId) {
+        const cached = await stripe.checkout.sessions.retrieve(previousSessionId);
+        if (cached.status === 'open' && cached.url) return cached.url;
+      }
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
         payment_method_types: ['card'],
@@ -24,8 +29,9 @@ export function createPayments(env: NodeJS.ProcessEnv = process.env, client?: St
         metadata: { orderId: order.id },
         success_url: `${baseUrl}/fr/reservation/confirmation/${order.id}`,
         cancel_url: `${baseUrl}/fr/reservation/payment/${order.id}?cancelled=1`,
-      }, { idempotencyKey: `checkout-${order.id}` });
+      }, { idempotencyKey: `checkout-${order.id}-${previousSessionId ?? 'initial'}` });
       if (!session.url) throw new Error('Stripe did not return a Checkout URL');
+      order.checkoutSessionId = session.id;
       return session.url;
     },
     verify(rawBody, signature) {

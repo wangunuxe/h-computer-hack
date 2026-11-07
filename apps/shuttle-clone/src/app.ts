@@ -104,7 +104,7 @@ export function createApp({
     if (!order) return c.text('Order not found', 404);
     try {
       const baseUrl = (env.SHUTTLE_PUBLIC_URL || `http://localhost:${env.PORT || 3001}`).replace(/\/$/, '');
-      order.checkoutUrl ??= await payments.checkout(order, baseUrl);
+      order.checkoutUrl = await payments.checkout(order, baseUrl);
       c.header('X-Payment-Mode', env.STRIPE_SECRET_KEY ? 'stripe' : 'fake-local-stub');
       return c.redirect(order.checkoutUrl, 303);
     } catch (error) {

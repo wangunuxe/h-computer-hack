@@ -27,7 +27,7 @@ export interface Draft {
 }
 export interface Order {
   id: string; ref: string; route: Route; vehicle: typeof vehicles[number]; info: Info;
-  paid: boolean; checkoutUrl?: string;
+  paid: boolean; checkoutUrl?: string; checkoutSessionId?: string;
 }
 export function createStore() {
   return { drafts: new Map<string, Draft>(), orders: new Map<string, Order>() };

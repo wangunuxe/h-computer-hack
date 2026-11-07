@@ -24,8 +24,9 @@ Environment:
 
 After the info POST, an unpaid order exists and step 4 counts down two seconds,
 then submits `POST /checkout/:orderId`. This returns HTTP 303 to Checkout or the
-stub. Successful Stripe sessions are cached per order; Stripe also receives an
-idempotency key. Confirmation never trusts its URL to mark an order paid:
+stub. Stripe sessions are retrieved before reuse; only open sessions are reused.
+Expired or completed sessions are replaced with a new idempotency key, while
+retries for the same replacement share a key. Confirmation never trusts its URL to mark an order paid:
 only a signed `checkout.session.completed` with `payment_status: paid` does that.
 Callbacks may repeat on webhook retries; consumers should deduplicate by order id.
 

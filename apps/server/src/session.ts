@@ -340,7 +340,7 @@ export class VoilaSession {
       const startUrl = base.pathname === '/' ? new URL('/fr/reservation/', base) : base;
       if (base.searchParams.get('difficulty') === 'easy') startUrl.searchParams.set('difficulty', 'easy');
       const result = await this.ports.runBooking({
-        trip, profile: this.profile!, startUrl: startUrl.href, signal: controller.signal,
+        trip, journeyMinutes: option.journey_minutes, profile: this.profile!, startUrl: startUrl.href, signal: controller.signal,
         onProgress: (text) => {
           if (!current()) return;
           this.send({ type: 'feed', kind: 'agent', text });
@@ -349,6 +349,7 @@ export class VoilaSession {
         confirm: (summary, details) => {
           if (!current()) return Promise.resolve({ approved: false, reply: 'Stopped' });
           if (this.confirmation) throw new Error('A confirmation is already pending.');
+          summary = say('confirm', { trip, option, details, now: this.ports.clock() }, this.language);
           const decision = new Promise<{ approved: boolean; reply: string }>((resolve) => { this.confirmation = { summary, details: { ...sanitizeConfirmationFields(details), option_name: option.name, guide_dog_status: option.guide_dog_status }, resolve }; });
           this.transition('CONFIRM'); this.send({ type: 'confirm', summary }); this.speak('confirm', { trip, option, details, now: this.ports.clock() });
           return decision;

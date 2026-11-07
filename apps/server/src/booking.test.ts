@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Tool, HaiAgents } from 'hai-agents';
 import { bookingErrorMessage, runBooking, type BookingClient, type BookingInput } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
@@ -38,13 +38,30 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
-  it.each([{}, { pickup_date: '2027-02-30', pickup_time: '24:00', total_price: '65', currency: 'USD' }])('omits missing or invalid structured confirmation fields without reading the summary: %j', async (fields) => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2027-01-15T10:00:00Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+  it('does not ask for approval or hand off payment for a wrong-day pickup', async () => {
+    const mock = setup(async function* (tools) {
+      const result = await call(tools, 'confirm_with_user', { summary: 'Shuttle tomorrow', ...confirmationFields, pickup_date: '2027-01-16' });
+      expect(result).toContain('REJECTED');
+      yield observation(stub); expect(await handoff(tools)).toContain('ERROR');
+    });
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow('without payment handoff');
+    expect(mock.input.confirm).not.toHaveBeenCalled(); expect(mock.input.onPaymentHandoff).not.toHaveBeenCalled(); expect(mock.cancel).toHaveBeenCalledOnce();
+  });
+  it('briefs H with explicit Paris pickup dates and a deadline minus journey-time window', async () => {
+    const mock = setup(); await runBooking(mock.input, mock.client);
+    const params = mock.startSession.mock.calls[0] as unknown as [{ agent: { instructions: string } }];
+    expect(params[0].agent.instructions).toContain('2027-01-15T11:15:00+01:00 through 2027-01-15T15:10:00+01:00');
+    expect(params[0].agent.instructions).toContain('Recommended pickup date: 2027-01-15, time: 11:15');
+  });
+  it.each([{}, { pickup_date: '2027-02-30', pickup_time: '24:00', total_price: '65', currency: 'USD' }])('rejects missing or invalid pickup fields without reading the summary: %j', async (fields) => {
     const mock = setup(async function* (tools) {
       await call(tools, 'confirm_with_user', { summary: 'Flight Price: 400 EUR. Time: 23:00', ...fields });
       yield observation(stub); await handoff(tools);
     });
-    await runBooking(mock.input, mock.client);
-    expect(mock.input.confirm).toHaveBeenCalledWith('Flight Price: 400 EUR. Time: 23:00', { pickup_date: undefined, pickup_time: undefined, total_price: undefined, currency: undefined });
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow('without payment handoff');
+    expect(mock.input.confirm).not.toHaveBeenCalled();
     const params = mock.startSession.mock.calls[0] as unknown as [{ tools: Tool[] }];
     const schema = params[0].tools.find((item) => item.name === 'confirm_with_user')!.inputSchema;
     expect(schema).toMatchObject({ properties: { pickup_date: expect.any(Object), pickup_time: expect.any(Object), total_price: expect.any(Object), currency: expect.any(Object) } });
@@ -90,7 +107,7 @@ describe('H booking runner', () => {
 
   it.each([
     ['2026-11-07T17:46:00Z', '07/11/2026, 18:46:00'],
-    ['2027-07-15T22:30:00Z', '16/07/2027, 00:30:00'],
+    ['2026-07-15T22:30:00Z', '16/07/2026, 00:30:00'],
   ])('includes current Paris date/time at %s and future pickup guidance', async (now, paris) => {
     vi.useFakeTimers();
     try {

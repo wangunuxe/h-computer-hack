@@ -61,7 +61,7 @@ describe('contextual conversation routing', () => {
     const summary = `Private summary: ${profile.name}, ${profile.phone}, ${profile.email}`;
     const s = setup({ runBooking: async (input) => { await input.confirm(summary, { pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR' }); return new Promise(() => {}); } });
     await s.start(); await s.reply('shuttle'); await s.reply('quel est le prix ?');
-    expect(s.events).toContainEqual({ type: 'confirm', summary });
+    expect(s.events.some((event) => event.type === 'confirm' && !event.summary.includes(summary))).toBe(true);
     const context = s.ports.converse.mock.calls[0]![0];
     expect(context.confirmation).toEqual({ pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR', option_name: 'Paris Airport Shuttle', guide_dog_status: 'unknown' });
     for (const value of [profile.name, profile.phone, profile.email, summary]) expect(JSON.stringify(context)).not.toContain(value);

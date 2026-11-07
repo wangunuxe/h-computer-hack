@@ -130,11 +130,12 @@ describe('VoilaSession', () => {
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
     expect(replay).toEqual([{ type: 'stage', stage: 'CHOOSE' }, s.events.find((e) => e.type === 'options')]);
   });
-  it('replays the pending raw confirmation after CONFIRM', async () => {
+  it('replays the pending localized confirmation after CONFIRM', async () => {
     const s = setup({ runBooking: async (input) => { await input.confirm('Original agent summary'); return completed; } });
     await s.start(); await s.choose();
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
-    expect(replay).toEqual([{ type: 'stage', stage: 'CONFIRM' }, { type: 'confirm', summary: 'Original agent summary' }]);
+    expect(replay).toEqual([{ type: 'stage', stage: 'CONFIRM' }, s.events.find((event) => event.type === 'confirm')]);
+    expect(JSON.stringify(replay)).not.toContain('Original agent summary');
   });
   it('replays payment in HANDOFF and AWAIT_PAYMENT, then the booking card in DONE', async () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();
@@ -328,10 +329,10 @@ describe('VoilaSession', () => {
   it.each([
     '**Booking summary:**\nFlight Price: 400 EUR\nTotal: 65 EUR\nEmail: karim@example.com',
     'Date: 2027-01-15\nTime: 20:00', 'Total - 65 EUR',
-  ])('keeps the full summary on screen but speaks only structured pickup facts: %s', async (summary) => {
+  ])('builds French confirmation cards and speech from structured facts, not agent prose: %s', async (summary) => {
     const s = setup({ runBooking: async (input) => { await input.confirm(summary, { pickup_date: '2027-01-15', pickup_time: '20:00', total_price: 65, currency: 'EUR' }); return completed; } });
     s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
-    expect(s.events).toContainEqual({ type: 'confirm', summary });
+    expect(s.events).toContainEqual({ type: 'confirm', summary: 'Navette Paris Airport Shuttle, vers CDG 2E, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?' });
     expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Navette Paris Airport Shuttle, vers CDG 2E, aujourd’hui à 20 h, 65 €, avec votre chien guide. Je confirme ?' });
     expect(s.events.filter((e) => e.type === 'say').map((e) => e.text).join(' ')).not.toMatch(/Booking summary|karim@example|\*\*/);
   });
@@ -339,7 +340,7 @@ describe('VoilaSession', () => {
     const summary = 'Date: 2027-01-15\nTime: 20:00\nFlight Price: 400 EUR\nTotal - 65 EUR';
     const s = setup({ runBooking: async (input) => { await input.confirm(summary); return completed; } });
     s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
-    expect(s.events).toContainEqual({ type: 'confirm', summary });
+    expect(s.events).toContainEqual({ type: 'confirm', summary: 'Navette Paris Airport Shuttle, vers CDG 2E, avec votre chien guide. Je confirme ?' });
     expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Navette Paris Airport Shuttle, vers CDG 2E, avec votre chien guide. Je confirme ?' });
   });
   it('stop aborts booking and suppresses late callbacks and results', async () => {

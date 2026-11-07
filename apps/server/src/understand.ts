@@ -63,7 +63,7 @@ export async function understand({ transcript, profile, now, previous = {}, sign
 Use previous trip only as context; output new or corrected facts. Do not invent an origin, destination, deadline or luggage count.
 "airport" alone does not identify an airport: omit destination until clarified. Correct clear recognition errors such as "gar du nor" and "charle de gol".
 All dates and clock times are Europe/Paris. Resolve today/tomorrow against now; use the correct seasonal offset. Never silently roll a past clock time to tomorrow.
-trip.deadline is ONLY an explicitly supplied check-in cutoff. A flight departure is NOT the cutoff: return it as departure instead, and omit trip.deadline unless an explicit cutoff was also stated. The caller subtracts 60 minutes.
+trip.deadline is an explicitly supplied arrival deadline or check-in cutoff. Resolve relative arrival limits ("within 2 hours", "dans deux heures maximum") by adding elapsed time to now, including midnight or DST rollover; never copy the current clock time onto tomorrow's date. If a preferred limit and a larger maximum are both stated, use the earlier preferred limit. A flight departure is NOT the cutoff: return it as departure instead, and omit trip.deadline unless an explicit cutoff was also stated. The caller subtracts 60 minutes.
 Do not copy defaults or previous facts into the output. Missing facts must be omitted, not null. Guide-dog statements in the transcript override the profile.`,
       },
     }), timeout, interrupted]);

@@ -1,4 +1,6 @@
 import { once } from 'node:events';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -94,6 +96,23 @@ describe('payment callback', () => {
 });
 
 describe('real WebSocket round-trip', () => {
+  it('rejects a malformed upgrade URL without an uncaught exception', async () => {
+    const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
+      import { request } from 'node:http';
+      import { once } from 'node:events';
+      import { createSessionServer } from './src/index.ts';
+      const running = createSessionServer({ port: 0, hostname: '127.0.0.1' });
+      if (!running.server.listening) await once(running.server, 'listening');
+      const req = request({ host: '127.0.0.1', port: running.server.address().port, path: '//[', headers: {
+        Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ=='
+      } });
+      req.on('error', () => {}); req.end();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await running.close();
+      console.log('SURVIVED');
+    `], { timeout: 5000 });
+    expect(result.stdout).toContain('SURVIVED');
+  });
   it.each([undefined, '1'])('uses the socket address without a forwarded header with TRUST_PROXY=%s', async (trustProxy) => {
     vi.stubEnv('TRUST_PROXY', trustProxy);
     const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports }); cleanup.push(running.close);

@@ -94,7 +94,9 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
   const server = serve({ fetch: app.fetch, port, hostname });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   server.on('upgrade', (request, socket, head) => {
-    const url = new URL(request.url ?? '/', 'http://localhost');
+    let url: URL;
+    try { url = new URL(request.url ?? '/', 'http://localhost'); }
+    catch { socket.destroy(); return; }
     const pathname = url.pathname;
     const watch = /^\/ws\/watch\/([^/]+)$/.exec(pathname);
     if (watch) {

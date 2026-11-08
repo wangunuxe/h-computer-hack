@@ -92,9 +92,6 @@ async function runBookingAttempt(input: BookingInput, client: BookingClient) {
   const start = new URL(input.startUrl);
   const playbook = await readFile(new URL('../../../playbooks/paris-airport-shuttle.md', import.meta.url), 'utf8');
   input.signal?.throwIfAborted();
-  const quota = await client.sessions.getSessionQuota();
-  if (quota.available <= 0) throw new Error('No H session quota available. Cancel unused sessions and retry.');
-  input.signal?.throwIfAborted();
   let session: SessionHandle<Answer> | undefined;
   let closing = false;
   let abandoned = false;
@@ -170,11 +167,14 @@ async function runBookingAttempt(input: BookingInput, client: BookingClient) {
     }),
   ];
   try {
+    const quota = await Promise.race([client.sessions.getSessionQuota(), failure]);
+    if (quota.available <= 0) throw new Error('No H session quota available. Cancel unused sessions and retry.');
+    input.signal?.throwIfAborted();
     const currentParisTime = new Intl.DateTimeFormat('en-GB', {
       timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
     }).format(new Date());
-    session = await client.startSession<Answer>({
+    await Promise.race([client.startSession<Answer>({
       agent: {
         name: 'voila-shuttle-booker', description: 'Book the mock airport shuttle without paying.',
         model: process.env.HAI_MODEL ?? 'holo4-27b', reasoningEffort: 'disabled',
@@ -191,9 +191,9 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
       },
       messages: 'Complete the shuttle booking, obtain approval before creating the order, and hand off payment without paying.',
       answerSchema: BookingAnswerSchema, tools, maxSteps: 60, maxTimeS: 240, timezone: 'Europe/Paris', queue: false,
-    });
+    }).then(async (created) => { session = created; if (abandoned) await close(); }), failure]);
     input.signal?.throwIfAborted();
-    const handle = session;
+    const handle = session!;
     lastStep = Date.now();
     watchdog = setInterval(() => {
       if (!waitingForUser && Date.now() - lastStep >= (steps ? 60_000 : 45_000)) rejectFailure(new BookingStalledError(!confirmationRequested && !paymentUrl, steps, costUsd));

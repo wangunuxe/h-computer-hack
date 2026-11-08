@@ -39,6 +39,39 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it('stops promptly while the H quota request is pending', async () => {
+    const mock = setup();
+    let resolve!: (value: { available: number }) => void;
+    mock.getSessionQuota.mockImplementation(() => new Promise((done) => { resolve = done; }));
+    const controller = new AbortController(); mock.input.signal = controller.signal;
+    let settled = false;
+    const result = runBooking(mock.input, mock.client).catch((error: unknown) => { settled = true; return error; });
+    await vi.waitFor(() => expect(mock.getSessionQuota).toHaveBeenCalledOnce());
+    controller.abort(new Error('stop'));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    const stoppedPromptly = settled;
+    resolve({ available: 3 });
+    expect(await result).toEqual(new Error('stop'));
+    expect(mock.startSession).not.toHaveBeenCalled();
+    expect(stoppedPromptly).toBe(true);
+  });
+  it('stops promptly during H creation and cancels a late-created session', async () => {
+    const mock = setup();
+    let created!: (value: typeof mock.handle) => void;
+    mock.startSession.mockImplementation(() => new Promise((resolve) => { created = resolve; }));
+    const controller = new AbortController(); mock.input.signal = controller.signal;
+    let settled = false;
+    const result = runBooking(mock.input, mock.client).catch((error: unknown) => { settled = true; return error; });
+    await vi.waitFor(() => expect(mock.startSession).toHaveBeenCalledOnce());
+    controller.abort(new Error('stop'));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    const stoppedPromptly = settled;
+    created(mock.handle);
+    expect(await result).toEqual(new Error('stop'));
+    expect(mock.cancel).toHaveBeenCalledOnce();
+    expect(mock.handle.stream).not.toHaveBeenCalled();
+    expect(stoppedPromptly).toBe(true);
+  });
   it('exposes observation URLs and action descriptions, but not screenshot payloads or typed values', async () => {
     const mock = setup(async function* (tools) {
       yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', metadata: { url: 'https://shuttle.example/fr/reservation/draft/route' }, image: { type: 'url', source: 'https://images.example/private-screenshot' } } };

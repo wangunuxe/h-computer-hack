@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ recorders: [] as { callbacks: Function[]; cancel(): void }[], resume: vi.fn() }));
+const mocks = vi.hoisted(() => ({ recorders: [] as { callbacks: Function[]; cancel(): void }[], resume: vi.fn(), enqueue: vi.fn() }));
 vi.mock('./recorder.js', () => ({ Recorder: class {
   callbacks: Function[];
   constructor(...callbacks: Function[]) { this.callbacks = callbacks; mocks.recorders.push(this); }
@@ -11,7 +11,7 @@ vi.mock('./recorder.js', () => ({ Recorder: class {
   cancel() { this.callbacks[2]!(); }
 } }));
 vi.mock('./speech.js', () => ({ BrowserSpeech: class {}, SpeechQueue: class {
-  idle = true; enqueue() {} unlock() {} hold() {} bargeIn() {} resume = mocks.resume;
+  idle = true; enqueue = mocks.enqueue; unlock() {} hold() {} bargeIn() {} resume = mocks.resume;
 } }));
 class Socket {
   static OPEN = 1; static CONNECTING = 0; static instances: Socket[] = [];
@@ -26,7 +26,7 @@ let documentEvents: ReturnType<typeof vi.spyOn>, windowEvents: ReturnType<typeof
 async function flush() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
 async function boot() { await import('./main.js'); await flush(); const socket = Socket.instances[0]!; socket.open(); socket.send.mockClear(); return socket; }
 beforeEach(() => {
-  vi.useFakeTimers(); vi.resetModules(); mocks.recorders = []; mocks.resume.mockClear(); Socket.instances = [];
+  vi.useFakeTimers(); vi.resetModules(); mocks.recorders = []; mocks.resume.mockClear(); mocks.enqueue.mockClear(); Socket.instances = [];
   document.body.innerHTML = readFileSync('index.html', 'utf8').replace(/<script[\s\S]*?<\/script>/g, '');
   for (const key of ['localStorage', 'sessionStorage']) {
     const values = new Map<string, string>();
@@ -42,6 +42,31 @@ afterEach(() => {
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 describe('phone client lifecycle and controls', () => {
+  it.each(['fr', 'en'] as const)('speaks directional hints with each question only once in %s', async (language) => {
+    vi.spyOn(navigator, 'language', 'get').mockReturnValue(language);
+    const socket = await boot(); mocks.enqueue.mockClear();
+    const scenarios = [
+      { stage: 'CLARIFY', type: 'clarify', question: language === 'fr' ? 'Est-ce votre départ ?' : 'Is this your pickup?' },
+      { stage: 'CHOOSE', type: 'profile_request', question: language === 'fr' ? 'Ce numéro est-il correct ?' : 'Is this number correct?' },
+      { stage: 'CONFIRM', type: 'confirm', question: language === 'fr' ? 'Je confirme ?' : 'Shall I confirm?' },
+    ];
+    for (const scenario of scenarios) {
+      socket.message({ type: 'stage', stage: scenario.stage });
+      const hint = scenario.stage === 'CONFIRM'
+        ? language === 'fr' ? 'Confirmer, à gauche ; Annuler, à droite.' : 'Confirm on the left, cancel on the right.'
+        : language === 'fr' ? 'Oui à gauche, non à droite.' : 'Yes on the left, no on the right.';
+      socket.message(scenario.type === 'confirm' ? { type: 'confirm', summary: scenario.question } : { type: scenario.type, question: scenario.question, yes_no: true });
+      socket.message({ type: 'say', text: scenario.question });
+      expect(mocks.enqueue).toHaveBeenLastCalledWith(`${scenario.question} ${hint}`);
+      expect(mocks.enqueue.mock.calls.filter(([text]) => text === `${scenario.question} ${hint}`)).toHaveLength(1);
+      expect(document.getElementById('caption')?.textContent).toBe(`${scenario.question} ${hint}`);
+      expect(document.getElementById('caption')?.getAttribute('aria-hidden')).toBe('true');
+      expect(Array.from(document.querySelectorAll('.decision button'), (button) => button.id)).toEqual(['confirm-yes', 'confirm-no']);
+      const reminder = language === 'fr' ? 'Je reste en attente.' : 'Still waiting.';
+      socket.message({ type: 'say', text: reminder });
+      expect(mocks.enqueue).toHaveBeenLastCalledWith(reminder);
+    }
+  });
   it('works without storage, retries a closed socket, and resumes without issuing another session', async () => {
     const unavailable = () => { throw new DOMException('Unavailable', 'SecurityError'); };
     vi.stubGlobal('localStorage', { getItem: unavailable, setItem: unavailable, removeItem: unavailable });

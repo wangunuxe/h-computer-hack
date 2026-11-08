@@ -35,7 +35,7 @@ describe('tap-only mobile microphone controls', () => {
     expect(source).not.toMatch(/\$\('repeat'\)|lastConnection|voice\.enqueue\(stages|voice\.enqueue\(text, 'connection'|announce\(t\(\)\.(?:listening|processing|stop)\)|\$\('stage'\)\.focus/);
     expect(source).toContain('if (speechNeedsGesture) voice.enqueue(lastSay || t().welcome);');
     expect(source).toContain('unlock(); voice.hold(); cue();');
-    for (const content of ['announce(event.text)', 'announce(event.summary)', 'announce(event.message, true)', 'announce(event.question)', "voice.enqueue(cards, 'cards')", 'voice.idle && Date.now() - lastNarrated >= 30_000', 'progressCue++ % cues.length']) expect(source).toContain(content);
+    for (const content of ['decisionSpeech.utterance(event, state.stage)', 'if (utterance) announce(utterance)', 'announce(event.message, true)', "voice.enqueue(cards, 'cards')", 'voice.idle && Date.now() - lastNarrated >= 30_000', 'progressCue++ % cues.length']) expect(source).toContain(content);
   });
   it.each([0, 1])('starts and stops for synthetic or ordinary clicks, detail %s', (detail) => {
     const button = {} as HTMLButtonElement, dock = {} as HTMLElement; let active = false;

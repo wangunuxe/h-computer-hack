@@ -46,7 +46,7 @@ async function main() {
     const result = await runBooking({
       startUrl: route.href, signal: controller.signal,
       trip: { origin: 'La Défense', destination: 'Bercy', passengers: 1, luggage: 1, guide_dog: true },
-      profile: { name: 'Karim Demo', email: 'karim@example.com', phone: '+33612345678', language: 'fr', guide_dog: true },
+      profile: { name: 'Nicolas Demo', email: 'karim@example.com', phone: '+33612345678', language: 'fr', guide_dog: true },
       onProgress: (text) => console.log(`[H] ${text}`),
       confirm: async (summary) => {
         console.log(`Confirm booking: ${summary}`);

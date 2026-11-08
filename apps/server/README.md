@@ -3,7 +3,7 @@
 Taxi booking asks only for missing guide-dog information, never a name, phone
 number or email address. If guide-dog information is known, booking proceeds
 directly without a contact prompt. A saved name takes precedence over
-`VOILA_DEFAULT_NAME`, then the demo fallback `Karim Demo` (the booking CLI identity).
+`VOILA_DEFAULT_NAME`, then the demo fallback `Nicolas Demo` (the booking CLI identity).
 Names are trimmed and validated as nonempty before booking; invalid configuration
 fails booking without asking the traveler for a name. A saved email is used when
 available; otherwise booking uses `VOILA_DEFAULT_EMAIL` or the demo fallback
@@ -45,7 +45,7 @@ pnpm booking --yes    # automatically approves the sample booking
 The shuttle must already be reachable from H's cloud browser. Missing or localhost
 URLs are rejected. The CLI creates a draft, then starts H directly on its route page.
 Append `?difficulty=easy` to the public URL for the clone's easier controls.
-The sample is Karim, Gare du Nord → CDG 2E, one passenger, one bag, a guide dog,
+The sample is Nicolas, Gare du Nord → CDG 2E, one passenger, one bag, a guide dog,
 and a flight deadline four hours from now. Ctrl-C cancels the H session.
 Progress, payment URL, final booking, metrics (duration in milliseconds, cost in USD
 when reported), and Agent View URL are printed. Pay only on your own device.

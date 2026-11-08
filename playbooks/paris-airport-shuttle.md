@@ -183,7 +183,7 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
 - Comfort Estate — up to 4 passengers, 4 suitcases
 - Private Minivan — up to 8 passengers, 8 suitcases
 
-Prices are route-based estimates displayed beside each class, not fixed class prices. Preserve the starting URL's quote parameter: it holds Voilà's route, coordinates and fare clock on the server. Read the displayed amount before requesting approval; stop if the quote expires.
+Prices are route-based estimates displayed beside each class, not fixed class prices. Preserve the starting URL's quote parameter: it holds Voilà's route and coordinates on the server. Pickup date/time or passenger changes can update the fare. Read the displayed amount before requesting approval; stop if the quote expires.
 
 ### Passengers
 - 1 passenger — including children and infants

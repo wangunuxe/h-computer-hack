@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { estimateTaxi, resolveTaxiQuote } from '@voila/shared';
 import { createApp } from './app.js';
 import { createStore } from './store.js';
@@ -6,6 +6,22 @@ import { optionsForTrip } from '../../server/src/options.js';
 import { registerFareQuote } from '../../server/src/booking.js';
 const at = new Date('2026-11-09T11:00:00Z');
 describe('shared route fare from narration through checkout', () => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-09T09:00:00Z')); });
+  afterEach(() => vi.useRealTimers());
+  it('reprices the same route when only the pickup time or holiday date changes', async () => {
+    const store = createStore(), geocodeFetch = vi.fn<typeof fetch>();
+    const app = createApp({ store, env: {}, geocodeFetch });
+    const response = await app.request('/fr/reservation/?difficulty=easy'), base = response.headers.get('location')!.replace(/\/route$/, '');
+    const draft = [...store.drafts.values()][0]!;
+    draft.fare = await resolveTaxiQuote({ origin: 'Châtelet', destination: 'Montparnasse' }, { now: at });
+    const body = { pickup: 'Châtelet', dropoff: 'Montparnasse', date: '2026-11-09', time: '12:00', pickup_lat: '', pickup_lng: '', dropoff_lat: '', dropoff_lng: '' };
+    const post = (values: typeof body) => app.request(base + '/route', { method: 'POST', body: new URLSearchParams(values) });
+    expect((await post(body)).status).toBe(303); const daytime = estimateTaxi(draft.fare).price;
+    expect((await post({ ...body, time: '18:00' })).status).toBe(303);
+    expect(estimateTaxi(draft.fare).tariff).toBe('B'); expect(estimateTaxi(draft.fare).price).toBeGreaterThan(daytime);
+    expect((await post({ ...body, date: '2026-11-11' })).status).toBe(303); expect(estimateTaxi(draft.fare).tariff).toBe('B');
+    expect(geocodeFetch).not.toHaveBeenCalled();
+  });
   it.each([['La Défense', 'Bercy', 1], ['Gare du Nord', 'CDG', 1], ['Gare du Nord', 'Gare de l’Est', 1], ['près du 7 Avenue Mary, à Rueil-Malmaison', 'Bercy', 1], ['Gare du Nord', 'CDG', 5]] as const)('charges the server estimate for %s → %s with %i passengers', async (origin, destination, passengers) => {
     const store = createStore(), app = createApp({ store, env: { INTERNAL_CALLBACK_TOKEN: 'test-token' } });
     const quote = await resolveTaxiQuote({ origin, destination, passengers }, { now: at, gps: origin.startsWith('près') ? { latitude: 48.88354, longitude: 2.17661 } : undefined });
@@ -15,7 +31,6 @@ describe('shared route fare from narration through checkout', () => {
     expect(url).not.toMatch(/latitude|longitude|48\./);
     const response = await app.request(url), base = response.headers.get('location')!.replace(/\/route$/, '');
     const post = (path: string, body: Record<string,string>) => app.request(path, { method: 'POST', body: new URLSearchParams(body) });
-    // The quote retains the narrated time-of-day tariff even if H completes the form later.
     const date = new Date(Date.now() + 86400000).toISOString().slice(0,10);
     expect((await post(base + '/route', { pickup: origin, dropoff: destination, date, time: '12:00', pickup_lat: '', pickup_lng: '', dropoff_lat: '', dropoff_lng: '' })).status).toBe(303);
     expect(await (await app.request(base + '/vehicle')).text()).toContain(`${option.price} EUR`);

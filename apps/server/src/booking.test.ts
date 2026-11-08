@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Tool, HaiAgents } from 'hai-agents';
 import { bookingAction, bookingErrorMessage, registerFareQuote, runBooking, type BookingClient, type BookingInput } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
+import { estimateTaxi } from '@voila/shared';
 
 const answer = { ref: 'PAS-123', pickup_time: '2027-01-15T12:15:00+01:00', pickup_point: 'Gare du Nord', price: 65, operator_phone: '+33184800000', guide_dog_status: 'unknown' };
 const stub = 'https://shuttle.example/stub-payment/order-123?mode=no-stripe-key';
@@ -38,6 +39,23 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it('checks the observed pickup tariff, rejects the stale fare, and reads the updated amount for approval', async () => {
+    const quote = { origin: 'Châtelet', destination: 'Montparnasse', at: '2027-01-15T05:00:00Z', passengers: 1 };
+    const stale = estimateTaxi(quote).price, actual = estimateTaxi({ ...quote, at: '2027-01-15T11:15:00Z' }).price;
+    expect(stale).not.toBe(actual);
+    vi.stubEnv('INTERNAL_CALLBACK_TOKEN', 'test-token'); vi.stubEnv('SHUTTLE_PUBLIC_URL', 'https://shuttle.example');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ id: '00000000-0000-0000-0000-000000000000' }))));
+    try {
+      const mock = setup(async function* (tools) {
+        expect(await call(tools, 'confirm_with_user', { summary: 'Stale fare', ...confirmationFields, total_price: stale })).toContain('differs from the route estimate');
+        expect(mock.input.confirm).not.toHaveBeenCalled();
+        await call(tools, 'confirm_with_user', { summary: `Updated fare EUR ${actual}`, ...confirmationFields, total_price: actual });
+      });
+      mock.input.fareQuote = quote; mock.input.trip = { ...mock.input.trip, origin: quote.origin, destination: quote.destination };
+      await expect(runBooking(mock.input, mock.client)).rejects.toThrow('without payment handoff');
+      expect(mock.input.confirm).toHaveBeenCalledWith(`Updated fare EUR ${actual}`, expect.objectContaining({ total_price: actual }));
+    } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+  });
   it('retries a transient clone wake failure once, but never retries authentication or cancellation', async () => {
     const input = { startUrl: 'https://shuttle.example/fr/reservation/', fareQuote: { origin: 'Gare du Nord', destination: 'CDG', at: '2027-01-15T10:00:00Z', passengers: 1 } };
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response('', { status: 503 })).mockResolvedValueOnce(new Response(JSON.stringify({ id: '00000000-0000-0000-0000-000000000000' })));

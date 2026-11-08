@@ -5,6 +5,12 @@ const PointSchema = z.object({ latitude: z.number().min(-90).max(90), longitude:
 export const TaxiQuoteSchema = z.object({ origin: z.string().min(1), destination: z.string().min(1), from: PointSchema.optional(), to: PointSchema.optional(), at: z.iso.datetime({ offset: true }), passengers: z.number().int().min(1).max(8).default(1) });
 export type TaxiQuote = z.infer<typeof TaxiQuoteSchema>;
 export type TaxiPoint = z.infer<typeof PointSchema>;
+export function parisPickupTime(date: string, time: string): Date | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return;
+  const format = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  const candidates = ['+01:00', '+02:00'].map((offset) => new Date(date + 'T' + time + ':00' + offset)).filter((value) => Number.isFinite(value.getTime()) && format.format(value) === date + ' ' + time);
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
 const parisStations = new Set(['Bercy', 'Gare de Lyon', 'Gare du Nord', 'Châtelet–Les Halles', 'Charles de Gaulle–Étoile', 'Gare Montparnasse', 'Gare de l’Est', 'Saint-Michel–Notre-Dame', 'Luxembourg', 'Port-Royal', 'Denfert-Rochereau', 'Cité Universitaire']);
 function taxiStation(place: string) {
   const station = stationForPlace(place);

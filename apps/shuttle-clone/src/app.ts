@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { TaxiQuoteSchema, resolveTaxiQuote, taxiPlaceKey } from '@voila/shared';
+import { TaxiQuoteSchema, resolveTaxiQuote, taxiPlaceKey, parisPickupTime } from '@voila/shared';
 import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -85,13 +85,11 @@ export function createApp({
       return c.html(routePage(draft, 'Select both addresses from the suggestion dropdown (missing lat/lng).', values), 400);
     }
     if (draft.orderId) return c.text('An order already exists for this draft', 409);
+    const pickup = parisPickupTime(r.date, r.time);
+    if (!pickup) return c.html(routePage(draft, 'Invalid or ambiguous Paris pickup time.', values), 400);
     const quoted = draft.fare && taxiPlaceKey(draft.fare.origin) === taxiPlaceKey(r.pickup) && taxiPlaceKey(draft.fare.destination) === taxiPlaceKey(r.dropoff);
-    if (!quoted) {
-      const candidates = ['+01:00', '+02:00'].map((offset) => new Date(`${r.date}T${r.time}:00${offset}`));
-      const pickup = candidates.find((date) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date) === `${r.date} ${r.time}`);
-      if (!pickup) return c.html(routePage(draft, 'Invalid Paris pickup time.', values), 400);
-      draft.fare = await resolveTaxiQuote({ origin: r.pickup, destination: r.dropoff }, { now: pickup, fetch: geocodeFetch });
-    }
+    if (quoted) draft.fare = { ...draft.fare!, at: pickup.toISOString() };
+    else draft.fare = await resolveTaxiQuote({ origin: r.pickup, destination: r.dropoff, passengers: draft.fare?.passengers ?? Number(draft.info?.passengers ?? 1) }, { now: pickup, fetch: geocodeFetch });
     draft.route = r; draft.vehicle = undefined; draft.info = undefined;
     return c.redirect(`/fr/reservation/${draft.id}/vehicle`, 303);
   });

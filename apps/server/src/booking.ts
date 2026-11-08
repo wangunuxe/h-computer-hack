@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { HaiAgentsClient, tool, type SessionHandle } from 'hai-agents';
-import { BookingSchema, estimateTaxi, type Booking, type Trip, type Profile } from '@voila/shared';
+import { BookingSchema, estimateTaxi, parisPickupTime, type Booking, type Trip, type Profile } from '@voila/shared';
 import { z } from 'zod';
 import { ConfirmationToolSchema, sanitizeConfirmationFields, type ConfirmationFields } from './confirmation.js';
 import { pickupWindow, pickupProblem } from './pickup-window.js';
@@ -135,7 +135,7 @@ async function runBookingAttempt(input: BookingInput, client: BookingClient) {
         const details = sanitizeConfirmationFields(args);
         const problem = pickupProblem(details, window, new Date());
         if (problem) return `REJECTED: ${problem}`;
-        if (input.fareQuote && details.total_price !== estimateTaxi(input.fareQuote).price) return 'REJECTED: The observed price differs from the route estimate. Correct the route or request new options; do not create an order.';
+        if (input.fareQuote && details.total_price !== estimateTaxi({ ...input.fareQuote, at: parisPickupTime(details.pickup_date!, details.pickup_time!)!.toISOString() }).price) return 'REJECTED: The observed price differs from the route estimate. Correct the route or request new options; do not create an order.';
         waitingForUser = true;
         let decision: { approved: boolean; reply: string };
         try { decision = await input.confirm(summary, details); }

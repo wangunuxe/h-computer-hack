@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { estimateTaxi, geocodeTaxiPlace, resolveTaxiQuote } from './taxi.js';
+import { estimateTaxi, geocodeTaxiPlace, resolveTaxiQuote, parisPickupTime } from './taxi.js';
 const at = '2026-11-09T11:00:00Z';
 describe('shared regulated taxi estimates', () => {
+  it('resolves summer/winter pickup clocks and rejects missing, invalid or ambiguous times', () => {
+    expect(parisPickupTime('2026-11-09', '18:00')?.toISOString()).toBe('2026-11-09T17:00:00.000Z');
+    expect(parisPickupTime('2027-07-01', '18:00')?.toISOString()).toBe('2027-07-01T16:00:00.000Z');
+    for (const [date, time] of [['', ''], ['2027-03-28', '02:30'], ['2027-10-31', '02:30'], ['2027-02-30', '12:00']]) expect(parisPickupTime(date!, time!)).toBeUndefined();
+  });
   it.each([[5, 61.5], [6, 67], [7, 72.5], [8, 78]])('preserves the regulated airport supplement for %i passengers', (passengers, price) => {
     expect(estimateTaxi({ origin: 'Gare du Nord', destination: 'CDG', at, passengers }).price).toBe(price);
   });

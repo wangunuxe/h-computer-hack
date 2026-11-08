@@ -29,9 +29,21 @@ describe('showcase renderer', () => {
     event({ type: 'feed', kind: 'traffic', text: 'RER A et ligne 14 : trafic normal' }); expect(get('caption').textContent).toBe('Reading RATP: RER A, M14');
     for (const [stage, caption] of Object.entries({ UNDERSTAND: 'Gemini is understanding the trip.', CLARIFY: 'Asking the traveler for a missing detail.', PRESENT: 'Reading the route options aloud.', CHOOSE: "Options read aloud — waiting for the traveler's choice.", CONFIRM: 'Waiting for the traveler to confirm.', HANDOFF: "Payment handed to the traveler's phone.", AWAIT_PAYMENT: "Payment handed to the traveler's phone.", DONE: 'Booking confirmed.' })) { event({ type: 'stage', stage }); expect(get('caption').textContent).toBe(caption); }
     mode(false); mode(true);
+    event({ type: 'traveler', name: 'Amina Benali' });
+    expect(get('hearLabel').textContent).toBe('What Amina Benali hears');
+    expect(get('caption').textContent).toBe('Listening to Amina Benali.');
+    event({ type: 'agent_metrics', steps: 7, cost_usd: 0.021 });
+    expect(get('bwStat').textContent).toContain('step 7 · $0.021'); expect(get('bwStatBig').textContent).toContain('step 7 · $0.021');
+    event({ type: 'agent_metrics', steps: 8, cost_usd: null });
+    expect(get('bwStat').textContent).toContain('step 8'); expect(get('bwStat').textContent).not.toContain('$');
+    event({ type: 'agent_view', url: 'https://h.example/session/123?view=agent' });
+    expect(get('bwAgentView').getAttribute('href')).toBe('https://h.example/session/123?view=agent'); expect(get('bwAgentView').hidden).toBe(false);
+    event({ type: 'stage', stage: 'LISTEN' });
+    expect(get('bwAgentView').hidden).toBe(true); expect(get('bwAgentView').hasAttribute('href')).toBe(false);
+    expect(get('bwStat').textContent).not.toContain('step 7'); expect(get('bwStatBig').textContent).not.toContain('step 7');
     event({ type: 'stage', stage: 'RESEARCH' }); event({ type: 'feed', kind: 'traffic', text: 'Traffic unavailable.' }); expect(get('caption').textContent).toBe('Checking live RATP traffic for the route.');
-    event({ type: 'stage', stage: 'EXECUTE' }); vi.mocked(requestAnimationFrame).mock.calls[0]![0](1000);
-    expect(labels).toContainEqual({ text: 'Traveler', color: '#141B2B' }); expect(labels).toContainEqual({ text: 'Execute', color: '#141B2B' }); expect(labels).toContainEqual({ text: 'Confirm', color: '#5E6B82' });
+    event({ type: 'stage', stage: 'EXECUTE' }); labels.length=0; vi.mocked(requestAnimationFrame).mock.calls[0]![0](1000);
+    expect(labels).toContainEqual({ text: 'Amina Benali', color: '#141B2B' }); expect(labels).toContainEqual({ text: 'Execute', color: '#141B2B' }); expect(labels).toContainEqual({ text: 'Confirm', color: '#5E6B82' });
     document.querySelector<HTMLButtonElement>('#chips button')!.click(); expect(get('hear').textContent).not.toContain('Nicolas');
     event({ type: 'say', text: 'Real narration' }); expect(get('hear').textContent).toContain('Real narration');
     expect(get('caption').textContent).toBe('H agent is booking on the taxi site.');
@@ -44,6 +56,8 @@ describe('showcase renderer', () => {
     expect(get('log').lastChild!.textContent).toContain('  payment  handed to phone · 61.5 €'); expect(get('log').textContent).not.toContain('"type":');
     event({ type: 'booking_card', booking: { ref: 'PAS-123' } }); expect(get('pvLive').textContent).toContain('PAS-123');
     event({ type: 'error', message: 'Connection problem' }); expect(get('caption').textContent).toBe('Connection problem');
-    mode(false); expect(document.querySelector<HTMLElement>('.hud')!.hidden).toBe(false); expect(get('play').textContent).toBe('Pause'); expect(get('log').textContent).toContain('gladia.live');
+    mode(false); labels.length=0; vi.mocked(requestAnimationFrame).mock.calls.at(-1)![0](2000);
+    expect(labels).toContainEqual({ text: 'Nicolas', color: '#141B2B' });
+    expect(document.querySelector<HTMLElement>('.hud')!.hidden).toBe(false); expect(get('play').textContent).toBe('Pause'); expect(get('log').textContent).toContain('gladia.live');
   });
 });

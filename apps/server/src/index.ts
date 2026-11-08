@@ -145,6 +145,7 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
         if (parsed.success && parsed.data.type === 'final_transcript' && parsed.data.text.trim() && ['LISTEN', 'DONE'].includes(session.stage)) watches.clearHistory(id);
         if (parsed.success && (parsed.data.type === 'final_transcript' || parsed.data.type === 'user_reply')) watches.mirror(id, session.watchEvent(parsed.data));
         session.handle(parsed.success ? parsed.data : null);
+        if (parsed.success && parsed.data.type === 'hello' && parsed.data.watch) watches.mirror(id, session.watchTraveler());
       });
     });
   });

@@ -37,6 +37,8 @@ export interface BookingInput {
   onProgress(text: string): void;
   onStep?(event: AgentStep): void;
   onPage?(page: BookingPage): void;
+  onMetrics?(metrics: { steps: number; costUsd: number | null }): void;
+  onAgentView?(url: string): void;
   onAction?(action: BookingAction): void;
   onRetry?(): void;
   confirm(summary: string, details?: ConfirmationFields): Promise<{ approved: boolean; reply: string }>;
@@ -75,7 +77,13 @@ export async function runBooking(input: BookingInput, client: BookingClient = ne
   let previousCost: number | null = 0;
   for (let attempt = 0; ; attempt++) {
     try {
-      const result = await runBookingAttempt(input, client);
+      const result = await runBookingAttempt({
+        ...input,
+        onMetrics: (metrics) => input.onMetrics?.({
+          steps: previousSteps + metrics.steps,
+          costUsd: attempt ? previousCost === null || metrics.costUsd === null ? null : previousCost + metrics.costUsd : metrics.costUsd,
+        }),
+      }, client);
       return { ...result, metrics: { ...result.metrics, durationMs: Date.now() - started, steps: previousSteps + result.metrics.steps,
         costUsd: attempt ? previousCost === null || typeof result.metrics.costUsd !== 'number' ? null : previousCost + result.metrics.costUsd : result.metrics.costUsd } };
     }
@@ -202,6 +210,9 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
     watchdog.unref?.();
     const work = async () => {
       const envelope = await Promise.race([handle.get(), failure]);
+      if (!abandoned && envelope.agentViewUrl) {
+        try { input.onAgentView?.(envelope.agentViewUrl); } catch { /* Monitor callbacks never affect booking. */ }
+      }
       input.signal?.throwIfAborted();
       const iterator = handle.stream({ tools, timeoutMs: 300_000 });
       try {
@@ -257,6 +268,9 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
             const { metrics } = z.object({ metrics: z.object({ steps: z.number().optional(), totalCost: z.number().nullish() }) }).parse(event.data);
             if (metrics.steps !== undefined && metrics.steps > steps) { steps = metrics.steps; lastStep = Date.now(); }
             costUsd = metrics.totalCost ?? costUsd;
+            if (!abandoned) {
+              try { input.onMetrics?.({ steps, costUsd: costUsd ?? null }); } catch { /* Monitor callbacks never affect booking. */ }
+            }
           }
         }
       } finally {

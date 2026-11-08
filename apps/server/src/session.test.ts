@@ -326,6 +326,27 @@ describe('VoilaSession', () => {
     expect(replay.filter((event) => !['activity', 'profile'].includes(event.type))).toEqual([{ type: 'stage', stage: 'CONFIRM' }, s.events.find((event) => event.type === 'confirm')]);
     expect(JSON.stringify(replay)).not.toContain('Original agent summary');
   });
+  it('forwards H metrics and Agent View only while the booking is current', async () => {
+    const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();
+    let input!: BookingInput;
+    const s = setup({ runBooking: async (value) => {
+      input = value;
+      value.onMetrics?.({ steps: 7, costUsd: 0.021 });
+      value.onAgentView?.('https://h.example/session/1');
+      return pending.promise;
+    } });
+    const sink = vi.fn(); s.session.watchSteps(sink);
+    await s.start(); await s.choose();
+    expect(sink.mock.calls).toEqual([
+      [{ type: 'agent_metrics', steps: 7, cost_usd: 0.021 }],
+      [{ type: 'agent_view', url: 'https://h.example/session/1' }],
+    ]);
+    s.session.handle({ type: 'stop' });
+    input.onMetrics?.({ steps: 8, costUsd: 0.022 });
+    input.onAgentView?.('https://h.example/session/2');
+    expect(sink).toHaveBeenCalledTimes(2);
+    pending.resolve(completed); await flush();
+  });
   it('replays payment in HANDOFF and AWAIT_PAYMENT, then the booking card in DONE', async () => {
     const pending = deferred<Awaited<ReturnType<SessionPorts['runBooking']>>>();
     let input!: BookingInput;

@@ -28,7 +28,7 @@ const savedSession = sessionStorage.load();
 if (savedSession) { credentials = { id: savedSession.id, resume_token: savedSession.resume_token }; helloSent = savedSession.helloSent; }
 let attempt: ConnectionAttempt | undefined;
 let recorder: Recorder | undefined; let releasing = false;
-let pendingStart = false; let pendingStartFeedback: ReturnType<typeof setTimeout> | undefined;
+let pendingStart = false;
 let lastSay = ''; let pendingFocus: Stage | undefined;
 let optionPending = false;
 let lastCards = ''; let lastNarrated = Date.now(); let speechNeedsGesture = true; let progressCue = 0;
@@ -184,7 +184,6 @@ function start() {
     if (connectionFailed) { retryConnection(); return; }
     voice.bargeIn(); voice.resume(); unlock(); cue();
     pendingStart = true; recordingLabel();
-    pendingStartFeedback = setTimeout(() => { if (pendingStart) announce(t().connectionRetry, true); }, 1000);
     void connect(); return;
   }
   voice.bargeIn(); voice.resume();
@@ -198,7 +197,7 @@ function start() {
   }, (seconds) => { $('elapsed').hidden = false; $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }, () => { if (!recorder || recorder === current) voice.resume(); });
   recorder = current; recordingLabel(); void current.start(credentials);
 }
-function clearPendingStart() { pendingStart = false; clearTimeout(pendingStartFeedback); pendingStartFeedback = undefined; }
+function clearPendingStart() { pendingStart = false; }
 function release() {
   if (pendingStart) { clearPendingStart(); voice.bargeIn(); voice.resume(); cue(true); recordingLabel(); return; }
   if (!recorder || releasing) return; releasing = true; unlock(); cue(true); recordingLabel(); recorder.stop();

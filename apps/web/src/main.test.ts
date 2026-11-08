@@ -43,7 +43,7 @@ afterEach(() => {
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 describe('phone client lifecycle and controls', () => {
-  it('queues an early tap without replacing the connecting socket, gives feedback, then starts once', async () => {
+  it('keeps a slow queued start armed without misleading retry advice or errors', async () => {
     const vibrate = vi.fn(); vi.stubGlobal('navigator', { language: 'en', vibrate });
     const socket = await boot(false), talk = document.getElementById('talk')!;
     mocks.enqueue.mockClear(); talk.click();
@@ -51,12 +51,29 @@ describe('phone client lifecycle and controls', () => {
     expect(Socket.instances).toHaveLength(1);
     expect(mocks.recorders).toHaveLength(0);
     expect(talk.getAttribute('aria-pressed')).toBe('true');
-    await vi.advanceTimersByTimeAsync(999); expect(mocks.enqueue).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1); expect(mocks.enqueue).toHaveBeenCalledExactlyOnceWith(labels.en.connectionRetry);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(document.getElementById('errors')!.textContent).toBe('');
+    expect(talk.getAttribute('aria-pressed')).toBe('true');
     socket.open();
     expect(mocks.recorders).toHaveLength(1);
+    expect(document.getElementById('errors')!.textContent).toBe('');
     expect(talk.getAttribute('aria-label')).toBe(labels.en.stopListening);
     expect(mocks.enqueue.mock.calls.some(([text]) => [labels.en.connecting, labels.en.ready, labels.en.listening].includes(text))).toBe(false);
+  });
+  it.each(['fr', 'en'] as const)('leaves no stale connection error after cancelling a slow queued start in %s', async (language) => {
+    vi.spyOn(navigator, 'language', 'get').mockReturnValue(language);
+    const socket = await boot(false), talk = document.getElementById('talk')!;
+    talk.click(); mocks.enqueue.mockClear();
+    await vi.advanceTimersByTimeAsync(2000);
+    talk.click();
+    expect(talk.getAttribute('aria-pressed')).toBe('false');
+    expect(document.getElementById('errors')!.textContent).toBe('');
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    socket.open();
+    expect(mocks.recorders).toHaveLength(0);
+    expect(document.body.dataset.connected).toBe('true');
+    expect(document.getElementById('errors')!.textContent).toBe('');
   });
   it('queues a start before credentials exist and starts after session creation and connection', async () => {
     let resolve!: (response: Response) => void;
@@ -83,9 +100,11 @@ describe('phone client lifecycle and controls', () => {
   });
   it('preserves explicit connection retry after failure rather than arming a stale start', async () => {
     const socket = await boot(false); socket.close();
+    expect(document.getElementById('errors')!.textContent).toBe(labels.en.connectionRetry);
     document.getElementById('talk')!.click(); await flush();
     expect(Socket.instances).toHaveLength(2);
     Socket.instances[1]!.open(); expect(mocks.recorders).toHaveLength(0);
+    expect(document.getElementById('errors')!.textContent).toBe('');
   });
   it('handles touch pointer activation plus its synthetic click without toggling twice', async () => {
     await boot(); const talk = document.getElementById('talk')!;

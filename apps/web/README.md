@@ -27,7 +27,7 @@ click suppressed; mouse, keyboard and screen-reader clicks remain supported.
 The first tap starts recording and the next tap finishes; holding is unnecessary.
 There is no hold-to-talk mode. Enter and Space use the native button activation.
 An early tap during connection gives a cue and queues recording until connected;
-tap again to cancel. A slow connection also reads the existing retry guidance.
+tap again to cancel. Only a failed connection reads the existing retry guidance.
 Client-only `tts_enabled` preferences persist beside the profile;
 they are stripped from the wire profile. Choose “Screen reader only” to disable
 all Voilà speech synthesis and use the live caption card instead. Screen-reader

@@ -25,7 +25,7 @@ class Socket {
 }
 let documentEvents: ReturnType<typeof vi.spyOn>, windowEvents: ReturnType<typeof vi.spyOn>;
 async function flush() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
-async function boot() { await import('./main.js'); await flush(); const socket = Socket.instances[0]!; socket.open(); socket.send.mockClear(); return socket; }
+async function boot(open = true) { await import('./main.js'); await flush(); const socket = Socket.instances[0]!; if (open) socket.open(); socket.send.mockClear(); return socket; }
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetModules(); mocks.recorders = []; mocks.resume.mockClear(); mocks.enqueue.mockClear(); Socket.instances = [];
   document.body.innerHTML = readFileSync('index.html', 'utf8').replace(/<script[\s\S]*?<\/script>/g, '');
@@ -43,6 +43,62 @@ afterEach(() => {
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 describe('phone client lifecycle and controls', () => {
+  it('queues an early tap without replacing the connecting socket, gives feedback, then starts once', async () => {
+    const vibrate = vi.fn(); vi.stubGlobal('navigator', { language: 'en', vibrate });
+    const socket = await boot(false), talk = document.getElementById('talk')!;
+    mocks.enqueue.mockClear(); talk.click();
+    expect(vibrate).toHaveBeenCalledWith(35);
+    expect(Socket.instances).toHaveLength(1);
+    expect(mocks.recorders).toHaveLength(0);
+    expect(talk.getAttribute('aria-pressed')).toBe('true');
+    await vi.advanceTimersByTimeAsync(999); expect(mocks.enqueue).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1); expect(mocks.enqueue).toHaveBeenCalledExactlyOnceWith(labels.en.connectionRetry);
+    socket.open();
+    expect(mocks.recorders).toHaveLength(1);
+    expect(talk.getAttribute('aria-label')).toBe(labels.en.stopListening);
+    expect(mocks.enqueue.mock.calls.some(([text]) => [labels.en.connecting, labels.en.ready, labels.en.listening].includes(text))).toBe(false);
+  });
+  it('queues a start before credentials exist and starts after session creation and connection', async () => {
+    let resolve!: (response: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((done) => { resolve = done; })));
+    await import('./main.js'); await flush();
+    document.getElementById('talk')!.click();
+    expect(fetch).toHaveBeenCalledTimes(1); expect(mocks.recorders).toHaveLength(0);
+    resolve(new Response(JSON.stringify({ id: 'issued', resume_token: 'token' }))); await flush();
+    Socket.instances[0]!.open(); expect(mocks.recorders).toHaveLength(1);
+    mocks.enqueue.mockClear(); await vi.advanceTimersByTimeAsync(1000);
+    expect(mocks.enqueue).not.toHaveBeenCalledWith(labels.en.connectionRetry);
+  });
+  it.each(['tap', 'background', 'pagehide', 'failure'])('cancels a queued microphone start on %s', async (kind) => {
+    const socket = await boot(false), talk = document.getElementById('talk')!;
+    talk.click(); mocks.enqueue.mockClear();
+    if (kind === 'tap') talk.click();
+    if (kind === 'background') { vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); }
+    if (kind === 'pagehide') window.dispatchEvent(new Event('pagehide'));
+    if (kind === 'failure') socket.close();
+    expect(talk.getAttribute('aria-pressed')).toBe('false');
+    socket.open(); await vi.advanceTimersByTimeAsync(1000);
+    expect(mocks.recorders).toHaveLength(0);
+    expect(mocks.enqueue.mock.calls.filter(([text]) => text === labels.en.connectionRetry)).toHaveLength(kind === 'failure' ? 1 : 0);
+  });
+  it('preserves explicit connection retry after failure rather than arming a stale start', async () => {
+    const socket = await boot(false); socket.close();
+    document.getElementById('talk')!.click(); await flush();
+    expect(Socket.instances).toHaveLength(2);
+    Socket.instances[1]!.open(); expect(mocks.recorders).toHaveLength(0);
+  });
+  it('handles touch pointer activation plus its synthetic click without toggling twice', async () => {
+    await boot(); const talk = document.getElementById('talk')!;
+    vi.spyOn(talk, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
+    const tap = () => {
+      for (const type of ['pointerdown', 'pointerup']) talk.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: 'touch', pointerId: 1, isPrimary: true, button: 0, clientX: 40, clientY: 40 }));
+      talk.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    };
+    tap(); expect(mocks.recorders).toHaveLength(1);
+    expect(mocks.recorders[0]!.stop).not.toHaveBeenCalled();
+    tap(); expect(mocks.recorders[0]!.stop).toHaveBeenCalledOnce();
+    expect(mocks.recorders).toHaveLength(1);
+  });
   it.each(['fr', 'en'] as const)('toggles the microphone only on activation and submits once after stopping in %s', async (language) => {
     vi.spyOn(navigator, 'language', 'get').mockReturnValue(language);
     const socket = await boot();

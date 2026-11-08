@@ -84,6 +84,15 @@ describe('read-only desktop watches', () => {
       expect(registry.issue('one')).not.toHaveProperty('error');
     } finally { registry.dispose(); }
   });
+  it('does not count open showcase pages against the per-client limit and expires never-attached tickets quickly', () => {
+    vi.useFakeTimers(); const registry = new WatchRegistry();
+    try {
+      for (let n = 0; n < 3; n++) { const ticket = registry.issue('tunnel'); if ('error' in ticket) throw Error('ticket'); registry.attach(ticket.watch_id, ticket.watch_token, vi.fn()); }
+      const orphans = [registry.issue('tunnel'), registry.issue('tunnel'), registry.issue('tunnel')];
+      expect(orphans.every((ticket) => !('error' in ticket))).toBe(true); expect(registry.issue('tunnel')).toEqual({ error: 'client-limit' });
+      vi.advanceTimersByTime(60_000); expect(registry.issue('tunnel')).not.toHaveProperty('error');
+    } finally { registry.dispose(); }
+  });
   it('limits and expires unpaired tickets, rejects credentials and replaces pairings', () => {
     vi.useFakeTimers(); const registry = new WatchRegistry(() => 'CHOOSE');
     try {

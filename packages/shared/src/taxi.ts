@@ -15,7 +15,7 @@ const parisStations = new Set(['Bercy', 'Gare de Lyon', 'Gare du Nord', 'Châtel
 function taxiStation(place: string) {
   const station = stationForPlace(place);
   const text = normalizePlace(place.replace(/^près (?:du|de)\s+/iu, '')).replace(/^(?:(?:paris|aeroport(?: de paris)?|airport|metro|station)\s+)+/, '');
-  if (/\b\d{5}\b/.test(text)) return;
+  if (/\b\d{5}\b/.test(text) && station?.name !== 'CDG' && station?.name !== 'Orly') return;
   if (station && parisStations.has(station.name) && ![station.name, ...station.aliases].some((name) => text === normalizePlace(name)) && !/\bparis$/.test(text)) return;
   return station && [station.name, ...station.aliases].some((name) => text === normalizePlace(name) || text.startsWith(normalizePlace(name) + ' ')) ? station : undefined;
 }

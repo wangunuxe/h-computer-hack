@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { estimateTaxi, geocodeTaxiPlace, resolveTaxiQuote, parisPickupTime, taxiPlacesEquivalent } from './taxi.js';
 const at = '2026-11-09T11:00:00Z';
 describe('shared regulated taxi estimates', () => {
+  it.each(['CDG Airport Terminal 2E, 95700 Roissy-en-France', 'Roissy CDG Terminal 2F, 93290 Tremblay-en-France', 'Orly Airport Terminal 4, 94390 Orly'])('retains airport detection regardless of the suffix in %s', async (airport) => {
+    const fetcher = vi.fn<typeof fetch>();
+    const quote = await resolveTaxiQuote({ origin: 'Gare du Nord', destination: airport }, { now: new Date(at), fetch: fetcher });
+    expect(estimateTaxi(quote).price).toBe(airport.startsWith('Orly') ? 45 : 56); expect(estimateTaxi(quote).tariff).toBe('forfait'); expect(fetcher).not.toHaveBeenCalled();
+    expect(estimateTaxi({ ...quote, origin: airport, destination: 'Gare du Nord', from: quote.to, to: quote.from }).tariff).toBe('forfait');
+  });
   it('matches canonical stations and complete normalized addresses, never postal or proximity guesses', () => {
     expect(taxiPlacesEquivalent('Gare du Nord', 'Gare du Nord, 18 Rue de Dunkerque, Paris')).toBe(true);
     expect(taxiPlacesEquivalent('12 Rue de la Paix, 75002 Paris', '12 rue de la paix 75002 Paris')).toBe(true);

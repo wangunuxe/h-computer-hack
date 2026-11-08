@@ -42,6 +42,12 @@ afterEach(() => {
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 describe('phone client lifecycle and controls', () => {
+  it('reconnects a restored payment tab even without visibilitychange', async () => {
+    const socket = await boot(); socket.readyState = 3;
+    const event = new Event('pageshow'); Object.defineProperty(event, 'persisted', { value: true }); window.dispatchEvent(event); await flush();
+    expect(Socket.instances).toHaveLength(2); expect(Socket.instances[1]!.url).toBe(socket.url);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it('submits an option only once before the server responds', async () => {
     const socket = await boot(); socket.message({ type: 'stage', stage: 'CHOOSE' });
     socket.message({ type: 'options', items: [{ id: 'taxi', name: 'Taxi', price: 30, pickup_wait_minutes: 5, journey_minutes: 25, guide_dog_status: 'accepted' }] });

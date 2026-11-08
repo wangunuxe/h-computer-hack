@@ -142,14 +142,17 @@ async function connect() {
   } catch { if (attempt === current) { current.clear(); connectionFailure(); clearTimeout(retry); retry = setTimeout(() => void connect(), 3000); } }
   finally { if (attempt === current) connecting = false; }
 }
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
+function resumeConnection() {
     clearTimeout(retry);
     attempt?.cancel(); attempt = undefined; connecting = false;
     if (replaceOnForeground(socket?.readyState)) { const stale = socket; socket = undefined; stale?.close(); }
     void connect();
-  } else { if (credentials) sessionStorage.save(credentials, helloSent); recorder?.cancel(); }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') resumeConnection();
+  else { if (credentials) sessionStorage.save(credentials, helloSent); recorder?.cancel(); }
 });
+window.addEventListener('pageshow', (event) => { if (event.persisted) resumeConnection(); });
 window.addEventListener('pagehide', () => { if (credentials) sessionStorage.save(credentials, helloSent); });
 setInterval(() => { if (connected && credentials) sessionStorage.save(credentials, helloSent); }, 60_000);
 setInterval(() => {

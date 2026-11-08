@@ -30,6 +30,7 @@ describe('tap-only mobile microphone controls', () => {
     button.dispatchEvent(new MouseEvent('click', { detail: 1 }));
     vi.advanceTimersByTime(699); button.dispatchEvent(new MouseEvent('click', { detail: 1 }));
     expect(release).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
     pointer('pointerdown', { pointerType }); pointer('pointerup', { pointerType });
     expect(release).toHaveBeenCalledOnce();
     button.dispatchEvent(new MouseEvent('click', { detail: 1 }));
@@ -37,11 +38,52 @@ describe('tap-only mobile microphone controls', () => {
     vi.advanceTimersByTime(700); button.dispatchEvent(new MouseEvent('click', { detail: 1 }));
     expect(start).toHaveBeenCalledTimes(2);
   });
-  it('keeps activation-only keyboard/AT clicks working inside the touch dedupe window', () => {
+  it.each(['touch', 'pen'])('consumes the detail-zero click after %s without releasing the new recording', (pointerType) => {
+    vi.useFakeTimers();
     const { button, start, release, pointer } = touchControls();
-    pointer('pointerdown'); pointer('pointerup');
+    pointer('pointerdown', { pointerType }); pointer('pointerup', { pointerType });
+    button.dispatchEvent(new MouseEvent('click', { detail: 0 }));
+    expect(start).toHaveBeenCalledOnce(); expect(release).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(700);
+    pointer('pointerdown', { pointerType }); pointer('pointerup', { pointerType });
     button.dispatchEvent(new MouseEvent('click', { detail: 0 }));
     expect(start).toHaveBeenCalledOnce(); expect(release).toHaveBeenCalledOnce();
+  });
+  it('blocks any extra click or pointer toggle for 700ms after a pointer activation', () => {
+    vi.useFakeTimers();
+    const { button, start, release, pointer } = touchControls();
+    pointer('pointerdown'); pointer('pointerup');
+    for (const detail of [0, 1, 0]) button.dispatchEvent(new MouseEvent('click', { detail }));
+    vi.advanceTimersByTime(699);
+    pointer('pointerdown'); pointer('pointerup');
+    expect(start).toHaveBeenCalledOnce(); expect(release).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    pointer('pointerdown'); pointer('pointerup');
+    for (const detail of [0, 1, 0]) button.dispatchEvent(new MouseEvent('click', { detail }));
+    expect(start).toHaveBeenCalledOnce(); expect(release).toHaveBeenCalledOnce();
+  });
+  it.each(['pointercancel', 'lostpointercapture'])('consumes one click regardless of detail after %s, then allows standalone AT activation', (type) => {
+    vi.useFakeTimers();
+    const { button, start, release, pointer } = touchControls();
+    pointer('pointerdown'); pointer(type);
+    button.dispatchEvent(new MouseEvent('click', { detail: 0 }));
+    expect(start).not.toHaveBeenCalled(); expect(release).not.toHaveBeenCalled();
+    button.dispatchEvent(new MouseEvent('click', { detail: 0 }));
+    expect(start).toHaveBeenCalledOnce(); expect(release).not.toHaveBeenCalled();
+  });
+  it('does not discard an activation-only click after the unconsumed touch window expires', () => {
+    vi.useFakeTimers();
+    const { button, start, release, pointer } = touchControls();
+    pointer('pointerdown'); pointer('pointerup');
+    vi.advanceTimersByTime(700);
+    button.dispatchEvent(new MouseEvent('click', { detail: 0 }));
+    expect(start).toHaveBeenCalledOnce(); expect(release).toHaveBeenCalledOnce();
+  });
+  it.each(['pointercancel', 'lostpointercapture'])('does not suppress keyboard/AT activation after %s without a tracked touch', (type) => {
+    const { button, start, release } = touchControls();
+    button.dispatchEvent(new Event(type));
+    button.dispatchEvent(new MouseEvent('click', { detail: 0 }));
+    expect(start).toHaveBeenCalledOnce(); expect(release).not.toHaveBeenCalled();
   });
   it.each(['movement', 'outside', 'cancel', 'lost capture', 'wrong pointer', 'no down', 'non-primary', 'disabled', 'mouse'])('ignores a pointer release with %s', (kind) => {
     const { button, start, pointer } = touchControls();

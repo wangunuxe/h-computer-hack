@@ -106,17 +106,29 @@ describe('phone client lifecycle and controls', () => {
     Socket.instances[1]!.open(); expect(mocks.recorders).toHaveLength(0);
     expect(document.getElementById('errors')!.textContent).toBe('');
   });
-  it('handles touch pointer activation plus its synthetic click without toggling twice', async () => {
+  it.each([0, 1])('handles touch pointer activation plus click detail %s without toggling twice', async (detail) => {
     await boot(); const talk = document.getElementById('talk')!;
     vi.spyOn(talk, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
     const tap = () => {
       for (const type of ['pointerdown', 'pointerup']) talk.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: 'touch', pointerId: 1, isPrimary: true, button: 0, clientX: 40, clientY: 40 }));
-      talk.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+      talk.dispatchEvent(new MouseEvent('click', { bubbles: true, detail }));
     };
     tap(); expect(mocks.recorders).toHaveLength(1);
     expect(mocks.recorders[0]!.stop).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(700);
     tap(); expect(mocks.recorders[0]!.stop).toHaveBeenCalledOnce();
     expect(mocks.recorders).toHaveLength(1);
+  });
+  it.each(['background', 'socket close'])('ignores focus/blur but still cancels recording on %s', async (kind) => {
+    const socket = await boot(), talk = document.getElementById('talk')!;
+    talk.click(); const recorder = mocks.recorders[0]!, cancel = vi.spyOn(recorder, 'cancel');
+    talk.focus(); talk.blur();
+    window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('blur'));
+    expect(cancel).not.toHaveBeenCalled(); expect(recorder.stop).not.toHaveBeenCalled();
+    if (kind === 'background') { vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); }
+    else socket.close();
+    expect(cancel).toHaveBeenCalledOnce(); expect(recorder.stop).not.toHaveBeenCalled();
+    expect(talk.getAttribute('aria-pressed')).toBe('false');
   });
   it.each(['fr', 'en'] as const)('toggles the microphone only on activation and submits once after stopping in %s', async (language) => {
     vi.spyOn(navigator, 'language', 'get').mockReturnValue(language);

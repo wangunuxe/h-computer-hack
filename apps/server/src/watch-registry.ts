@@ -12,7 +12,8 @@ export class WatchRegistry {
   constructor(private stage: (id: string) => Stage = () => 'LISTEN', private timers: Pick<typeof globalThis, 'setTimeout' | 'clearTimeout'> = globalThis, private capacity = 100) {}
   issue(ip: string) {
     if (this.entries.size >= this.capacity) return { error: 'capacity' as const };
-    if ([...this.entries.values()].filter((entry) => entry.ip === ip && !entry.online && !entry.sinks.size).length >= 3) return { error: 'client-limit' as const };
+    const own = [...this.entries.values()].filter((entry) => entry.ip === ip);
+    if (own.length >= 20 || own.filter((entry) => !entry.online && !entry.sinks.size).length >= 3) return { error: 'client-limit' as const };
     const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     let code: string;
     do { code = [...randomBytes(6)].map((n) => alphabet[n & 31]).join(''); } while (this.codes.has(code));

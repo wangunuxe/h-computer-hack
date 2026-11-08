@@ -5,6 +5,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe('showcase renderer', () => {
+  it('explains the demo beside the pairing QR in English without changing its controls', () => {
+    const html = readFileSync(new NodeURL('../showcase.html', import.meta.url), 'utf8');
+    document.documentElement.innerHTML = html.replace(/<link\b[^>]*>/g, '');
+    const pairing = document.getElementById('pairing')!;
+    expect(pairing.querySelector('#pairing-qr')).not.toBeNull();
+    expect(pairing.querySelector('#pairing-code')).not.toBeNull();
+    expect(pairing.querySelector('#pairing-demo-note')!.textContent).toBe('Demo: the phone is the traveler’s frontend; this screen shows the backend agent live.Real use needs only a phone, no computer. The demonstrator scans the QR.');
+    expect(pairing.querySelector('#pairing-demo-note')!.getAttribute('hidden')).toBeNull();
+    expect(pairing.querySelectorAll('button, input')).toHaveLength(0);
+  });
   it('autoplays mock, resets on pair, renders real/empty/error/payment states, and resumes mock on unpair', () => {
     const html = readFileSync(new NodeURL('../showcase.html', import.meta.url), 'utf8');
     document.documentElement.innerHTML = html.replace(/<link\b[^>]*>/g, '');

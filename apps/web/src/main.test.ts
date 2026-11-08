@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { labels } from './labels.js';
 
-const mocks = vi.hoisted(() => ({ recorders: [] as { callbacks: Function[]; cancel(): void }[], resume: vi.fn(), enqueue: vi.fn() }));
+const mocks = vi.hoisted(() => ({ recorders: [] as { callbacks: Function[]; stop: ReturnType<typeof vi.fn>; cancel(): void }[], resume: vi.fn(), enqueue: vi.fn() }));
 vi.mock('./recorder.js', () => ({ Recorder: class {
   callbacks: Function[];
   constructor(...callbacks: Function[]) { this.callbacks = callbacks; mocks.recorders.push(this); }
   async start() {}
-  stop() {}
+  stop = vi.fn();
   cancel() { this.callbacks[2]!(); }
 } }));
 vi.mock('./speech.js', () => ({ BrowserSpeech: class {}, SpeechQueue: class {
@@ -42,6 +43,35 @@ afterEach(() => {
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 describe('phone client lifecycle and controls', () => {
+  it.each(['fr', 'en'] as const)('toggles the microphone only on activation and submits once after stopping in %s', async (language) => {
+    vi.spyOn(navigator, 'language', 'get').mockReturnValue(language);
+    const socket = await boot();
+    const talk = document.getElementById('talk') as HTMLButtonElement;
+    expect(talk.type).toBe('button');
+    expect(talk.getAttribute('aria-pressed')).toBe('false');
+    expect(talk.getAttribute('aria-label')).toBe(labels[language].tap);
+    for (const type of ['pointerdown', 'touchstart', 'pointerup', 'touchend']) talk.dispatchEvent(new Event(type, { bubbles: true }));
+    expect(mocks.recorders).toHaveLength(0);
+    talk.click();
+    const recorder = mocks.recorders[0]!;
+    expect(talk.getAttribute('aria-pressed')).toBe('true');
+    expect(talk.getAttribute('aria-label')).toBe(labels[language].stopListening);
+    for (const type of ['pointerup', 'touchend', 'pointercancel', 'touchcancel']) talk.dispatchEvent(new Event(type, { bubbles: true }));
+    expect(recorder.stop).not.toHaveBeenCalled();
+    expect(mocks.recorders).toHaveLength(1);
+    talk.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+    expect(recorder.stop).toHaveBeenCalledOnce();
+    expect(talk.disabled).toBe(true);
+    expect(talk.getAttribute('aria-pressed')).toBe('false');
+    talk.click();
+    expect(recorder.stop).toHaveBeenCalledOnce();
+    recorder.cancel(); recorder.callbacks[0]!('Bercy');
+    expect(socket.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ type: 'final_transcript', text: 'Bercy' }));
+    expect(talk.disabled).toBe(false);
+    expect(talk.getAttribute('aria-label')).toBe(labels[language].tap);
+    expect(talk.getAttribute('aria-pressed')).toBe('false');
+    expect(mocks.enqueue.mock.calls.some(([text]) => [labels[language].listening, labels[language].processing].includes(text))).toBe(false);
+  });
   it.each(['fr', 'en'] as const)('speaks directional hints with each question only once in %s', async (language) => {
     vi.spyOn(navigator, 'language', 'get').mockReturnValue(language);
     const socket = await boot(); mocks.enqueue.mockClear();

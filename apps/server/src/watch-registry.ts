@@ -26,25 +26,28 @@ export class WatchRegistry {
     if (!entry || !secureEqual(token, entry.token)) return;
     entry.sinks.add(sink);
     if (entry.online && entry.session) {
+      this.timers.clearTimeout(entry.timer);
       sink({ type: 'paired', stage: this.stage(entry.session) });
       for (const event of entry.recent) sink({ type: 'watch', event });
       sink({ type: 'watch', event: { type: 'stage', stage: this.stage(entry.session) } });
     } else sink({ type: 'unpaired' });
-    return () => entry.sinks.delete(sink);
+    return () => { if (entry.sinks.delete(sink) && !entry.sinks.size && this.entries.get(id) === entry) this.expire(id, entry, 30_000); };
   }
   pair(code: string, session: string, ip = 'unknown') {
     const now = Date.now();
     for (const [key, attempt] of this.attempts) if (attempt.until <= now) this.attempts.delete(key);
     const attempt = this.attempts.get(ip) ?? { count: 0, until: now + 60_000 };
     this.attempts.set(ip, attempt); if (++attempt.count > 6) return;
-    const entry = this.entries.get(this.codes.get(code.toUpperCase().trim()) ?? '');
+    const id = this.codes.get(code.toUpperCase().trim()) ?? '';
+    const entry = this.entries.get(id);
     if (!entry) return;
     if (entry.session !== session) { this.send(entry, { type: 'unpaired' }); entry.recent = []; }
     entry.session = session; entry.online = true; this.timers.clearTimeout(entry.timer);
+    if (!entry.sinks.size) this.expire(id, entry, 30_000);
     this.send(entry, { type: 'paired', stage: this.stage(session) });
   }
-  connected(session: string) { for (const entry of this.entries.values()) if (entry.session === session) { entry.online = true; this.timers.clearTimeout(entry.timer); this.send(entry, { type: 'paired', stage: this.stage(session) }); } }
-  disconnected(session: string) { for (const [id, entry] of this.entries) if (entry.session === session) { entry.online = false; this.send(entry, { type: 'unpaired' }); this.expire(id, entry); } }
+  connected(session: string) { for (const [id, entry] of this.entries) if (entry.session === session) { entry.online = true; this.timers.clearTimeout(entry.timer); if (!entry.sinks.size) this.expire(id, entry, 30_000); this.send(entry, { type: 'paired', stage: this.stage(session) }); } }
+  disconnected(session: string) { for (const [id, entry] of this.entries) if (entry.session === session) { entry.online = false; this.send(entry, { type: 'unpaired' }); this.expire(id, entry, entry.sinks.size ? 10 * 60_000 : 30_000); } }
   clearHistory(session: string) { for (const entry of this.entries.values()) if (entry.session === session) entry.recent = []; }
   mirror(session: string, event: WatchPayload | undefined) {
     if (!event) return;
@@ -56,9 +59,9 @@ export class WatchRegistry {
   }
   dispose() { for (const entry of this.entries.values()) this.timers.clearTimeout(entry.timer); this.entries.clear(); this.codes.clear(); this.attempts.clear(); }
   private send(entry: Watch, event: WatchEvent) { for (const sink of entry.sinks) sink(event); }
-  private expire(id: string, entry: Watch) {
+  private expire(id: string, entry: Watch, ms = 10 * 60_000) {
     this.timers.clearTimeout(entry.timer);
-    entry.timer = this.timers.setTimeout(() => { this.send(entry, { type: 'unpaired', expired: true }); this.entries.delete(id); this.codes.delete(entry.code); }, 10 * 60_000);
+    entry.timer = this.timers.setTimeout(() => { this.send(entry, { type: 'unpaired', expired: true }); entry.session = undefined; entry.online = false; entry.recent = []; this.entries.delete(id); this.codes.delete(entry.code); }, ms);
     entry.timer.unref?.();
   }
 }

@@ -7,6 +7,35 @@ import { createSessionServer } from './index.js';
 
 afterEach(() => vi.useRealTimers());
 describe('read-only desktop watches', () => {
+  it('reclaims abandoned paired tickets while allowing a 30-second reconnect grace', () => {
+    vi.useFakeTimers(); const registry = new WatchRegistry(() => 'CHOOSE', globalThis, 1);
+    try {
+      const ticket = registry.issue('one'); if ('error' in ticket) throw Error('ticket');
+      const detach = registry.attach(ticket.watch_id, ticket.watch_token, vi.fn())!; registry.pair(ticket.code, 'a');
+      registry.mirror('a', { type: 'say', text: 'current trip' }); detach(); vi.advanceTimersByTime(29_999);
+      const resumed = vi.fn(); const close = registry.attach(ticket.watch_id, ticket.watch_token, resumed)!;
+      expect(resumed).toHaveBeenCalledWith({ type: 'paired', stage: 'CHOOSE' }); expect(JSON.stringify(resumed.mock.calls)).toContain('current trip');
+      vi.advanceTimersByTime(30_000); expect(registry.issue('two')).toEqual({ error: 'capacity' });
+      close(); vi.advanceTimersByTime(30_000);
+      expect(registry.attach(ticket.watch_id, ticket.watch_token, vi.fn())).toBeUndefined();
+      const next = registry.issue('one'); if ('error' in next) throw Error('capacity not released');
+      const sink = vi.fn(); registry.attach(next.watch_id, next.watch_token, sink);
+      registry.pair(ticket.code, 'a'); registry.connected('a'); registry.mirror('a', { type: 'say', text: 'old session' });
+      expect(sink.mock.calls).toEqual([[{ type: 'unpaired' }]]);
+    } finally { registry.dispose(); }
+  });
+  it('keeps a ticket while another watcher is attached and expires pairings with no watcher', () => {
+    vi.useFakeTimers(); const registry = new WatchRegistry();
+    try {
+      const ticket = registry.issue('one'); if ('error' in ticket) throw Error('ticket');
+      const first = registry.attach(ticket.watch_id, ticket.watch_token, vi.fn())!;
+      const second = vi.fn(); registry.attach(ticket.watch_id, ticket.watch_token, second); registry.pair(ticket.code, 'a');
+      first(); vi.advanceTimersByTime(31_000); registry.mirror('a', { type: 'say', text: 'still connected' });
+      expect(second).toHaveBeenLastCalledWith({ type: 'watch', event: { type: 'say', text: 'still connected' } });
+      const abandoned = registry.issue('two'); if ('error' in abandoned) throw Error('ticket'); registry.pair(abandoned.code, 'b');
+      vi.advanceTimersByTime(30_000); expect(registry.attach(abandoned.watch_id, abandoned.watch_token, vi.fn())).toBeUndefined();
+    } finally { registry.dispose(); }
+  });
   it('drops replay history at session reset and completion boundaries', () => {
     const registry = new WatchRegistry();
     try {

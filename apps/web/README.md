@@ -22,8 +22,9 @@ Three-minute transcripts fit the existing shared text schema and 64 KiB WebSocke
 limit; trip extraction allows 20 seconds for Gemini.
 The circular microphone defaults to tap-to-toggle: activate once to start and
 again to finish, including with VoiceOver/TalkBack or keyboard activation.
-The profile also offers hold-to-talk (hold Space/Enter or press and hold).
-Client-only `mic_mode` and `tts_enabled` preferences persist beside the profile;
+Pointer/touch release does not stop recording; activate the button again to finish.
+There is no hold-to-talk mode. Enter and Space use the native button activation.
+Client-only `tts_enabled` preferences persist beside the profile;
 they are stripped from the wire profile. Choose “Screen reader only” to disable
 all Voilà speech synthesis and use the live caption card instead. Screen-reader
 presence is not inferred, because browsers provide no reliable detection API.
@@ -49,12 +50,14 @@ and 30 per rolling hour; excess attempts return 429. Reconnecting does not reset
 these limits.
 The API key remains server-side. Audio is raw little-endian signed PCM16, mono,
 16 kHz. Gladia names this encoding `wav/pcm` (a WAV header is not required).
-Endpointing is 0.5 s; on release we send `stop_recording`, then collect final
+Endpointing is 0.5 s; the stop tap captures another 0.25 s of audio before sending
+`stop_recording`, then collects final
 `transcript.data.utterance.text` messages until `end_session`/normal closure.
-Unfinalized partials are never submitted. Setup cancellation stops late microphone
-tracks, recording is bounded to 60 s, and finalization is bounded to 10 s.
+The final transcript is preferred; a remaining partial is retained when its final
+is missing or empty. Setup cancellation stops late microphone tracks, recording
+is bounded to 180 s, and finalization is bounded to 10 s.
 Microphone capture starts alongside URL initialization. PCM is buffered (up to
-1 MB) until the Gladia socket opens, then flushed in order. Releasing during setup
+1 MB) until the Gladia socket opens, then flushed in order. Stopping during setup
 stops capture but preserves the buffered audio and sends `stop_recording` after it.
 
 Official contracts checked:

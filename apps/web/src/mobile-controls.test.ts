@@ -18,6 +18,7 @@ describe('tap-only mobile microphone controls', () => {
     for (const failed of [false, true]) expect(micControlState({ connected: false, failed, active: false, releasing: true }, t)).toEqual({ caption: failed ? t.connectionRetry : t.connecting, label: failed ? t.connectionRetry : t.tap, disabled: false, pressed: false });
     expect(micControlState({ connected: true, failed: false, active: false, releasing: false }, t)).toEqual({ caption: t.tap, label: t.tap, disabled: false, pressed: false });
     expect(micControlState({ connected: true, failed: false, active: true, releasing: false }, t).label).toBe(t.stopListening);
+    expect(micControlState({ connected: true, failed: false, active: true, releasing: false }, t).pressed).toBe(true);
     expect(micControlState({ connected: true, failed: false, active: false, releasing: true }, t).disabled).toBe(true);
     expect(micControlState({ connected: true, failed: false, active: false, releasing: true }, t).label).toBe(t.tap);
   });

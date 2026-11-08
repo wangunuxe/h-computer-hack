@@ -51,7 +51,7 @@ describe('say', () => {
   it('reads at most three numbered options with Paris arrival and EUR prices', () => {
     const options = [...presetOptions, { ...presetOptions[0]!, id: 'third', name: 'Third option' }, { ...presetOptions[0]!, id: 'fourth', name: 'Fourth option' }];
     const text = say('present-options', { options, now: new Date('2027-01-15T10:00:00Z') }, 'en');
-    expect(text).toContain('1. Airport taxi, estimated arrival 11:55, €65.00.');
+    expect(text).toContain('1. Airport taxi, estimated pickup in about 5 minutes, journey about 50 minutes, estimated arrival 11:55, estimated price €65.00.');
     expect(text).toContain('3. Third option');
     expect(text).not.toContain('Fourth option');
   });

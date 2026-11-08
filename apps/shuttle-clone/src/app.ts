@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { TaxiQuoteSchema, resolveTaxiQuote, taxiPlaceKey } from '@voila/shared';
 import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -7,7 +8,7 @@ import { parisToday, pickupIsPast } from './dates.js';
 import { createPayments } from './payments.js';
 import type { PaymentGateway } from './payments.js';
 import { confirmationPage, infoPage, paymentPage, routePage, stubPage, vehiclePage } from './pages.js';
-import { createStore, newDraft, vehicles, timeOptions, passengerOptions, luggageOptions } from './store.js';
+import { createStore, newDraft, vehiclesForDraft, timeOptions, passengerOptions, luggageOptions } from './store.js';
 import type { Order, Store } from './store.js';
 
 const routeSchema = z.object({
@@ -25,8 +26,8 @@ const validCoordinate = (value: string, max: number) =>
   value.trim() !== '' && Number.isFinite(Number(value)) && Math.abs(Number(value)) <= max;
 
 export function createApp({
-  store = createStore(), env = process.env, payments = createPayments(env), fetcher = fetch,
-}: { store?: Store; env?: NodeJS.ProcessEnv; payments?: PaymentGateway; fetcher?: typeof fetch } = {}) {
+  store = createStore(), env = process.env, payments = createPayments(env), fetcher = fetch, geocodeFetch = fetch,
+}: { store?: Store; env?: NodeJS.ProcessEnv; payments?: PaymentGateway; fetcher?: typeof fetch; geocodeFetch?: typeof fetch } = {}) {
   const app = new Hono();
   const completePayment = async (order: Order) => {
     order.paid = true;
@@ -45,8 +46,19 @@ export function createApp({
   const root = fileURLToPath(new URL('../public', import.meta.url));
   app.use('/assets/*', serveStatic({ root, rewriteRequestPath: (path) => path.replace(/^\/assets/, '') }));
   app.get('/', (c) => c.redirect('/fr/reservation/'));
+  app.post('/internal/fare-quotes', async (c) => {
+    const expected = env.INTERNAL_CALLBACK_TOKEN ? `Bearer ${env.INTERNAL_CALLBACK_TOKEN}` : '', actual = c.req.header('Authorization') ?? '';
+    if (!expected || Buffer.byteLength(actual) !== Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(actual), Buffer.from(expected))) return c.text('Unauthorized', 401);
+    const parsed = TaxiQuoteSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text('Invalid fare quote', 400);
+    for (const [id, quote] of store.quotes) if (quote.expires <= Date.now()) store.quotes.delete(id);
+    if (store.quotes.size >= 1000) return c.text('Quote capacity reached', 503);
+    const id = randomUUID(); store.quotes.set(id, { fare: parsed.data, expires: Date.now() + 30 * 60_000 }); return c.json({ id }, 201);
+  });
   app.get('/fr/reservation/', (c) => {
     const draft = newDraft(c.req.query('difficulty') === 'easy' ? 'easy' : 'real');
+    const id = c.req.query('quote');
+    if (id) { const quote = store.quotes.get(id); if (!quote || quote.expires <= Date.now()) return c.text('Fare estimate expired. Ask Voilà for new options.', 400); draft.fare = quote.fare; }
     store.drafts.set(draft.id, draft);
     return c.redirect(`/fr/reservation/${draft.id}/route`);
   });
@@ -73,7 +85,14 @@ export function createApp({
       return c.html(routePage(draft, 'Select both addresses from the suggestion dropdown (missing lat/lng).', values), 400);
     }
     if (draft.orderId) return c.text('An order already exists for this draft', 409);
-    draft.route = r;
+    const quoted = draft.fare && taxiPlaceKey(draft.fare.origin) === taxiPlaceKey(r.pickup) && taxiPlaceKey(draft.fare.destination) === taxiPlaceKey(r.dropoff);
+    if (!quoted) {
+      const candidates = ['+01:00', '+02:00'].map((offset) => new Date(`${r.date}T${r.time}:00${offset}`));
+      const pickup = candidates.find((date) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date) === `${r.date} ${r.time}`);
+      if (!pickup) return c.html(routePage(draft, 'Invalid Paris pickup time.', values), 400);
+      draft.fare = await resolveTaxiQuote({ origin: r.pickup, destination: r.dropoff }, { now: pickup, fetch: geocodeFetch });
+    }
+    draft.route = r; draft.vehicle = undefined; draft.info = undefined;
     return c.redirect(`/fr/reservation/${draft.id}/vehicle`, 303);
   });
   app.get('/fr/reservation/:id/vehicle', (c) => {
@@ -88,7 +107,7 @@ export function createApp({
     if (!draft.route) return c.text('Complete route first', 400);
     if (draft.orderId) return c.text('An order already exists for this draft', 409);
     const body = await c.req.parseBody();
-    const vehicle = vehicles.find((v) => v.id === body.vehicle);
+    const vehicle = vehiclesForDraft(draft).find((v) => v.id === body.vehicle);
     if (!vehicle) return c.html(vehiclePage(draft, 'Select a vehicle class.'), 400);
     draft.vehicle = vehicle;
     return c.redirect(`/fr/reservation/${draft.id}/info`, 303);
@@ -114,6 +133,7 @@ export function createApp({
       return c.html(infoPage(draft, `Selected vehicle allows at most ${draft.vehicle.luggageCapacity} suitcases. Choose a larger vehicle or reduce the luggage count.`, values), 400);
     }
     draft.info = parsed.data;
+    draft.vehicle = vehiclesForDraft(draft).find((vehicle) => vehicle.id === draft.vehicle!.id)!;
     const id = randomUUID();
     const order: Order = {
       id, ref: `PAS-${id.slice(0, 8).toUpperCase()}`, route: { ...draft.route },

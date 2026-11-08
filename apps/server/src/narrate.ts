@@ -71,7 +71,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
       return options.slice(0, 3).map((option, index) => {
         const arrival = new Date(now.getTime() + (option.pickup_wait_minutes + option.journey_minutes) * 60_000);
         const time = new Intl.DateTimeFormat(locale, { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(arrival);
-        return `${index + 1}. ${optionName(option)}, ${fr ? 'arrivée estimée' : 'estimated arrival'} ${time}, ${money(option.price)}.`;
+        return fr ? `${index + 1}. ${optionName(option)}, prise en charge estimée dans environ ${option.pickup_wait_minutes} minutes, trajet d’environ ${option.journey_minutes} minutes, arrivée estimée ${time}, prix estimé ${money(option.price)}.` : `${index + 1}. ${optionName(option)}, estimated pickup in about ${option.pickup_wait_minutes} minutes, journey about ${option.journey_minutes} minutes, estimated arrival ${time}, estimated price ${money(option.price)}.`;
       }).join(' ');
     },
     'still-working': ({ variant = 0 }) => (fr

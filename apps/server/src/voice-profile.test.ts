@@ -26,9 +26,9 @@ describe('local spoken contact parsers', () => {
     const phone = 'zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit';
     expect(redactContactText(`${intro} ${phone}, 2 personnes à CDG à 20:45 le 2027-01-15`)).toBe(`${intro} [phone], 2 personnes à CDG à 20:45 le 2027-01-15`);
   });
-  it('retains comma boundaries without a phone introducer', () => {
+  it('redacts a complete French comma-pair phone without consuming passenger counts', () => {
     const text = 'zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit, 2 personnes';
-    expect(redactContactText(text)).toBe(text);
+    expect(redactContactText(text)).toBe('[phone], 2 personnes');
     expect(redactContactText('06 12 34 56 78, 2 personnes')).toBe('[phone], 2 personnes');
   });
   it.each(['06:12 34 56 78', '06:12:34 56 78'])('does not protect a temporal prefix of a phone-shaped sequence: %s', (phone) => {

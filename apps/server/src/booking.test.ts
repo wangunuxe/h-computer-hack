@@ -38,6 +38,20 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it('registers the route quote and rejects a mismatched H fare before asking the traveler', async () => {
+    vi.stubEnv('INTERNAL_CALLBACK_TOKEN', 'test-token');
+    vi.stubEnv('SHUTTLE_PUBLIC_URL', 'https://shuttle.example');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ id: '00000000-0000-0000-0000-000000000000' }))));
+    try {
+      const mock = setup(async function* (tools) {
+        expect(await confirm(tools)).toContain('differs from the route estimate');
+      });
+      mock.input.fareQuote = { origin: 'Gare du Nord', destination: 'CDG', at: '2027-01-15T10:00:00Z', passengers: 1 };
+      await expect(runBooking(mock.input, mock.client)).rejects.toThrow('without payment handoff');
+      expect(mock.input.confirm).not.toHaveBeenCalled();
+      expect(JSON.stringify(mock.startSession.mock.calls)).toContain('quote=00000000-0000-0000-0000-000000000000');
+    } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+  });
   it('briefs H with a non-airport dropoff and ASAP window without inventing a flight deadline', async () => {
     const mock = setup(async function* () {});
     mock.input.trip = { ...mock.input.trip, origin: 'La Défense', destination: 'Bercy', deadline: undefined };

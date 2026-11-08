@@ -1,6 +1,6 @@
 import { html } from 'hono/html';
 import { parisToday } from './dates.js';
-import { luggageOptions, operatorPhone, passengerOptions, timeOptions, vehicles } from './store.js';
+import { luggageOptions, operatorPhone, passengerOptions, timeOptions, vehiclesForDraft } from './store.js';
 import type { Draft, Order } from './store.js';
 
 export function page(title: string, body: ReturnType<typeof html>) {
@@ -37,7 +37,8 @@ export function vehiclePage(draft: Draft, error = '') {
   return page('Step 2 — Vehicle', html`<p class="error">${error}</p>
     <p>${draft.route?.pickup} → ${draft.route?.dropoff}</p>
     <form method="post" action="/fr/reservation/${draft.id}/vehicle">
-    <div class="field"><label>Vehicle class</label><select name="vehicle">${vehicles.map((v) =>
+    <p>Route fare estimate; the same estimate is charged by this demonstration site. No reservation, waiting or toll extras.</p>
+    <div class="field"><label>Vehicle class</label><select name="vehicle">${vehiclesForDraft(draft).map((v) =>
       html`<option value="${v.id}"${(draft.vehicle?.id ?? 'sedan') === v.id ? html` selected` : ''}>${v.text}</option>`)}</select></div>
     <button type="submit">Continue to passenger information</button></form>`);
 }

@@ -11,7 +11,7 @@ function fixture() {
   } as Stripe.Response<Stripe.Checkout.Session>);
   const retrieve = vi.spyOn(stripe.checkout.sessions, 'retrieve');
   const order: Order = {
-    id: 'order-1', ref: 'PAS-1', vehicle: vehicles[0], paid: false,
+    id: 'order-1', ref: 'PAS-1', vehicle: { ...vehicles[0], price: 65 }, paid: false,
     route: { pickup: 'Paris', dropoff: 'CDG', date: '2030-01-01', time: '12:00',
       pickup_lat: '48', pickup_lng: '2', dropoff_lat: '49', dropoff_lng: '2' },
     info: { name: 'Karim', email: 'karim@example.com', phone: '123', passengers: '1', luggage: '1', notes: '' },

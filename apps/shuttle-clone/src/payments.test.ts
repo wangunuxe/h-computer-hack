@@ -21,6 +21,13 @@ function fixture() {
 }
 
 describe('Stripe session lifecycle', () => {
+  it('charges exactly 6150 cents for a five-passenger CDG forfait', async () => {
+    const { retrieve, create, order, payments } = fixture();
+    retrieve.mockResolvedValue({ id: 'cs_old', status: 'expired', url: null } as Stripe.Response<Stripe.Checkout.Session>);
+    order.vehicle.price = 61.5;
+    await payments.checkout(order, 'https://shuttle.example');
+    expect(create.mock.calls[0]![0]!.line_items![0]!.price_data!.unit_amount).toBe(6150);
+  });
   it('retrieves and reuses only an open session', async () => {
     const { retrieve, create, order, payments } = fixture();
     retrieve.mockResolvedValue({ id: 'cs_old', status: 'open', url: 'https://checkout.stripe.com/open' } as Stripe.Response<Stripe.Checkout.Session>);

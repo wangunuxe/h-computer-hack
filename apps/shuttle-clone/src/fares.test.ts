@@ -6,9 +6,9 @@ import { optionsForTrip } from '../../server/src/options.js';
 import { registerFareQuote } from '../../server/src/booking.js';
 const at = new Date('2026-11-09T11:00:00Z');
 describe('shared route fare from narration through checkout', () => {
-  it.each([['La Défense', 'Bercy'], ['Gare du Nord', 'CDG'], ['Gare du Nord', 'Gare de l’Est'], ['près du 7 Avenue Mary, à Rueil-Malmaison', 'Bercy']])('charges the server estimate for %s → %s', async (origin, destination) => {
+  it.each([['La Défense', 'Bercy', 1], ['Gare du Nord', 'CDG', 1], ['Gare du Nord', 'Gare de l’Est', 1], ['près du 7 Avenue Mary, à Rueil-Malmaison', 'Bercy', 1], ['Gare du Nord', 'CDG', 5]] as const)('charges the server estimate for %s → %s with %i passengers', async (origin, destination, passengers) => {
     const store = createStore(), app = createApp({ store, env: { INTERNAL_CALLBACK_TOKEN: 'test-token' } });
-    const quote = await resolveTaxiQuote({ origin, destination }, { now: at, gps: origin.startsWith('près') ? { latitude: 48.88354, longitude: 2.17661 } : undefined });
+    const quote = await resolveTaxiQuote({ origin, destination, passengers }, { now: at, gps: origin.startsWith('près') ? { latitude: 48.88354, longitude: 2.17661 } : undefined });
     const option = optionsForTrip({ origin, destination }, false, quote)[0]!;
     const fetcher = vi.fn<typeof fetch>(async (url, init) => app.request(String(url), init));
     const url = await registerFareQuote({ fareQuote: quote, startUrl: 'https://shuttle.test/fr/reservation/?difficulty=easy' }, fetcher, 'test-token', 'https://shuttle.test');
@@ -19,10 +19,11 @@ describe('shared route fare from narration through checkout', () => {
     const date = new Date(Date.now() + 86400000).toISOString().slice(0,10);
     expect((await post(base + '/route', { pickup: origin, dropoff: destination, date, time: '12:00', pickup_lat: '', pickup_lng: '', dropoff_lat: '', dropoff_lng: '' })).status).toBe(303);
     expect(await (await app.request(base + '/vehicle')).text()).toContain(`${option.price} EUR`);
-    await post(base + '/vehicle', { vehicle: 'sedan' });
-    await post(base + '/info', { name: 'Test', email: 'test@example.com', phone: '0612345678', passengers: '1', luggage: '0', notes: '' });
+    await post(base + '/vehicle', { vehicle: passengers > 3 ? 'van' : 'sedan' });
+    await post(base + '/info', { name: 'Test', email: 'test@example.com', phone: '0612345678', passengers: String(passengers), luggage: '0', notes: '' });
     const order = [...store.orders.values()][0]!; expect(order.vehicle.price).toBe(option.price);
     expect(order.vehicle.price).toBe(estimateTaxi(quote).price);
+    if (passengers === 5) expect(order.vehicle.price).toBe(61.5);
     const checkout = vi.fn(async () => 'https://checkout.test/');
     const withPayments = createApp({ store, env: {}, payments: { checkout, verify: vi.fn() } });
     await withPayments.request(`/checkout/${order.id}`, { method: 'POST' }); expect(checkout.mock.calls[0]![0]).toMatchObject({ vehicle: { price: option.price } });

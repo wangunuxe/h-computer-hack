@@ -77,7 +77,8 @@ export function estimateTaxi(input: TaxiQuote) {
   // CDG right/left €56/65; Orly right/left €45/36, both directions, Paris municipality only.
   // Simulation excludes reservation/waiting/toll extras; passenger supplement is €5.50 from passenger five.
   const forfait = port && paris?.paris ? (port === 'cdg' ? bank(paris) === 'right' ? 56 : 65 : bank(paris) === 'right' ? 45 : 36) : undefined;
-  const price = Math.round(Math.max(8, (forfait ?? 3 + distanceKm * { A: 1.30, B: 1.66, C: 1.76 }[tariff]) + Math.max(0, quote.passengers - 4) * 5.5));
+  const base = forfait ?? Math.round(3 + distanceKm * { A: 1.30, B: 1.66, C: 1.76 }[tariff]);
+  const price = Math.max(8, base + Math.max(0, quote.passengers - 4) * 5.5);
   // Planning averages, not live traffic: intramuros 18/25 km/h peak/off-peak, mixed suburban 28/40.
   // Dispatch assumption: eight minutes at rush hour, five otherwise; not live vehicle availability.
   return { price, journey_minutes: Math.max(5, Math.ceil(distanceKm / speed * 60 / 5) * 5), pickup_wait_minutes: peak ? 8 : 5, distance_km: Math.round(distanceKm * 10) / 10, tariff: forfait === undefined ? tariff : 'forfait', fallback: !(from && to) };

@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { estimateTaxi, geocodeTaxiPlace, resolveTaxiQuote } from './taxi.js';
 const at = '2026-11-09T11:00:00Z';
 describe('shared regulated taxi estimates', () => {
+  it.each([[5, 61.5], [6, 67], [7, 72.5], [8, 78]])('preserves the regulated airport supplement for %i passengers', (passengers, price) => {
+    expect(estimateTaxi({ origin: 'Gare du Nord', destination: 'CDG', at, passengers }).price).toBe(price);
+  });
   it('gives distinct plausible routes instead of one fixed fare and duration', () => {
     const routes = [['La Défense', 'Bercy'], ['Gare du Nord', 'CDG'], ['Gare du Nord', 'Gare de l’Est']].map(([origin, destination]) => estimateTaxi({ origin: origin!, destination: destination!, at, passengers: 1 }));
     expect(new Set(routes.map((route) => route.price)).size).toBe(3); expect(new Set(routes.map((route) => route.journey_minutes)).size).toBe(3);

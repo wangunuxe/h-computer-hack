@@ -1,9 +1,31 @@
 import type { Gps } from '@voila/shared';
 import { distanceMeters, stations } from './stations.js';
 
-export function originFromGps(gps: Gps): string {
+export function originFromGps(gps: Gps): string | undefined {
   const nearest = stations.map((station) => ({ station, distance: distanceMeters(gps, station) })).sort((a, b) => a.distance - b.distance)[0]!;
-  return nearest.distance <= 800 && (gps.accuracy ?? 0) <= 800 ? nearest.station.name : `Position GPS (${gps.latitude.toFixed(5)}, ${gps.longitude.toFixed(5)})`;
+  return nearest.distance <= 800 && (gps.accuracy ?? 0) <= 800 ? nearest.station.name : undefined;
+}
+export async function resolveGpsOrigin(gps: Gps, { signal, fetch: fetcher = globalThis.fetch }: { signal?: AbortSignal; fetch?: typeof fetch } = {}): Promise<string | undefined> {
+  signal?.throwIfAborted();
+  const station = originFromGps(gps);
+  if (station) return station;
+  if ((gps.accuracy ?? 0) > 2000) return;
+  try {
+    const timeout = AbortSignal.timeout(3000);
+    const response = await fetcher(`https://api-adresse.data.gouv.fr/reverse/?lon=${gps.longitude}&lat=${gps.latitude}`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+    if (response.ok) {
+      const body = await response.json();
+      const address = body?.features?.[0]?.properties;
+      const street = address?.street, city = address?.city, number = address?.housenumber;
+      const valid = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length < 150 && !/[\d][.,]\d{3,}|[<>\r\n]/u.test(value);
+      if (valid(street) && valid(city) && (address.distance === undefined || (Number.isFinite(address.distance) && address.distance <= 2000))) {
+        return typeof number === 'string' && /^\d{1,5}(?:\s?(?:bis|ter|[a-z]))?$/i.test(number) ? `près du ${number} ${street}, à ${city}` : `${street}, ${city}`;
+      }
+    }
+  } catch { signal?.throwIfAborted(); }
+  signal?.throwIfAborted();
+  const nearest = stations.map((station) => ({ station, distance: distanceMeters(gps, station) })).sort((a, b) => a.distance - b.distance)[0]!;
+  return nearest.distance <= 2000 ? `près de ${nearest.station.name}` : undefined;
 }
 export function redactGpsCoordinates(text: string): string {
   const decimal = String.raw`[+-]?(?:0|[1-9]\d{0,2})\s*(?:[.,]|point|virgule)\s*\d{2,}`;

@@ -1,4 +1,5 @@
 import { ProfileSchema, type TravelerProfile } from '@voila/shared';
+import { confirmationAnswer } from './confirmation-answer.js';
 
 const normal = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/['’-]/g, ' ').replace(/[.,!?;:()]/g, ' ').replace(/\s+/g, ' ').trim();
 const french = ['zero', 'un', 'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'neuf', 'dix', 'onze', 'douze', 'treize', 'quatorze', 'quinze', 'seize'];
@@ -98,12 +99,13 @@ const spokenPhoneSpan = `(?<![\\p{L}\\d])\\+?${spokenRun}(?![\\p{L}\\d])`;
 const commaPhoneSpan = new RegExp(`^\\+?${spokenRun}(?:,[ \\t]*${spokenRun})+(?![\\p{L}\\d])`, 'iu');
 const contactSpan = new RegExp(`(?<date>${dateSpan.source})|(?<beforePhone>${timeSpan.source})(?=[ \\t]+${numericPhone})|(?<phone>${numericPhone})|(?<time>${timeSpan.source})|(?<spoken>${spokenPhoneSpan})`, 'giu');
 type Field = 'name' | 'phone' | 'email' | 'guide_dog';
-const yes = (text: string) => /^(oui|yes|correct|exactement|c est correct|c est ca|oui c est ca|c est bon|that s right)$/.test(normal(text));
-const no = (text: string) => /^(non|no|non merci|no thanks)$/.test(normal(text));
+const yes = (text: string) => confirmationAnswer(text) === 'yes';
+const no = (text: string) => confirmationAnswer(text) === 'no';
 export class VoiceProfile {
   private candidate?: string | boolean;
   constructor(public profile: TravelerProfile, private required: Field[]) {}
   get field() { return this.required.find((field) => this.profile[field] === undefined); }
+  get yesNo() { return this.candidate !== undefined || this.field === 'guide_dog'; }
   get question(): string {
     if (this.candidate !== undefined) return this.readback();
     const fr = this.profile.language.startsWith('fr');

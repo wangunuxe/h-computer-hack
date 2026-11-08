@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { initialState, optionEvent, reduce, transcriptEvent, type Stage } from './state.js';
 describe('event state and routing', () => {
+  it('exposes yes/no alternatives for GPS, profile and booking confirmations only while pending', () => {
+    let state = reduce(initialState(), { type: 'clarify', question: 'Est-ce votre départ ?', yes_no: true });
+    expect(state.yesNo).toBe(true);
+    state = reduce(state, { type: 'clarify', question: 'Où êtes-vous ?' }); expect(state.yesNo).toBe(false);
+    state = reduce(state, { type: 'profile_request', question: 'Camille. Correct ?', yes_no: true }); expect(state.yesNo).toBe(true);
+    state = reduce(state, { type: 'profile_request', question: 'Votre téléphone ?' }); expect(state.yesNo).toBe(false);
+    state = reduce(state, { type: 'confirm', summary: 'Book?' }); expect(state.yesNo).toBe(true);
+    state = reduce(state, { type: 'stage', stage: 'EXECUTE' }); expect(state.yesNo).toBe(false);
+  });
   it('keeps Stop in CLARIFY only while server-reported work is cancellable', () => {
     let state = reduce(initialState(), { type: 'stage', stage: 'CLARIFY' });
     state = reduce(state, { type: 'activity', cancellable: true }); expect(state.cancellable).toBe(true);

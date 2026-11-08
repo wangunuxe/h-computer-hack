@@ -62,11 +62,11 @@ describe('VoilaSession', () => {
       type: 'session', name: 'User', scenario: 'live', started_at: '2027-01-15T09:00:00.000Z',
     });
   });
-  it('redacts phone numbers from observed transcripts', () => {
+  it('redacts contact details and GPS coordinates from observed transcripts', () => {
     const s = setup();
     s.hello();
-    s.session.handle({ type: 'final_transcript', text: 'My phone number is 0771234567' });
-    expect(s.observed).toContainEqual({ type: 'transcript', text: 'My phone number is [phone]' });
+    s.session.handle({ type: 'final_transcript', text: 'My phone number is 0771234567. GPS 48.91000, 2.20000' });
+    expect(s.observed).toContainEqual({ type: 'transcript', text: 'My phone number is [phone]. GPS [position GPS]' });
   });
   it('observes every phone event and forwards booking frames, metrics, and agent view', async () => {
     const s = setup({

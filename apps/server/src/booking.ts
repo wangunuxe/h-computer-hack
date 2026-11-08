@@ -49,8 +49,19 @@ export async function registerFareQuote(input: Pick<BookingInput, 'fareQuote' | 
   if (!input.fareQuote) return input.startUrl;
   if (!token) throw new Error('Fare quote authentication is not configured.');
   if (!cloneUrl || new URL(cloneUrl).origin !== new URL(input.startUrl).origin) throw new Error('Fare quotes require the configured shuttle clone origin.');
-  const timeout = AbortSignal.timeout(3000);
-  const response = await fetcher(new URL('/internal/fare-quotes', cloneUrl), { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(input.fareQuote), signal: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout });
+  let response: Response | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    input.signal?.throwIfAborted();
+    const timeout = AbortSignal.timeout(30_000);
+    try {
+      response = await fetcher(new URL('/internal/fare-quotes', cloneUrl), { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(input.fareQuote), signal: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout });
+      if (response.status < 500 || attempt) break;
+    } catch (error) {
+      input.signal?.throwIfAborted();
+      if (attempt) throw error;
+    }
+  }
+  if (!response) throw new Error('Could not register the route fare estimate.');
   if (!response.ok) throw new Error('Could not register the route fare estimate.');
   const body = await response.json() as { id?: string };
   if (typeof body.id !== 'string' || !/^[a-f0-9-]{36}$/.test(body.id)) throw new Error('Invalid fare quote response.');

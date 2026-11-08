@@ -1,5 +1,5 @@
 import type { Option, Trip } from '@voila/shared';
-import type { BookingPage } from './booking.js';
+import type { BookingAction, BookingPage } from './booking.js';
 import { sanitizeConfirmationFields, type ConfirmationFields } from './confirmation.js';
 
 type Empty = Record<string, never>;
@@ -19,7 +19,9 @@ export interface NarrationParams {
   'research-started': Empty;
   disruption: { cause: string; recorded: boolean; mode?: 'demo' | 'live'; status?: 'normal' | 'disrupted' | 'unknown'; origin?: string };
   'present-options': { options: readonly Option[]; now: Date };
-  'still-working': Empty;
+  'still-working': { variant?: number };
+  'booking-action': { action: BookingAction };
+  'booking-retry': Empty;
   confirm: { trip: Trip; option: Option; details?: ConfirmationFields; now: Date };
   'payment-handoff': { merchant: string; amount: number };
   'booking-done': { ref: string };
@@ -58,7 +60,19 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
         return `${index + 1}. ${optionName(option)}, ${fr ? 'arrivée estimée' : 'estimated arrival'} ${time}, ${money(option.price)}.`;
       }).join(' ');
     },
-    'still-working': () => fr ? 'Je continue, un instant.' : 'Still working. One moment.',
+    'still-working': ({ variant = 0 }) => (fr
+      ? ['La vérification est toujours en cours. Vous pouvez dire stop.', 'Je reste en attente de la réponse du site.', 'Cela prend plus de temps que prévu. Je surveille la réponse.']
+      : ['The check is still in progress. You can say stop.', 'I am waiting for the site to respond.', 'This is taking longer than expected. I am watching for a response.'])[variant % 3]!,
+    'booking-retry': () => fr ? 'Le site met du temps, je réessaie.' : 'The site is taking a while. I am retrying.',
+    'booking-action': ({ action }) => ({
+      pickup: fr ? 'J’entre l’adresse de départ.' : 'I am entering the pickup address.',
+      dropoff: fr ? 'J’entre l’adresse de destination.' : 'I am entering the destination address.',
+      date: fr ? 'Je choisis la date de prise en charge.' : 'I am choosing the pickup date.',
+      time: fr ? 'Je choisis l’heure de prise en charge.' : 'I am choosing the pickup time.',
+      vehicle: fr ? 'Je choisis le véhicule.' : 'I am selecting the vehicle.',
+      passenger: fr ? 'Je renseigne vos informations de voyage.' : 'I am entering your passenger details.',
+      notes: fr ? 'Je renseigne les demandes pour le conducteur.' : 'I am entering the requests for the driver.',
+    })[action],
     confirm: ({ trip, option, details, now }) => {
       const { pickup_date: date, pickup_time: time, total_price: price, currency } = sanitizeConfirmationFields(details);
       const parts = [`${optionName(option)}, ${fr ? 'vers' : 'to'} ${trip.destination}`];
@@ -81,7 +95,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
     'payment-handoff': ({ merchant, amount }) => fr ? `${money(amount)} chez ${merchant}. Ouvrez le paiement sur votre téléphone.` : `${money(amount)} with ${merchant}. Open payment on your phone.`,
     'booking-done': ({ ref }) => fr ? `Réservation ${ref}. Voici votre fiche.` : `Booking ${ref}. Here are your details.`,
     stopped: () => fr ? 'J’arrête. Aucune autre action.' : 'Stopped. No further actions.',
-    'booking-failed': ({ reason }) => `${fr ? 'La réservation a échoué.' : 'Booking failed.'}${reason ? ` ${reason}` : ''}`,
+    'booking-failed': ({ reason }) => `${fr ? 'Cette tentative de réservation a échoué. Voulez-vous réessayer le taxi vers l’aéroport ?' : 'This booking attempt failed. Would you like to retry the airport taxi?'}${reason ? ` ${reason}` : ''}`,
     'clarify-origin': () => fr ? 'Où êtes-vous actuellement ?' : 'Where are you now?',
     'clarify-destination': () => fr ? 'Quel aéroport et quel terminal ?' : 'Which airport and terminal?',
     'choose-again': () => fr ? 'Quelle option choisissez-vous ? Dites son numéro ou son nom.' : 'Which option? Say its number or name.',
@@ -96,7 +110,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
       'rer-b-replacement-bus': 'Demandez aux agents si un bus de remplacement dessert CDG et où monter. Confirmez le terminal, l’accessibilité et le départ.',
     } as Record<string, string>)[id] ?? instructions) : instructions,
     'no-feasible-options': ({ rejected }) => [fr ? 'Aucune option réalisable.' : 'No feasible options.', ...rejected.map((option) => `${optionName(option)}: ${option.reason === 'too_late' ? (fr ? 'arrivée trop tardive' : 'arrival too late') : (fr ? 'chien guide refusé' : 'guide dog refused')}.`)].join(' '),
-    'no-known-options': () => fr ? 'Je ne connais pas d’option pour ce trajet. Demandez de l’aide aux agents de la gare ou appelez un taxi.' : 'No known options for this route. Ask station staff for help or call a taxi.',
+    'no-known-options': () => fr ? 'Je peux réserver un taxi vers l’aéroport. Pour vérifier ce trajet, quel aéroport souhaitez-vous rejoindre et d’où partez-vous ?' : 'I can book an airport taxi. To check this route, which airport are you going to and where should the taxi pick you up?',
   };
   return templates[key](params);
 }

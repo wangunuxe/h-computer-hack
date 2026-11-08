@@ -25,7 +25,7 @@ if (savedSession) { credentials = { id: savedSession.id, resume_token: savedSess
 let attempt: ConnectionAttempt | undefined;
 let recorder: Recorder | undefined; let releasing = false;
 let lastSay = ''; let pendingFocus: Stage | undefined;
-let lastCards = ''; let lastNarrated = Date.now(); let lastConnection = '';
+let lastCards = ''; let lastNarrated = Date.now(); let speechNeedsGesture = true; let progressCue = 0;
 const t = () => labels[language];
 
 function announce(text: string, assertive = false) {
@@ -34,13 +34,13 @@ function announce(text: string, assertive = false) {
   lastNarrated = Date.now(); voice.enqueue(text);
 }
 const voice = new SpeechQueue(new BrowserSpeech(() => {
-  voice.hold();
-  $('errors').textContent = language === 'fr' ? 'Touchez Activer la voix pour écouter à nouveau.' : 'Tap Enable voice to hear this again.';
+  voice.hold(); speechNeedsGesture = true;
+  $('errors').textContent = language === 'fr' ? 'La voix est indisponible. Touchez le micro pour réessayer.' : 'Speech is unavailable. Tap the microphone to retry.';
   $('errors').setAttribute('role', 'alert'); $('errors').setAttribute('aria-live', 'assertive');
 }), language === 'fr' ? 'fr-FR' : 'en-GB');
 function unlock() {
-  for (const id of ['connection', 'errors']) { $(id).setAttribute('aria-live', 'off'); $(id).setAttribute('role', 'none'); }
-  voice.unlock();
+  $('errors').setAttribute('aria-live', 'off'); $('errors').setAttribute('role', 'none');
+  speechNeedsGesture = false; voice.unlock();
 }
 function cue(stopping = false) {
   navigator.vibrate?.(stopping ? [20, 30, 20] : 35);
@@ -51,7 +51,7 @@ function cue(stopping = false) {
   } catch { /* Haptics and earcons are optional. */ }
 }
 function send(event: WebEvent) {
-  if (socket?.readyState !== WebSocket.OPEN) { announce(t().disconnected, true); return false; }
+  if (socket?.readyState !== WebSocket.OPEN) { announce(t().connectionRetry, true); return false; }
   socket.send(JSON.stringify(event)); return true;
 }
 function sendTranscript(text: string) {
@@ -69,8 +69,6 @@ function connection(ready: boolean) {
   connected = ready; document.body.dataset.connected = String(ready);
   if (ready && connectionFailed) { connectionFailed = false; $('errors').replaceChildren(); }
   $('connection').textContent = ready ? t().ready : connectionFailed ? t().connectionRetry : t().connecting;
-  const text = $('connection').textContent!;
-  if (text !== lastConnection) { lastConnection = text; voice.enqueue(text, 'connection'); lastNarrated = Date.now(); }
   recordingLabel();
 }
 function connectionFailure() {
@@ -78,7 +76,7 @@ function connectionFailure() {
   if (first) announce(t().connectionRetry, true);
 }
 function retryConnection() {
-  unlock(); clearTimeout(retry); attempt?.cancel(); attempt = undefined; connecting = false;
+  voice.resume(); unlock(); clearTimeout(retry); attempt?.cancel(); attempt = undefined; connecting = false;
   const stale = socket; socket = undefined; stale?.close(); void connect();
 }
 async function connect() {
@@ -121,7 +119,6 @@ async function connect() {
         if (event.type === 'profile_request') collectingProfile = true;
         if (event.type === 'stage' && state.stage !== previous) collectingProfile = false;
         if (event.type === 'stage' && state.stage !== previous) pendingFocus = ['UNDERSTAND', 'RESEARCH', 'EXECUTE'].includes(state.stage) ? undefined : state.stage;
-        if (event.type === 'stage' && state.stage !== previous) voice.enqueue(stages[language][state.stage], 'stage');
         if (event.type === 'say') announce(event.text);
         if (event.type === 'confirm') announce(event.summary);
         if (event.type === 'error') announce(event.message, true);
@@ -152,7 +149,10 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', () => { if (credentials) sessionStorage.save(credentials, helloSent); });
 setInterval(() => { if (connected && credentials) sessionStorage.save(credentials, helloSent); }, 60_000);
 setInterval(() => {
-  if (!recorder && state.cancellable && voice.idle && Date.now() - lastNarrated >= 15_000) announce(language === 'fr' ? 'Je travaille toujours sur votre trajet. Vous pouvez dire stop.' : 'I am still working on your journey. You can say stop.');
+  if (!recorder && state.cancellable && voice.idle && Date.now() - lastNarrated >= 30_000) {
+    const cues = language === 'fr' ? ['Je reste en attente du serveur. Vous pouvez dire stop.', 'Votre demande est toujours en cours. Je vous informe dès que le serveur répond.'] : ['I am waiting for the server. You can say stop.', 'Your request is still in progress. I will tell you when the server responds.'];
+    announce(cues[progressCue++ % cues.length]!);
+  }
 }, 5000);
 function recordingLabel() {
   const active = !!recorder && !releasing;
@@ -167,7 +167,9 @@ function recordingLabel() {
 function start() {
   if (!connected) { retryConnection(); return; }
   if (recorder || !credentials || socket?.readyState !== WebSocket.OPEN) return;
-  voice.bargeIn(); voice.resume(); announce(t().listening); unlock(); voice.hold(); cue(); releasing = false;
+  voice.bargeIn(); voice.resume();
+  if (speechNeedsGesture) voice.enqueue(lastSay || t().welcome);
+  unlock(); voice.hold(); cue(); releasing = false;
   $('errors').replaceChildren();
   const current = new Recorder(sendTranscript, (failure) => { console.warn('Speech recording failed', recordingDiagnostic(failure)); announce(t()[recordingErrorKeys[failure.kind]], true); }, () => { if (recorder === current) { recorder = undefined; releasing = false; $('elapsed').hidden = true; recordingLabel(); } }, () => {
     releasing = true; cue(true); recordingLabel();
@@ -176,12 +178,10 @@ function start() {
   }, (seconds) => { $('elapsed').hidden = false; $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }, () => voice.resume());
   recorder = current; recordingLabel(); void current.start(credentials);
 }
-function release() { if (!recorder || releasing) return; releasing = true; unlock(); announce(t().processing); cue(true); recordingLabel(); recorder.stop(); }
+function release() { if (!recorder || releasing) return; releasing = true; unlock(); cue(true); recordingLabel(); recorder.stop(); }
 const talk = $<HTMLButtonElement>('talk');
 bindMicControls(talk, $('dock'), { active: () => !!recorder, start, release });
-$('stop').onclick = () => { voice.bargeIn(); voice.resume(); announce(t().stop); unlock(); recorder?.cancel(); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); };
-$('repeat').textContent = language === 'fr' ? 'Activer la voix · Répéter' : 'Enable voice · Repeat';
-$('repeat').onclick = () => { if (recorder) return; voice.bargeIn(); voice.enqueue([lastConnection, lastSay, lastCards].filter(Boolean).join('. ')); voice.resume(); unlock(); };
+$('stop').onclick = () => { voice.bargeIn(); voice.resume(); unlock(); recorder?.cancel(); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); };
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) { const node = document.createElement(tag); if (text) node.textContent = text; return node; }
 function button(text: string, action: () => void) { const node = element('button', text); node.type = 'button'; node.onclick = () => { unlock(); action(); }; return node; }
@@ -234,7 +234,7 @@ function render() {
   {
     const target = document.getElementById('primary-content');
     if (pendingFocus && target) { target.focus({ preventScroll: true }); target.scrollIntoView({ block: 'center' }); pendingFocus = undefined; }
-    else if (pendingFocus && !['PRESENT', 'CHOOSE', 'CONFIRM', 'HANDOFF', 'AWAIT_PAYMENT', 'DONE'].includes(state.stage)) { $('stage').focus(); pendingFocus = undefined; }
+    else if (pendingFocus && !['PRESENT', 'CHOOSE', 'CONFIRM', 'HANDOFF', 'AWAIT_PAYMENT', 'DONE'].includes(state.stage)) pendingFocus = undefined;
     else if (restore) document.getElementById(restore)?.focus({ preventScroll: true });
   }
   renderFeed();

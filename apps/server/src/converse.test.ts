@@ -6,6 +6,14 @@ const input: TurnInput = { transcript: 'le moins cher', stage: 'CHOOSE', languag
 const result = { intent: 'choose', option_id: 'paris-airport-shuttle', reply: 'Voici le taxi vers l’aéroport.', confidence: .95 };
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 describe('Gemini turn interpreter', () => {
+  it.each(['CLARIFY', 'PRESENT', 'CHOOSE'] as const)('overrides mocked refusals to English and French taxi requests in %s', async (stage) => {
+    for (const [language, transcript] of [['fr', "pouvez-vous m'appeler un taxi ?"], ['en', 'can you call me a taxi?']] as const) {
+      const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify({ intent: 'question', reply: "I can't book a taxi. Ask station staff.", confidence: .99 }) });
+      const output = await converse({ ...input, stage, transcript, language, trip: { origin: 'Étoile', destination: 'CDG', deadline: '2027-01-15T21:00:00+01:00' } }, { models: { generateContent } });
+      expect(output).toMatchObject({ intent: 'choose', option_id: 'paris-airport-shuttle' });
+      expect(output.reply).not.toMatch(/can't|Ask station/); expect(generateContent.mock.calls[0]![0].config.systemInstruction).toContain('Voilà CAN book the airport taxi via H');
+    }
+  });
   it('does not expose a self-introduced name after an honorific in the SDK request', async () => {
     const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify(result) });
     const text = 'my name is Dr. Anna Lee, from Gare du Nord to CDG 2E';

@@ -3,7 +3,7 @@ import { understand } from './understand.js';
 import { getDemoDisruption, type Disruption } from './adapters/disruption.js';
 import { readRerBTraffic, rerBTrafficPage } from './adapters/traffic-h.js';
 import { searchDisruptionAndAlternatives } from './adapters/linkup.js';
-import { runBooking } from './booking.js';
+import { runBooking, type BookingAction } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
 import { assessOptions } from './feasibility.js';
 import { bookingMethods, isRerBOrigin, mergeOptions, optionsForTrip } from './options.js';
@@ -13,6 +13,7 @@ import { converse, type ConfirmationContext, type Turn, type TurnResult } from '
 import { sanitizeConfirmationFields } from './confirmation.js';
 import { fallbackQuestion } from './questions.js';
 import { VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
+import { mentionsTaxiRequest, requestsTaxi, taxiTurn } from './taxi.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 type Research = { disruption: Disruption; extraOptions: Option[] };
@@ -35,6 +36,7 @@ export class VoilaSession {
   private profile?: TravelerProfile;
   private profileCollector?: VoiceProfile;
   private pendingProfileOption?: string;
+  private retryOption?: string;
   private scenario: Scenario = 'demo';
   private gpsOrigin?: string;
   private trip: Partial<Trip> = {};
@@ -56,6 +58,8 @@ export class VoilaSession {
   private questionAsked = false;
   private lastSay: number;
   private lastHeartbeat = -Infinity;
+  private progressVariant = 0;
+  private pendingBookingAction?: BookingAction;
   private heartbeat: ReturnType<typeof setInterval>;
   private readonly ports: SessionPorts;
   private operations = new Set<symbol>();
@@ -67,9 +71,13 @@ export class VoilaSession {
     this.lastSay = this.ports.clock().getTime();
     this.heartbeat = this.ports.timers.setInterval(() => {
       const now = this.ports.clock().getTime();
-      if (['UNDERSTAND', 'RESEARCH', 'EXECUTE'].includes(this.stage) && now - this.lastSay >= 4000 && now - this.lastHeartbeat >= 15_000) {
+      if (['UNDERSTAND', 'RESEARCH', 'EXECUTE'].includes(this.stage) && now - this.lastSay >= 25_000 && now - this.lastHeartbeat >= 25_000) {
         this.lastHeartbeat = now;
-        this.speak('still-working', {});
+        let text = this.pendingBookingAction ? say('booking-action', { action: this.pendingBookingAction }, this.language) : say('still-working', { variant: this.progressVariant++ }, this.language);
+        this.pendingBookingAction = undefined;
+        if (text === this.lastText) text = say('still-working', { variant: this.progressVariant++ }, this.language);
+        if (text === this.lastText) text = say('still-working', { variant: this.progressVariant++ }, this.language);
+        this.answer(text, true);
       }
     }, 1000);
     this.heartbeat.unref?.();
@@ -153,6 +161,7 @@ export class VoilaSession {
       this.remember('user', event.text);
       const normalized = event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
       if (this.stage === 'CHOOSE') {
+        if (this.retryOption && /^(oui|yes|retry|reessaye|reessayez|try again|yes please)$/.test(normalized)) { this.select(this.retryOption); return; }
         const id = chooseOption(event.text, this.options);
         if (id) { this.select(id); return; }
       }
@@ -198,6 +207,7 @@ export class VoilaSession {
   }
   private error(message: string) { this.send({ type: 'error', message }); }
   private transition(stage: Stage) {
+    if (this.stage === 'EXECUTE' && stage !== 'EXECUTE') this.pendingBookingAction = undefined;
     if (stage !== this.stage) { this.attempt = 0; this.questionReplies = []; this.questionAsked = ['CHOOSE', 'CONFIRM'].includes(stage); }
     this.lastHeartbeat = -Infinity; this.stage = stage; this.send({ type: 'stage', stage });
     this.reportActivity();
@@ -211,10 +221,14 @@ export class VoilaSession {
     return () => { if (this.operations.delete(id)) this.reportActivity(); };
   }
   private speak<K extends keyof NarrationParams>(key: K, params: NarrationParams[K]) {
-    this.answer(say(key, params, this.profile?.language ?? 'en'), ['still-working', 'booking-page', 'research-started'].includes(key));
+    const text = say(key, params, this.profile?.language ?? 'en');
+    const progress = ['still-working', 'booking-page', 'research-started', 'booking-retry'].includes(key);
+    if (progress && text === this.lastText) return;
+    this.answer(text, progress);
   }
   private active(generation: number) { return generation === this.generation && !this.flow.signal.aborted; }
   private cancel() {
+    this.pendingBookingAction = undefined;
     this.profileCollector = undefined; this.pendingProfileOption = undefined;
     this.operations.clear();
     this.turnController?.abort(); ++this.turnVersion;
@@ -226,9 +240,11 @@ export class VoilaSession {
     this.paidRefs.clear();
   }
   private resetTrip() {
+    this.pendingBookingAction = undefined;
     this.cancel();
     this.history = []; this.attempt = 0; this.questionReplies = []; this.questionAsked = false;
     this.research = undefined; this.booking = undefined; this.payment = undefined; this.options = []; this.trip = {};
+    this.retryOption = undefined;
   }
   private stop() {
     this.resetTrip();
@@ -287,6 +303,7 @@ export class VoilaSession {
     } catch {
       if (!this.active(generation)) return;
       this.ports.logger.error('Trip understanding failed.');
+      if (mentionsTaxiRequest(transcript)) { this.transition('CLARIFY'); this.ask(taxiTurn({ transcript, stage: this.stage, language: this.language, trip: this.trip, options: this.options, now: this.ports.clock(), attempt: this.attempt }, { intent: 'unclear', confidence: 0, reply: '' }).reply); return; }
       this.error('Could not understand the trip. Please try again.');
       this.answer(this.fallback());
       this.cancel(); this.transition('LISTEN');
@@ -340,6 +357,7 @@ export class VoilaSession {
     } catch { result = { intent: 'unclear', confidence: 0, reply: this.fallback() }; }
     finally { finish(); if (this.turnController === controller) this.turnController = undefined; }
     if (!this.active(generation) || this.stage !== stage || this.turnVersion !== version || controller.signal.aborted) return;
+    result = taxiTurn({ transcript, stage, language: this.language, trip: this.trip, options: this.options, now: this.ports.clock(), attempt: this.attempt }, result);
     if (result.intent !== 'unclear' && /^(euh|uh|um|hmm|(?:euh[, ]+)?je (?:ne )?sais pas|i don.t know|not sure)[.!? ]*$/i.test(transcript.trim())) result = { intent: 'unclear', confidence: 0, reply: this.fallback() };
     if (result.intent === 'stop' && result.confidence >= .65) { this.stop(); return; }
     if (stage === 'CONFIRM') {
@@ -357,9 +375,11 @@ export class VoilaSession {
       if (changedRoute || !this.research) { this.flow.abort(); this.flow = new AbortController(); this.research = this.startResearch(transcript, next); void this.research.catch(() => {}); }
       this.options = [];
       if (!this.missing().length) this.answer(result.reply);
-      await this.plan(transcript, next, result.reply); return;
+      await this.plan(transcript, next, result.reply);
+      if (this.stage === 'CHOOSE' && requestsTaxi(transcript) && this.options.some((option) => option.id === 'paris-airport-shuttle')) this.select('paris-airport-shuttle');
+      return;
     }
-    if (stage === 'CHOOSE' && result.intent === 'choose' && result.confidence >= .65 && result.option_id && this.options.some((option) => option.id === result.option_id)) { this.answer(result.reply); this.select(result.option_id); return; }
+    if (['CLARIFY', 'CHOOSE', 'PRESENT'].includes(stage) && result.intent === 'choose' && result.confidence >= .65 && result.option_id && this.options.some((option) => option.id === result.option_id)) { this.answer(result.reply); this.transition('CHOOSE'); this.select(result.option_id); return; }
     if (['CLARIFY', 'CHOOSE', 'CONFIRM'].includes(stage)) {
       if (result.intent !== 'question' && this.questionAsked) ++this.attempt;
       if (result.intent === 'question' && stage !== 'CLARIFY') this.answer(result.reply);
@@ -400,6 +420,7 @@ export class VoilaSession {
     }
   }
   private async execute(id: string, generation: number) {
+    this.retryOption = undefined;
     this.paidRefs.clear();
     this.payment = undefined;
     this.transition('EXECUTE');
@@ -415,6 +436,8 @@ export class VoilaSession {
       if (base.searchParams.get('difficulty') === 'easy') startUrl.searchParams.set('difficulty', 'easy');
       const result = await this.ports.runBooking({
         trip, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
+        onRetry: () => { if (current()) { this.pendingBookingAction = undefined; this.speak('booking-retry', {}); } },
+        onAction: (action) => { if (current() && this.stage === 'EXECUTE') this.pendingBookingAction = action; },
         onProgress: (text) => {
           if (!current()) return;
           this.send({ type: 'feed', kind: 'agent', text });
@@ -450,11 +473,12 @@ export class VoilaSession {
       if (!current()) return;
       this.confirmation?.resolve({ approved: false, reply: 'Booking failed' }); this.confirmation = undefined;
       this.ports.logger.error('Booking execution failed.');
-      this.error('Booking failed. Choose another option.');
+      this.error(say('booking-failed', {}, this.language));
       this.speak('booking-failed', {});
-      this.options = this.options.filter((option) => option.id !== id);
+      this.retryOption = id === 'paris-airport-shuttle' ? id : undefined;
+      if (!this.retryOption) this.options = this.options.filter((option) => option.id !== id);
       this.send({ type: 'options', items: this.options });
       this.transition('CHOOSE');
-    } finally { controller.abort(); if (this.bookingController === controller) this.bookingController = undefined; finish(); }
+    } finally { controller.abort(); if (this.bookingController === controller) { this.pendingBookingAction = undefined; this.bookingController = undefined; } finish(); }
   }
 }

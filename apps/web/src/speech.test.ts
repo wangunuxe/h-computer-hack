@@ -2,10 +2,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BrowserSpeech, SpeechQueue, playbackSession } from './speech.js';
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('speech queue', () => {
-  it('unlocks real queued text without cancelling it and coalesces obsolete connection states', () => {
+  it('unlocks real queued content without cancelling it and coalesces obsolete cards', () => {
     const speak = vi.fn(), cancel = vi.fn(), resume = vi.fn(); const queue = new SpeechQueue({ speak, cancel, resume }, 'fr-FR');
-    queue.enqueue('Connexion', 'connection'); queue.enqueue('Connecté', 'connection'); queue.unlock(); queue.unlock();
-    expect(cancel).not.toHaveBeenCalled(); expect(speak).toHaveBeenCalledExactlyOnceWith('Connecté', 'fr-FR', expect.any(Function));
+    queue.enqueue('Old options', 'cards'); queue.enqueue('Taxi from Étoile', 'cards'); queue.unlock(); queue.unlock();
+    expect(cancel).not.toHaveBeenCalled(); expect(speak).toHaveBeenCalledExactlyOnceWith('Taxi from Étoile', 'fr-FR', expect.any(Function));
+  });
+  it('unlocks a real question in the first microphone gesture before holding capture speech', () => {
+    const speak = vi.fn(); const queue = new SpeechQueue({ speak, cancel: vi.fn() }, 'fr-FR');
+    queue.enqueue('Où souhaitez-vous aller ?'); queue.bargeIn(); queue.resume();
+    queue.enqueue('Où souhaitez-vous aller ?'); queue.unlock(); queue.hold();
+    expect(speak).toHaveBeenCalledExactlyOnceWith('Où souhaitez-vous aller ?', 'fr-FR', expect.any(Function));
+    speak.mock.calls[0]![2](); queue.enqueue('D’où partez-vous ?'); expect(speak).toHaveBeenCalledOnce();
+    queue.resume(); expect(speak).toHaveBeenLastCalledWith('D’où partez-vous ?', 'fr-FR', expect.any(Function));
   });
   it('defers captions during capture and resumes them after playback is restored', () => {
     const speak = vi.fn(); const queue = new SpeechQueue({ speak, cancel: vi.fn() }, 'en-GB'); queue.unlock(); queue.hold();

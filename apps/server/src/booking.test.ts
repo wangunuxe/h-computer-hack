@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Tool, HaiAgents } from 'hai-agents';
-import { bookingErrorMessage, runBooking, type BookingClient, type BookingInput } from './booking.js';
+import { bookingAction, bookingErrorMessage, runBooking, type BookingClient, type BookingInput } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
 
 const answer = { ref: 'PAS-123', pickup_time: '2027-01-15T12:15:00+01:00', pickup_point: 'Gare du Nord', price: 65, operator_phone: '+33184800000', guide_dog_status: 'unknown' };
@@ -123,6 +123,143 @@ describe('H booking runner', () => {
     mock.input.onMetrics = () => { throw new Error('metrics callback failed'); };
     mock.input.onAgentView = () => { throw new Error('view callback failed'); };
     await expect(runBooking(mock.input, mock.client)).resolves.toMatchObject({ booking: { ref: answer.ref } });
+  });
+  describe('stall watchdog', () => {
+    beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00Z')); });
+    const hung = async function* (): AsyncGenerator<HaiAgents.SessionEvent> { await new Promise(() => {}); };
+    const ready = async (mock: ReturnType<typeof setup>) => { await vi.waitFor(() => expect(mock.handle.stream).toHaveBeenCalled()); };
+    it('cancels a zero-step session at 45 seconds and retries only once', async () => {
+      const mock = setup(hung); mock.input.onRetry = vi.fn();
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await ready(mock);
+      await vi.advanceTimersByTimeAsync(44_000); expect(mock.cancel).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(() => expect(mock.startSession).toHaveBeenCalledTimes(2));
+      expect(mock.cancel).toHaveBeenCalledOnce(); expect(mock.input.onRetry).toHaveBeenCalledOnce();
+      const tools = (mock.startSession.mock.calls[0] as unknown as [{ tools: Tool[] }])[0].tools;
+      await expect(confirm(tools)).rejects.toThrow('no longer active'); expect(mock.input.confirm).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(await result).toBeInstanceOf(Error); expect(mock.cancel).toHaveBeenCalledTimes(2); expect(mock.startSession).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+    it('can complete the second attempt without reusing the first attempt tools or approval', async () => {
+      const mock = setup(hung), good = setup();
+      mock.startSession.mockResolvedValueOnce(mock.handle).mockResolvedValueOnce(good.handle);
+      const result = runBooking(mock.input, mock.client);
+      await ready(mock); await vi.advanceTimersByTimeAsync(45_000);
+      const completed = await result;
+      expect(completed.booking.ref).toBe(answer.ref); expect(mock.cancel).toHaveBeenCalledOnce(); expect(good.cancel).toHaveBeenCalledOnce();
+      expect(completed.metrics.durationMs).toBeGreaterThanOrEqual(45_000); expect(completed.metrics.costUsd).toBeNull();
+      expect(mock.input.confirm).toHaveBeenCalledOnce(); expect(mock.input.onPaymentHandoff).toHaveBeenCalledOnce();
+    });
+    it('waits 60 seconds after the last increasing metric, not after initial observation', async () => {
+      const mock = setup(async function* () {
+        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 1 } } };
+        await new Promise((resolve) => setTimeout(resolve, 30_000));
+        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 2 } } };
+        await new Promise(() => {});
+      });
+      const controller = new AbortController(); mock.input.signal = controller.signal;
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await ready(mock); await vi.advanceTimersByTimeAsync(89_000); expect(mock.cancel).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1000); await vi.waitFor(() => expect(mock.startSession).toHaveBeenCalledTimes(2));
+      controller.abort(); await result;
+    });
+    it('does not count waiting for the human confirmation as a stall', async () => {
+      let release!: (value: { approved: boolean; reply: string }) => void;
+      const mock = setup(); mock.input.confirm = vi.fn(() => new Promise((resolve) => { release = resolve; }));
+      const controller = new AbortController(); mock.input.signal = controller.signal;
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await vi.waitFor(() => expect(mock.input.confirm).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(180_000); expect(mock.cancel).not.toHaveBeenCalled(); expect(mock.startSession).toHaveBeenCalledOnce();
+      controller.abort(); release({ approved: false, reply: 'stop' }); await result;
+    });
+    it.each([true, false])('never automatically rebooks after a confirmation decision (%s), even if no further step arrives', async (approved) => {
+      const mock = setup(async function* (tools) { await confirm(tools); await new Promise(() => {}); });
+      mock.input.confirm = vi.fn(async () => ({ approved, reply: approved ? 'oui' : 'non' }));
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await vi.waitFor(() => expect(mock.input.confirm).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(await result).toBeInstanceOf(Error); expect(mock.startSession).toHaveBeenCalledOnce(); expect(mock.cancel).toHaveBeenCalledOnce();
+    });
+    it('does not retry if cancellation fails', async () => {
+      const mock = setup(hung); mock.cancel.mockRejectedValue(new Error('cancel failed'));
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await ready(mock); await vi.advanceTimersByTimeAsync(45_000);
+      expect(await result).toBeInstanceOf(AggregateError); expect(mock.startSession).toHaveBeenCalledOnce();
+    });
+    it('stops immediately on external cancellation without automatic retry', async () => {
+      const mock = setup(hung), controller = new AbortController(); mock.input.signal = controller.signal;
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await ready(mock); controller.abort(new Error('stop')); expect(await result).toEqual(new Error('stop')); expect(mock.startSession).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+    it('keeps monitor callbacks cumulative across retries and ignores late events from the stalled attempt', async () => {
+      let releaseLateEvents!: () => void;
+      const lateEvents = new Promise<void>((resolve) => { releaseLateEvents = resolve; });
+      const mock = setup(async function* () {
+        for (let i = 0; i < 2; i++) {
+          yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'policy_event', content: '', toolReqs: [] } };
+        }
+        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 2, totalCost: 0.01 } } };
+        yield imageObservation('first-frame');
+        await lateEvents;
+        yield imageObservation('late-first-frame');
+        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 90, totalCost: 0.99 } } };
+        await new Promise(() => {});
+      });
+      const retry = setup(async function* (tools) {
+        for (let i = 0; i < 3; i++) {
+          yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'policy_event', content: '', toolReqs: [] } };
+        }
+        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 3, totalCost: 0.02 } } };
+        yield imageObservation('second-frame');
+        await confirm(tools); yield observation(stub); await handoff(tools);
+      });
+      const firstView = 'https://h.example/view/attempt-1';
+      const secondView = 'https://h.example/view/attempt-2';
+      mock.handle.get.mockResolvedValue({ agentViewUrl: firstView });
+      retry.handle.get.mockResolvedValue({ agentViewUrl: secondView });
+      mock.startSession.mockResolvedValueOnce(mock.handle).mockResolvedValueOnce(retry.handle);
+      const onFrame = vi.fn<NonNullable<BookingInput['onFrame']>>();
+      const onMetrics = vi.fn<NonNullable<BookingInput['onMetrics']>>();
+      const onAgentView = vi.fn<NonNullable<BookingInput['onAgentView']>>();
+      mock.input.onFrame = onFrame;
+      mock.input.onMetrics = onMetrics;
+      mock.input.onAgentView = onAgentView;
+      let retrySnapshot: { frames: number; metrics: number; views: number } | undefined;
+      mock.input.onRetry = vi.fn(() => {
+        retrySnapshot = { frames: onFrame.mock.calls.length, metrics: onMetrics.mock.calls.length, views: onAgentView.mock.calls.length };
+      });
+
+      const result = runBooking(mock.input, mock.client);
+      await ready(mock);
+      await vi.waitFor(() => {
+        expect(onMetrics).toHaveBeenLastCalledWith({ steps: 2, costUsd: 0.01 });
+        expect(onFrame).toHaveBeenCalledWith({ image: 'data:image/png;base64,first-frame', url: undefined, step: 2 });
+      });
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.waitFor(() => expect(mock.input.onRetry).toHaveBeenCalledOnce());
+      expect(retrySnapshot).toEqual({ frames: 1, metrics: 1, views: 1 });
+      releaseLateEvents();
+      await vi.waitFor(() => expect(retry.handle.stream).toHaveBeenCalled());
+      await expect(result).resolves.toMatchObject({ booking: { ref: answer.ref } });
+
+      expect(onAgentView).toHaveBeenCalledTimes(2);
+      expect(onAgentView).toHaveBeenNthCalledWith(1, firstView);
+      expect(onAgentView).toHaveBeenNthCalledWith(2, secondView);
+      expect(onFrame.mock.calls.map(([frame]) => frame)).toEqual([
+        { image: 'data:image/png;base64,first-frame', url: undefined, step: 2 },
+        { image: 'data:image/png;base64,second-frame', url: undefined, step: 5 },
+      ]);
+      expect(onMetrics).toHaveBeenCalledTimes(2);
+      const lastMetrics = onMetrics.mock.calls.at(-1)![0];
+      expect(lastMetrics.steps).toBe(5);
+      expect(lastMetrics.costUsd).toBeCloseTo(0.03);
+    });
+    it.each([['Pickup address input', 'pickup'], ['Dropoff address', 'dropoff'], ['Pickup date calendar', 'date'], ['Pickup time', 'time'], ['Vehicle class', 'vehicle'], ['Email', 'passenger'], ['Notes for the driver', 'notes'], ['Unrelated private text', undefined]])('maps only known element descriptions: %s', (element, expected) => {
+      expect(bookingAction(element!)).toBe(expected);
+    });
   });
   it('briefs H with the stated pickup instead of a station example', async () => {
     const mock = setup(); mock.input.trip.origin = 'Étoile'; await runBooking(mock.input, mock.client);
@@ -325,6 +462,14 @@ describe('H booking runner', () => {
     });
     await runBooking(mock.input, mock.client);
     expect(mock.input.onProgress).toHaveBeenCalledWith('Selecting vehicle');
+  });
+  it('reports known action categories without speaking arbitrary policy or entered values', async () => {
+    const mock = setup(async function* (tools) {
+      yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'policy_event', content: 'untrusted policy text', toolReqs: [{ toolName: 'write', args: { element: 'Pickup address input field', text: 'private address' } }, { toolName: 'unknown_tool', args: { element: 'Vehicle' } }] } };
+      await confirm(tools); yield observation(stub); await handoff(tools);
+    });
+    mock.input.onAction = vi.fn(); await runBooking(mock.input, mock.client);
+    expect(mock.input.onAction).toHaveBeenCalledExactlyOnceWith('pickup');
   });
 
   it('reports tool-only policy steps like the recorded real H stream', async () => {

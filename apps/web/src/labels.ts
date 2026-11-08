@@ -26,8 +26,8 @@ export function decisionLabels(language: 'fr' | 'en', stage: Stage): { yes: stri
   return language === 'fr' ? { yes: 'Oui', no: 'Non' } : { yes: 'Yes', no: 'No' };
 }
 export function decisionHint(language: 'fr' | 'en', stage: Stage): string {
-  if (stage === 'CONFIRM') return language === 'fr' ? 'Confirmer, à gauche ; Annuler, à droite.' : 'Confirm on the left, cancel on the right.';
-  return language === 'fr' ? 'Oui à gauche, non à droite.' : 'Yes on the left, no on the right.';
+  if (stage === 'CONFIRM') return language === 'fr' ? 'Confirmer en haut, annuler en bas.' : 'Confirm at the top, cancel at the bottom.';
+  return language === 'fr' ? 'Oui en haut, non en bas.' : 'Yes at the top, no at the bottom.';
 }
 export function optionLabel(option: { id: string; name: string }, language: 'fr' | 'en'): string {
   const separator = option.name.indexOf(' — ');

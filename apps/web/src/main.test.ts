@@ -77,7 +77,8 @@ describe('phone client lifecycle and controls', () => {
   });
   it('preserves explicit connection retry after failure rather than arming a stale start', async () => {
     const socket = await boot(false); socket.close();
-    expect(document.getElementById('errors')!.textContent).toBe(labels.en.connectionRetry);
+    expect(document.getElementById('errors')!.textContent).toBe('');
+    expect(mocks.enqueue).not.toHaveBeenCalledWith(labels.en.connectionRetry);
     document.getElementById('talk')!.click(); await flush();
     expect(Socket.instances).toHaveLength(2);
     Socket.instances[1]!.open(); expect(mocks.recorders).toHaveLength(0);
@@ -169,8 +170,8 @@ describe('phone client lifecycle and controls', () => {
     for (const scenario of scenarios) {
       socket.message({ type: 'stage', stage: scenario.stage });
       const hint = scenario.stage === 'CONFIRM'
-        ? language === 'fr' ? 'Confirmer, à gauche ; Annuler, à droite.' : 'Confirm on the left, cancel on the right.'
-        : language === 'fr' ? 'Oui à gauche, non à droite.' : 'Yes on the left, no on the right.';
+        ? language === 'fr' ? 'Confirmer en haut, annuler en bas.' : 'Confirm at the top, cancel at the bottom.'
+        : language === 'fr' ? 'Oui en haut, non en bas.' : 'Yes at the top, no at the bottom.';
       socket.message(scenario.type === 'confirm' ? { type: 'confirm', summary: scenario.question } : { type: scenario.type, question: scenario.question, yes_no: true });
       socket.message({ type: 'say', text: scenario.question });
       expect(mocks.enqueue).toHaveBeenLastCalledWith(`${scenario.question} ${hint}`);
@@ -251,6 +252,15 @@ describe('phone client lifecycle and controls', () => {
     expect(mocks.enqueue).toHaveBeenCalledWith(labels.en.openingPayment);
     vi.advanceTimersByTime(1500); expect(assign).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/test');
     expect(socket.send).not.toHaveBeenCalledWith(expect.stringContaining('Payer'));
+  });
+  it('stacks Pay above Cancel and cancels the session from the lower button', async () => {
+    const socket = await boot(); socket.message({ type: 'stage', stage: 'HANDOFF' });
+    socket.message({ type: 'payment_handoff', url: 'https://checkout.stripe.com/c/pay/test', amount: 44, merchant: 'Taxi', summary: 'Taxi' });
+    expect(Array.from(document.querySelectorAll('.payment-choice > *'), (node) => node.id)).toEqual(['primary-content', 'payment-cancel']);
+    expect(document.querySelector('.payment-choice .payment')?.getAttribute('href')).toBe('https://checkout.stripe.com/c/pay/test');
+    expect(document.body.dataset.split).toBe('true');
+    document.getElementById('payment-cancel')!.click();
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'stop' }));
   });
   it('forwards a payment command to the server when no payment page is available', async () => {
     const socket = await boot(); socket.message({ type: 'stage', stage: 'EXECUTE' });

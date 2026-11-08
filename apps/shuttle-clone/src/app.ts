@@ -141,6 +141,7 @@ export function createApp({
     if (Number(parsed.data.luggage) > draft.vehicle.luggageCapacity) {
       return c.html(infoPage(draft, `Selected vehicle allows at most ${draft.vehicle.luggageCapacity} suitcases. Choose a larger vehicle or reduce the luggage count.`, values), 400);
     }
+    if (draft.orderId) return c.redirect(`/fr/reservation/payment/${draft.orderId}`, 303);
     draft.info = parsed.data;
     draft.vehicle = vehiclesForDraft(draft).find((vehicle) => vehicle.id === draft.vehicle!.id)!;
     const id = randomUUID();

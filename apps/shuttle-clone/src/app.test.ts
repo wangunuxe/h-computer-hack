@@ -41,6 +41,13 @@ async function complete(app: App, easy = false) {
 }
 
 describe('four-step booking', () => {
+  it('creates only one order for concurrent passenger form submissions', async () => {
+    const { app, store } = setup(); const base = await start(app);
+    await post(app, base + '/route', route); await post(app, base + '/vehicle', { vehicle: 'sedan' });
+    const results = await Promise.all([post(app, base + '/info', info), post(app, base + '/info', info)]);
+    expect(store.orders.size).toBe(1);
+    expect(results[0]!.headers.get('location')).toBe(results[1]!.headers.get('location'));
+  });
   it('requires an explicit simulated payment and sends the same authenticated callback as Stripe', async () => {
     const { app, store, fetcher } = setup({ SERVER_PUBLIC_URL: 'https://server.example/', INTERNAL_CALLBACK_TOKEN: 'demo-token' }); await complete(app);
     const order = [...store.orders.values()][0]!;

@@ -42,6 +42,7 @@ describe('showcase renderer', () => {
     event({ type: 'stage', stage: 'RESEARCH' }); event({ type: 'feed', kind: 'traffic', text: 'Traffic unavailable.' }); expect(get('caption').textContent).toBe('Checking live RATP traffic for the route.');
     event({ type: 'stage', stage: 'EXECUTE' }); vi.mocked(requestAnimationFrame).mock.calls[0]![0](1000);
     expect(labels).toContainEqual({ text: 'Traveler', color: '#141B2B' }); expect(labels).toContainEqual({ text: 'Execute', color: '#141B2B' }); expect(labels).toContainEqual({ text: 'Confirm', color: '#5E6B82' });
+    expect([...document.querySelectorAll('#tools .tool[data-state="active"] b')].map((tool) => tool.textContent)).toEqual(['H Agents']); expect(labels).toContainEqual({ text: 'H Agents', color: '#FFFFFF' });
     document.querySelector<HTMLButtonElement>('#chips button')!.click(); expect(get('hear').textContent).not.toContain('Nicolas');
     event({ type: 'say', text: 'Real narration' }); expect(get('hear').textContent).toContain('Real narration');
     expect(get('caption').textContent).toBe('H agent is booking on the taxi site.');

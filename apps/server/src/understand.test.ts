@@ -12,8 +12,8 @@ describe('understand', () => {
   it.each(["pouvez-vous m'appeler un taxi ?", 'can you call me a taxi?'])('extracts only facts and leaves missing fields for clarification when a model tries to refuse %s', async (transcript) => {
     const client = clientWith({ trip: {}, reply: "I can't book a taxi" });
     const result = await understand({ transcript, profile, now }, client);
-    expect(result.missing).toEqual(['origin', 'destination', 'deadline']); expect(result).not.toHaveProperty('reply');
-    expect(client.models.generateContent.mock.calls[0]![0].config!.systemInstruction).toContain('Voilà CAN book an airport taxi via H');
+    expect(result.missing).toEqual(['origin', 'destination']); expect(result).not.toHaveProperty('reply');
+    expect(client.models.generateContent.mock.calls[0]![0].config!.systemInstruction).toContain('Voilà CAN book a taxi for any destination via H');
   });
   it.each(['my airplane is in 2 hours i need arrive cdg as soon as possible', 'my plane is in two hours, I need to get to CDG ASAP', 'mon avion part dans 2 heures, je dois arriver à CDG au plus vite', 'mon vol est dans deux heures, je pars tout de suite'])('defaults to departure now and derives the flight cutoff without another time question: %s', async (transcript) => {
     const client = clientWith({ trip: { destination: 'CDG' } });
@@ -144,7 +144,7 @@ describe('understand', () => {
   it('leaves unknown destination and deadline missing instead of inventing facts', async () => {
     const result = await understand({ transcript: 'I need the airport, RER B is down', profile, now }, clientWith({ trip: {} }));
     expect(result.trip).toEqual({ passengers: 1, luggage: 0, guide_dog: true });
-    expect(result.missing).toEqual(['origin', 'destination', 'deadline']);
+    expect(result.missing).toEqual(['origin', 'destination']);
   });
   it('preserves and canonicalizes previous cutoff when the reply supplies another field', async () => {
     const result = await understand({ transcript: 'one bag', profile, now, previous: { deadline: '2026-11-07T19:00:00Z' } }, clientWith({ trip: { luggage: 1 } }));

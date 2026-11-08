@@ -23,6 +23,7 @@ export const optionNames: Record<string, { fr: string; en: string }> = {
 };
 export function optionLabel(option: { id: string; name: string }, language: 'fr' | 'en'): string {
   const separator = option.name.indexOf(' — ');
-  const name = optionNames[option.id]?.[language] ?? (separator < 0 ? option.name : option.name.slice(0, separator));
+  const base = separator < 0 ? option.name : option.name.slice(0, separator);
+  const name = option.id === 'paris-airport-shuttle' && base.startsWith('Taxi to ') ? `${language === 'fr' ? 'Taxi vers' : 'Taxi to'} ${base.slice(8)}` : optionNames[option.id]?.[language] ?? base;
   return separator < 0 ? name : `${name}, ${language === 'fr' ? 'prise en charge à' : 'pickup at'} ${option.name.slice(separator + 3)}`;
 }

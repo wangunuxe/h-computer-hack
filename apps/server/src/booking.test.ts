@@ -38,6 +38,15 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it('briefs H with a non-airport dropoff and ASAP window without inventing a flight deadline', async () => {
+    const mock = setup(async function* () {});
+    mock.input.trip = { ...mock.input.trip, origin: 'La Défense', destination: 'Bercy', deadline: undefined };
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow('without payment handoff');
+    const params = mock.startSession.mock.calls[0] as unknown as [{ agent: { instructions: string } }];
+    expect(params[0].agent.instructions).toContain('Dropoff address: "Bercy". Enter this exact trip destination');
+    expect(params[0].agent.instructions).toContain('No arrival deadline was supplied: this is an ASAP trip.');
+    expect(params[0].agent.instructions).toContain('Do not ask for an arrival deadline or flight.');
+  });
   describe('stall watchdog', () => {
     beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00Z')); });
     const hung = async function* (): AsyncGenerator<HaiAgents.SessionEvent> { await new Promise(() => {}); };

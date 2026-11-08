@@ -1,8 +1,8 @@
 import type { Option, Trip } from '@voila/shared';
 
 export function assessOptions(options: readonly Option[], trip: Trip, now: Date, { bufferMinutes = 15 } = {}) {
-  const deadline = Date.parse(trip.deadline);
-  if (!Number.isFinite(now.getTime()) || !Number.isFinite(deadline) || !Number.isFinite(bufferMinutes) || bufferMinutes < 0) {
+  const deadline = trip.deadline ? Date.parse(trip.deadline) : Infinity;
+  if (!Number.isFinite(now.getTime()) || trip.deadline !== undefined && !Number.isFinite(deadline) || !Number.isFinite(bufferMinutes) || bufferMinutes < 0) {
     throw new Error('A valid clock, deadline and nonnegative buffer are required.');
   }
   const feasible: Option[] = [];

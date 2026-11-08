@@ -56,16 +56,15 @@ describe('preset options and merge', () => {
     expect(route('Étoile')).toHaveLength(1); expect(route('Gare du Nord')).toHaveLength(2); expect(route('Châtelet')).toHaveLength(2);
     expect(route('Gare du Nord', false)).toHaveLength(1); expect(route('Châtelet', false)).toHaveLength(1);
     expect(optionsForTrip({ origin: '', destination: 'CDG' }, true)).toEqual([]);
-    expect(optionsForTrip({ origin: 'Étoile', destination: 'Orly' }, true)).toEqual([]);
+    expect(optionsForTrip({ origin: 'Étoile', destination: 'Orly' }, true)).toHaveLength(1);
     expect(presetOptions[0]!.name).toBe('Airport taxi');
   });
   it.each(['CDG 2E', 'ROISSY', 'Aéroport Charles-de-Gaulle'])('recognizes the supported airport route to %s', (destination) => {
     expect(matchesPresetRoute({ origin: 'GARE DU NÖRD, Paris', destination })).toBe(true);
   });
   it.each([
-    { origin: 'Gare du Nord', destination: 'Charles de Gaulle–Étoile' }, { origin: 'Gare du Nord', destination: 'Orly' },
-    { origin: '', destination: 'CDG' }, { origin: 'Gare du Nord', destination: 'ABCDG' },
-  ])('rejects a different or unknown preset route: %j', (route) => { expect(matchesPresetRoute(route)).toBe(false); });
+    { origin: '', destination: 'CDG' }, { origin: 'Gare du Nord', destination: '' },
+  ])('requires both route endpoints: %j', (route) => { expect(matchesPresetRoute(route)).toBe(false); });
   it('has only a bookable airport taxi and a manual replacement bus', () => {
     expect(presetOptions).toHaveLength(2);
     for (const o of presetOptions) {

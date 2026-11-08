@@ -45,7 +45,7 @@ describe('H text traffic reader', () => {
       expect(s.session.cancel).toHaveBeenCalledOnce();
     } finally { vi.useRealTimers(); }
   });
-  it.each([undefined, { ...answer, status: 'unknown' }, { ...answer, source: 'https://untrusted.example/traffic' }])('rejects an absent or invalid answer', async (value) => {
+  it.each([undefined, { ...answer, status: 'invalid' }, { ...answer, source: 'https://untrusted.example/traffic' }])('rejects an absent or invalid answer', async (value) => {
     const s = setup(); s.session.waitForCompletion.mockResolvedValue({ status: 'completed', answer: value });
     s.session.get.mockResolvedValue({ latestAnswer: value as typeof answer });
     await expect(readRerBTraffic({}, s.client)).rejects.toThrow();

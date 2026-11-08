@@ -24,22 +24,26 @@ describe('airport taxi capability policy', () => {
     expect(output.intent).toBe('question'); expect(output.option_id).toBeUndefined(); expect(output.reply).toContain('where should the taxi pick you up');
     expect(mentionsTaxiRequest('do not call me a taxi')).toBe(false);
   });
-  it.each(['origin', 'destination', 'deadline'] as const)('asks for missing %s without inventing facts or selecting', (field) => {
+  it.each(['origin', 'destination'] as const)('asks for missing %s without inventing facts or selecting', (field) => {
     const trip = { ...input.trip }; delete trip[field];
     const result = taxiTurn({ ...input, stage: 'CLARIFY', trip }, refusal);
     expect(result.intent).toBe('question'); expect(result.trip_patch).toBeUndefined(); expect(result.option_id).toBeUndefined(); expect(result.reply).toContain('I can book'); expect(result.reply).toContain('?');
   });
   it('keeps corrections and missing-field questions rather than choosing the old pickup', () => {
     const result = taxiTurn({ ...input, trip: { destination: 'CDG' } }, { ...refusal, intent: 'provide_info', trip_patch: { origin: 'Châtelet' } });
-    expect(result.intent).toBe('provide_info'); expect(result.trip_patch).toEqual({ origin: 'Châtelet' }); expect(result.option_id).toBeUndefined(); expect(result.reply).toContain('arrival cutoff');
+    expect(result.intent).toBe('provide_info'); expect(result.trip_patch).toEqual({ origin: 'Châtelet' }); expect(result.option_id).toBeUndefined(); expect(result.reply).toContain('check the options');
   });
   it('clarifies an unknown route instead of inventing an option', () => {
     const result = taxiTurn({ ...input, trip: { ...input.trip, destination: 'Beauvais' }, options: [] }, refusal);
-    expect(result.intent).toBe('question'); expect(result.reply).toContain('which airport'); expect(result.option_id).toBeUndefined(); expect(refusesTaxi(result.reply)).toBe(false);
+    expect(result.intent).toBe('question'); expect(result.reply).toContain('constraints'); expect(result.option_id).toBeUndefined(); expect(refusesTaxi(result.reply)).toBe(false);
   });
   it('keeps feasibility constraints when no offered taxi can meet them', () => {
     const result = taxiTurn({ ...input, options: [] }, refusal);
     expect(result.intent).toBe('question'); expect(result.reply).toContain('constraints'); expect(result.option_id).toBeUndefined();
+  });
+  it('does not introduce an airport when overriding a refusal on a city trip', () => {
+    const result = taxiTurn({ ...input, transcript: 'Can you help me?', trip: { ...input.trip, destination: 'Bercy' } }, refusal);
+    expect(result.reply).toContain('offered taxi'); expect(result.reply).not.toContain('airport');
   });
   it.each(['UNDERSTAND', 'RESEARCH', 'EXECUTE', 'CONFIRM', 'HANDOFF', 'AWAIT_PAYMENT'] as const)('does not start duplicate bookings or approve/pay in %s', (stage) => {
     const result = taxiTurn({ ...input, stage }, refusal);

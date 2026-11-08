@@ -3,7 +3,7 @@ import type { ConfirmationFields } from './confirmation.js';
 import { parisIso } from './understand.js';
 export function pickupWindow(trip: Trip, now: Date, journeyMinutes = 50) {
   const earliest = new Date(Math.ceil((now.getTime() + 5 * 60_000) / 900_000) * 900_000);
-  const latest = new Date(Date.parse(trip.deadline) - journeyMinutes * 60_000);
+  const latest = new Date(trip.deadline ? Date.parse(trip.deadline) - journeyMinutes * 60_000 : now.getTime() + 60 * 60_000);
   if (earliest > latest) throw new Error('No pickup window remains before the arrival deadline.');
   return { earliest, latest };
 }

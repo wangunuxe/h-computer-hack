@@ -37,6 +37,15 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it.each(['', 'not json'])('recovers a taxi trip through clarification after malformed Gemini output: %j', async (text) => {
+    const client = { models: { generateContent: vi.fn(async () => ({ text })) } };
+    const s = setup({ understand: (input) => understand(input, client), converse: async () => ({ intent: 'provide_info', confidence: 1, reply: 'Merci.', trip_patch: { origin: 'La Défense', destination: 'Bercy' } }) });
+    s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'Je veux un taxi' }); await flush();
+    expect(s.session.stage).toBe('CLARIFY');
+    await s.choose('La Défense vers Bercy');
+    expect(s.session.stage).toBe('CHOOSE');
+    expect(s.events).toContainEqual(expect.objectContaining({ type: 'options', items: expect.arrayContaining([expect.objectContaining({ id: 'paris-airport-shuttle' })]) }));
+  });
   it.each(['je veux un taxi', 'taxi', 'un taxi', 'call me a taxi', 'la navette'])('books the airport taxi from Étoile in the demo for "%s", with confirmation and user payment', async (choice) => {
     const client = { models: { generateContent: vi.fn(async () => ({ text: JSON.stringify({ trip: { origin: 'Étoile', destination: 'CDG' } }) })) } };
     const runBooking = vi.fn<SessionPorts['runBooking']>().mockImplementation(async (input) => {

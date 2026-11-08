@@ -445,7 +445,7 @@ export class VoilaSession {
     if (['CLARIFY', 'CHOOSE', 'UNDERSTAND', 'RESEARCH', 'PRESENT'].includes(stage) && ['provide_info', 'correct'].includes(result.intent) && result.confidence >= .65 && result.trip_patch && Object.keys(result.trip_patch).length) {
       const before = this.trip;
       if (result.trip_patch.origin && result.trip_patch.origin !== before.origin) this.pickupGps = undefined;
-      this.trip = TripSchema.partial().parse({ ...this.trip, ...result.trip_patch }); this.attempt = 0;
+      this.trip = TripSchema.partial().parse({ passengers: 1, luggage: 0, guide_dog: this.profile?.guide_dog ?? false, ...this.trip, ...result.trip_patch }); this.attempt = 0;
       const changedRoute = ['origin', 'destination', 'deadline'].some((key) => before[key as keyof Trip] !== undefined && before[key as keyof Trip] !== this.trip[key as keyof Trip]);
       const next = ++this.generation;
       if (changedRoute || !this.research) { this.flow.abort(); this.flow = new AbortController(); this.research = undefined; }

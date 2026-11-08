@@ -12,7 +12,7 @@ describe('decision speech', () => {
   it('only repeats the hint when a reminder actually re-reads the question', () => {
     const speech = new DecisionSpeech('fr');
     const event = { type: 'clarify', question: 'Est-ce correct ?', yes_no: true } as const;
-    const utterance = 'Est-ce correct ? Oui à gauche, non à droite.';
+    const utterance = 'Est-ce correct ? Oui en haut, non en bas.';
     expect(speech.utterance(event, 'CLARIFY')).toBe(utterance);
     expect(speech.utterance({ type: 'say', text: event.question }, 'CLARIFY')).toBeUndefined();
     expect(speech.utterance({ type: 'say', text: 'Je reste en attente.' }, 'CLARIFY')).toBe('Je reste en attente.');

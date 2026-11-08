@@ -41,8 +41,6 @@ function announce(text: string, assertive = false) {
 }
 const voice = new SpeechQueue(new BrowserSpeech(() => {
   speechNeedsGesture = true;
-  $('errors').textContent = language === 'fr' ? 'La voix est indisponible. Touchez le micro pour réessayer.' : 'Speech is unavailable. Tap the microphone to retry.';
-  $('errors').setAttribute('role', 'alert'); $('errors').setAttribute('aria-live', 'assertive');
 }), language === 'fr' ? 'fr-FR' : 'en-GB');
 function unlock() {
   $('errors').setAttribute('aria-live', 'off'); $('errors').setAttribute('role', 'none');
@@ -58,7 +56,7 @@ function cue(stopping = false) {
   } catch { /* Haptics and earcons are optional. */ }
 }
 function send(event: WebEvent) {
-  if (socket?.readyState !== WebSocket.OPEN) { announce(t().connectionRetry, true); return false; }
+  if (socket?.readyState !== WebSocket.OPEN) return false;
   socket.send(JSON.stringify(event)); return true;
 }
 function openPayment(url: string) {
@@ -86,8 +84,7 @@ function connection(ready: boolean) {
   recordingLabel();
 }
 function connectionFailure() {
-  const first = !connectionFailed; connectionFailed = true; connection(false);
-  if (first) announce(t().connectionRetry, true);
+  connectionFailed = true; connection(false);
 }
 function retryConnection() {
   voice.resume(); unlock(); clearTimeout(retry); attempt?.cancel(); attempt = undefined; connecting = false;
@@ -215,7 +212,8 @@ function release(reason = 'activation') {
 const talk = $<HTMLButtonElement>('talk');
 traceMicEvents(talk);
 bindMicControls(talk, $('dock'), { active: () => !!recorder, start, release });
-$('stop').onclick = () => { voice.bargeIn(); voice.resume(); unlock(); recorder?.cancel('stop-button'); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); };
+function stopSession() { voice.bargeIn(); voice.resume(); unlock(); recorder?.cancel('stop-button'); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); }
+$('stop').onclick = stopSession;
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) { const node = document.createElement(tag); if (text) node.textContent = text; return node; }
 function button(text: string, action: () => void) { const node = element('button', text); node.type = 'button'; node.onclick = () => { if (!node.isConnected || node.disabled) return; unlock(); action(); }; return node; }
@@ -257,7 +255,12 @@ function render() {
   }
   if (['HANDOFF', 'AWAIT_PAYMENT'].includes(state.stage) && state.payment) {
     const link = safeLink(state.payment.url, t().payment + ' — ' + money(state.payment.amount) + ' — ' + state.payment.merchant);
-    if (link) { link.className = 'payment'; link.setAttribute('aria-label', link.textContent!); link.textContent = t().payment; actions.append(primary(link)); }
+    if (link) {
+      link.className = 'payment'; link.id = 'payment-open'; link.setAttribute('aria-label', link.textContent!); link.textContent = t().payment;
+      const cancel = button(t().no, stopSession); cancel.id = 'payment-cancel'; cancel.className = 'secondary'; cancel.setAttribute('aria-label', t().no);
+      const choices = element('div'); choices.className = 'decision payment-choice'; choices.setAttribute('role', 'group'); choices.dataset.speech = link.getAttribute('aria-label')!;
+      choices.append(primary(link), cancel); actions.append(choices);
+    }
   }
   if (state.stage === 'DONE' && state.booking) {
     const booking = state.booking; const card = primary(element('article')); card.className = 'booking-card'; card.setAttribute('aria-labelledby', 'booking-heading');
@@ -266,7 +269,8 @@ function render() {
     card.append(heading, element('p', `${pickup} · ${booking.pickup_point}`), element('p', `${t().ref} ${booking.ref} · ${money(booking.price)}`)); actions.append(card);
   }
   document.body.dataset.cards = String(actions.children.length > 0);
-  const cards = Array.from(actions.children).filter((node) => node.className !== 'decision').map((node) => node.tagName === 'A' || node.tagName === 'BUTTON' ? node.getAttribute('aria-label') ?? node.textContent : node.textContent).join('. ');
+  document.body.dataset.split = String(!!actions.querySelector('.decision'));
+  const cards = Array.from(actions.children as HTMLCollectionOf<HTMLElement>).filter((node) => node.className !== 'decision').map((node) => node.dataset.speech ?? (node.tagName === 'A' || node.tagName === 'BUTTON' ? node.getAttribute('aria-label') ?? node.textContent : node.textContent)).join('. ');
   if (cards !== lastCards) { lastCards = cards; if (cards) { voice.enqueue(cards, 'cards'); lastNarrated = Date.now(); } }
   {
     const target = document.getElementById('primary-content');

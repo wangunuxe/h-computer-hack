@@ -29,8 +29,11 @@ body[data-cards=true] #caption { max-height: 3.5rem; }
 .option-card, .payment { display: block; width: 100%; text-align: left; text-decoration: none; line-height: 1.45; }
 .option-card span { display: block; }
 .option-card .detail { font-size: 1.2rem; font-weight: 500; }
-.decision { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
-.decision button { min-height: 6rem; width: 100%; min-width: 0; padding-inline: .5rem; overflow-wrap: anywhere; }
+.decision { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+.decision button { min-height: max(6rem, 28svh); width: 100%; min-width: 0; padding-inline: .5rem; overflow-wrap: anywhere; display: grid; place-items: center; text-align: center; }
+.decision .payment { min-height: max(6rem, 28svh); }
+body[data-split=true] #talk { min-height: 6rem; flex-direction: row; gap: 1rem; }
+body[data-split=true] #talk svg { width: 2.5rem; height: 2.5rem; }
 .payment { text-align: center; min-height: 6rem; display: grid; place-items: center; }
 .booking-card { padding: 1.25rem; border: 2px solid var(--accent); border-radius: 1.25rem; font-size: 1.2rem; line-height: 1.5; }
 .booking-card h2 { font-size: 1.4rem; margin: 0 0 .5rem; }

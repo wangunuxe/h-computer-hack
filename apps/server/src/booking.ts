@@ -153,6 +153,7 @@ async function runBookingAttempt(input: BookingInput, client: BookingClient) {
         const problem = pickupProblem(approvedDetails!, window, new Date());
         if (problem) return `ERROR: ${problem}`;
         const parsed = z.object({ amount: z.number().nonnegative(), merchant: z.string().min(1), summary: z.string().min(1) }).parse(args);
+        if (parsed.amount !== approvedDetails!.total_price) return 'ERROR: The payment amount must match the approved transfer total.';
         let url: URL;
         try { url = new URL(observedUrl ?? ''); } catch { return 'ERROR: No payment URL in the latest observation.'; }
         const stripe = url.protocol === 'https:' && url.host === 'checkout.stripe.com';

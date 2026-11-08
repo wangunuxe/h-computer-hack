@@ -5,6 +5,7 @@ import { Recorder, type Credentials } from './recorder.js';
 import { clientProfile, deviceLanguage } from './preferences.js';
 import { labels, optionLabel, stages } from './labels.js';
 import { bindMicControls, micControlState } from './mic-controls.js';
+import { phoneLocation } from './location.js';
 import { recordingDiagnostic, recordingErrorKeys } from './recording-error.js';
 import { ConnectionAttempt, replaceOnForeground, requiresFreshSession } from './connection.js';
 import { SessionStorage } from './session-storage.js';
@@ -65,6 +66,7 @@ function sendTranscript(text: string) {
   }
   if (event && send(event) && credentials) sessionStorage.save(credentials, helloSent);
 }
+const requestPhoneLocation = phoneLocation((request_id, gps) => { send({ type: 'location_result', request_id, gps }); });
 function connection(ready: boolean) {
   connected = ready; document.body.dataset.connected = String(ready);
   if (ready && connectionFailed) { connectionFailed = false; $('errors').replaceChildren(); }
@@ -123,6 +125,7 @@ async function connect() {
         if (event.type === 'confirm') announce(event.summary);
         if (event.type === 'error') announce(event.message, true);
         if (event.type === 'clarify') announce(event.question);
+        if (event.type === 'location_request') requestPhoneLocation(event.request_id);
         if (!['say', 'clarify', 'error', 'feed'].includes(event.type)) render();
         if (event.type === 'feed') renderFeed();
       } catch { announce(t().error, true); }

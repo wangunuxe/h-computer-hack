@@ -15,7 +15,10 @@ describe('simulated address suggestions', () => {
   });
   it('keeps an unlisted pickup exactly, with approximate simulation coordinates', () => {
     expect(suggest('12 Rue de la Paix, Paris', true)).toEqual([['12 Rue de la Paix, Paris', 48.8566, 2.3522]]);
-    expect(suggest('12 Rue de la Paix, Paris', false)).toEqual([]);
+    expect(suggest('12 Rue de la Paix, Paris', false)).toEqual([['12 Rue de la Paix, Paris', 48.8566, 2.3522]]);
     expect(suggest('', true)).toEqual([]); expect(suggest(' ', true)).toEqual([]); expect(suggest('ab', true)).toEqual([]);
+  });
+  it.each(['La Défense', 'Bercy', 'Gare de Lyon'])('offers %s as either pickup or dropoff', (address) => {
+    expect(suggest(address, false)).toEqual(suggest(address, true)); expect(suggest(address, false)).toHaveLength(1);
   });
 });

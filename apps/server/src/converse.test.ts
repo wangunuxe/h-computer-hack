@@ -11,7 +11,7 @@ describe('Gemini turn interpreter', () => {
       const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify({ intent: 'question', reply: "I can't book a taxi. Ask station staff.", confidence: .99 }) });
       const output = await converse({ ...input, stage, transcript, language, trip: { origin: 'Étoile', destination: 'CDG', deadline: '2027-01-15T21:00:00+01:00' } }, { models: { generateContent } });
       expect(output).toMatchObject({ intent: 'choose', option_id: 'paris-airport-shuttle' });
-      expect(output.reply).not.toMatch(/can't|Ask station/); expect(generateContent.mock.calls[0]![0].config.systemInstruction).toContain('Voilà CAN book the airport taxi via H');
+      expect(output.reply).not.toMatch(/can't|Ask station/); expect(generateContent.mock.calls[0]![0].config.systemInstruction).toContain('Voilà CAN book a taxi for any destination via H');
     }
   });
   it('does not expose a self-introduced name after an honorific in the SDK request', async () => {

@@ -1,6 +1,7 @@
 import { OptionSchema, type Option } from '@voila/shared';
 import { z } from 'zod';
 import { presetOptions } from '../options.js';
+import { redactGpsCoordinates } from '../location.js';
 
 const httpUrl = z.url().refine((url) => ['https:', 'http:'].includes(new URL(url).protocol));
 const resultSchema = z.object({ results: z.array(z.object({
@@ -25,7 +26,7 @@ export async function searchDisruptionAndAlternatives({ query, context, signal, 
     const request = async () => {
       const response = await fetcher('https://api.linkup.so/v1/search', {
         method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: [query, context].filter(Boolean).join('\n'), depth: 'fast', outputType: 'searchResults', maxResults: 5 }),
+        body: JSON.stringify({ q: redactGpsCoordinates([query, context].filter(Boolean).join('\n')), depth: 'fast', outputType: 'searchResults', maxResults: 5 }),
         signal: controller.signal,
       });
       if (!response.ok) throw new Error(`Linkup search HTTP ${response.status}.`);

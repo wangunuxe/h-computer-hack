@@ -20,6 +20,14 @@ beforeEach(() => {
 });
 afterEach(() => { stop?.(); vi.useRealTimers(); vi.clearAllMocks(); });
 describe('live showcase pairing DOM', () => {
+  it.each(['fetch', 'socket'])('retries a stalled %s without waiting forever', async (kind) => {
+    const ticket = () => new Response(JSON.stringify({ code: 'ABC234', watch_id: 'id', watch_token: 'token' }));
+    const fetcher = vi.fn().mockResolvedValue(ticket());
+    if (kind === 'fetch') fetcher.mockImplementationOnce(() => new Promise(() => {}));
+    stop = startWatchPage({ fetcher, Socket: Socket as unknown as typeof WebSocket });
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(kind === 'fetch' ? fetcher.mock.calls.length : Socket.instances.length).toBe(2);
+  });
   it('resumes after repeated bfcache restores and refreshes an invalidated ticket', async () => {
     const transition = (type: string) => window.dispatchEvent(Object.assign(new Event(type), { persisted: true }));
     const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ code: 'ABC234', watch_id: 'old', watch_token: 'old-token' }))).mockResolvedValueOnce(new Response(JSON.stringify({ code: 'NEW234', watch_id: 'new', watch_token: 'new-token' })));

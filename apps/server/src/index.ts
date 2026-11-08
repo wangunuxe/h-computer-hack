@@ -140,6 +140,7 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
           const forwarded = process.env.TRUST_PROXY === '1' ? request.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() : undefined;
           watches.pair(parsed.data.watch, id, forwarded ?? request.socket.remoteAddress ?? 'unknown');
         }
+        if (parsed.success && parsed.data.type === 'final_transcript' && parsed.data.text.trim() && ['LISTEN', 'DONE'].includes(session.stage)) watches.clearHistory(id);
         if (parsed.success && (parsed.data.type === 'final_transcript' || parsed.data.type === 'user_reply')) watches.mirror(id, session.watchEvent(parsed.data));
         session.handle(parsed.success ? parsed.data : null);
       });

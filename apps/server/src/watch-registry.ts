@@ -45,8 +45,10 @@ export class WatchRegistry {
   }
   connected(session: string) { for (const entry of this.entries.values()) if (entry.session === session) { entry.online = true; this.timers.clearTimeout(entry.timer); this.send(entry, { type: 'paired', stage: this.stage(session) }); } }
   disconnected(session: string) { for (const [id, entry] of this.entries) if (entry.session === session) { entry.online = false; this.send(entry, { type: 'unpaired' }); this.expire(id, entry); } }
+  clearHistory(session: string) { for (const entry of this.entries.values()) if (entry.session === session) entry.recent = []; }
   mirror(session: string, event: WatchPayload | undefined) {
     if (!event) return;
+    if (event.type === 'stage' && ['LISTEN', 'DONE'].includes(event.stage)) this.clearHistory(session);
     for (const entry of this.entries.values()) if (entry.session === session && entry.online) {
       entry.recent.push(event); if (entry.recent.length > 32) entry.recent.shift();
       this.send(entry, { type: 'watch', event });

@@ -7,6 +7,18 @@ import { createSessionServer } from './index.js';
 
 afterEach(() => vi.useRealTimers());
 describe('read-only desktop watches', () => {
+  it('drops replay history at session reset and completion boundaries', () => {
+    const registry = new WatchRegistry();
+    try {
+      const ticket = registry.issue('one'); if ('error' in ticket) throw Error('ticket');
+      registry.attach(ticket.watch_id, ticket.watch_token, vi.fn()); registry.pair(ticket.code, 'a');
+      for (const stage of ['LISTEN', 'DONE'] as const) {
+        registry.mirror('a', { type: 'say', text: 'old trip' }); registry.mirror('a', { type: 'stage', stage });
+        const late = vi.fn(); registry.attach(ticket.watch_id, ticket.watch_token, late);
+        expect(JSON.stringify(late.mock.calls)).not.toContain('old trip');
+      }
+    } finally { registry.dispose(); }
+  });
   it('caps capacity, expires never-paired codes and rate limits guesses silently', () => {
     vi.useFakeTimers(); const registry = new WatchRegistry(() => 'LISTEN', globalThis, 1);
     try {
@@ -78,6 +90,18 @@ describe('read-only desktop watches', () => {
       expect(phoneEvents.some((event) => event.type === 'error')).toBe(false);
       expect(events.some((event) => event.type === 'watch' && event.event.type === 'final_transcript')).toBe(true);
       for (const secret of ['Karim','0612345678','karim@example.com','48.88354','2.17661','attacker','"profile"']) expect(JSON.stringify(events)).not.toContain(secret);
+      phone.send(JSON.stringify({ type: 'user_reply', text: 'efface mes informations' }));
+      await vi.waitFor(() => expect(phoneEvents.some((event) => event.type === 'say' && event.text.includes('Vos informations sont effacées'))).toBe(true));
+      const replay: any[] = [];
+      const late = new WebSocket(`ws://127.0.0.1:${address.port}/ws/watch/${ticket.watch_id}?token=${ticket.watch_token}`); late.on('message', (data) => replay.push(JSON.parse(data.toString()))); await once(late, 'open');
+      await vi.waitFor(() => expect(JSON.stringify(replay)).toContain('Vos informations sont effacées'));
+      expect(JSON.stringify(replay)).not.toContain('Bercy'); expect(replay.some((event) => event.event?.type === 'options')).toBe(false);
+      phone.send(JSON.stringify({ type: 'final_transcript', text: 'Nouvelle demande vers Bercy' }));
+      await vi.waitFor(() => expect(running.sessions.get(issued.id)?.stage).toBe('CHOOSE'));
+      const fresh: any[] = []; const freshWatch = new WebSocket(`ws://127.0.0.1:${address.port}/ws/watch/${ticket.watch_id}?token=${ticket.watch_token}`); freshWatch.on('message', (data) => fresh.push(JSON.parse(data.toString()))); await once(freshWatch, 'open');
+      await vi.waitFor(() => expect(fresh.some((event) => event.event?.type === 'options')).toBe(true));
+      expect(JSON.stringify(fresh)).not.toContain('Vos informations sont effacées'); expect(JSON.stringify(fresh)).toContain('Nouvelle demande vers Bercy');
+      late.close(); freshWatch.close();
       phone.close(); await vi.waitFor(() => expect(events.at(-1)).toEqual({ type: 'unpaired' })); watch.close();
     } finally { await running.close(); }
   });

@@ -86,6 +86,27 @@ button,select{background:rgba(255,255,255,.62);-webkit-backdrop-filter:blur(12px
 button.primary{background:var(--iri);color:#24283D;border-color:rgba(255,255,255,.9);box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 10px 24px -10px rgba(185,120,255,.7)}
 .note{color:#6A7090}
 
+/* ---- Hackathon tools dock ---- */
+.tools{position:absolute;right:12px;bottom:max(84px,calc(100% - clamp(380px,58vw,600px) + 8px));display:grid;gap:2px;min-width:178px;padding:8px 8px 6px;font:12px/1.3 var(--mono);color:var(--muted);background:rgba(255,255,255,.7);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border:1px solid var(--glass-edge);border-radius:16px;box-shadow:0 1px 0 #fff inset,0 10px 24px -14px rgba(96,86,160,.4);pointer-events:none}
+.tools .label{margin:0 0 2px 8px;font-size:10px}
+.tool{display:grid;grid-template-columns:10px 1fr auto;align-items:center;column-gap:8px;padding:3px 8px;border-radius:10px;transition:background .25s,box-shadow .25s}
+.tool i{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--t);box-sizing:border-box}
+.tool b{font-weight:500;color:#6A7090}
+.tool small{grid-column:2/4;font-size:10.5px;color:#4A5070;display:none}
+.tool em{font:700 9.5px/1 var(--mono);font-style:normal;letter-spacing:.08em;text-transform:uppercase;color:#fff;background:var(--t);border-radius:999px;padding:3px 6px;visibility:hidden}
+.tool[data-state="used"] i{background:var(--t)}
+.tool[data-state="used"] b{color:var(--fg)}
+.tool[data-state="active"]{background:color-mix(in srgb,var(--t) 13%,#fff);box-shadow:inset 0 0 0 1.5px var(--t),0 8px 18px -10px var(--t)}
+.tool[data-state="active"] i{background:var(--t);animation:toolPulse 1.2s ease-out infinite}
+.tool[data-state="active"] b{color:var(--fg);font-weight:700}
+.tool[data-state="active"] small{display:block}
+.tool[data-state="active"] em{visibility:visible}
+.tool.ping{animation:toolPing .9s ease-out}
+@keyframes toolPulse{from{box-shadow:0 0 0 0 color-mix(in srgb,var(--t) 65%,transparent)}to{box-shadow:0 0 0 9px transparent}}
+@keyframes toolPing{from{background:color-mix(in srgb,var(--t) 32%,#fff)}}
+@media (max-width:860px){.tools{display:none}}
+@media (prefers-reduced-motion:reduce){.tool[data-state="active"] i,.tool.ping{animation:none}}
+
 /* ---- Agent browser card ---- */
 .log{height:150px}
 .bwhint{float:right;letter-spacing:.02em;text-transform:none;color:#8A90AC}
@@ -182,6 +203,7 @@ dialog#bwDlg::backdrop{background:rgba(60,56,100,.28);-webkit-backdrop-filter:bl
         <div><i style="background:#F07F1B"></i>agent path</div>
       </div>
       <div class="caption" id="caption" aria-live="polite">Press Play.</div>
+      <div class="tools" id="tools" role="list" aria-label="Hackathon tools"><p class="label">Hackathon tools</p></div>
       <div class="tip" id="tip" hidden></div>
     </div>
 
@@ -350,6 +372,33 @@ const toS=(x,y)=>[W/2+(x-cam.x)*S*cam.z,H*.44+(y-cam.y)*S*cam.z];
 // chips
 const chips=$('chips');
 STAGES.forEach((s,i)=>{const b=document.createElement('button');b.className='chip';b.textContent=s.name;b.style.setProperty('--c',s.c);b.onclick=()=>jump(i);chips.appendChild(b)});
+// hackathon tools each node calls
+const TOOLS={h:{name:'H Agents',role:'holo4 · cloud browser',c:'#F07F1B'},gladia:{name:'Gladia',role:'live speech-to-text',c:'#2F6FEB'},linkup:{name:'Linkup',role:'web search · sources',c:'#12A594'},stripe:{name:'Stripe',role:'Checkout · Apple Pay',c:'#635BFF'}};
+const DEMO_TOOLS=[['gladia'],[],['linkup'],['gladia'],['h'],['h','gladia'],['stripe'],[]];
+const LIVE_TOOLS=[['gladia'],[],['h','linkup'],['gladia'],['h','gladia'],['h'],['stripe'],[]];
+const toolsFor=i=>(liveMode?LIVE_TOOLS:DEMO_TOOLS)[i]||[];
+const toolsEl=$('tools'),toolRows={};
+Object.entries(TOOLS).forEach(([id,t])=>{const r=document.createElement('div');r.className='tool';r.setAttribute('role','listitem');r.style.setProperty('--t',t.c);
+  r.innerHTML=`<i></i><b>${t.name}</b><em>calling</em><small>${t.role}</small>`;toolsEl.appendChild(r);toolRows[id]=r});
+let toolsKey='';
+function paintTools(){const act=si>=0&&si<STAGES.length?toolsFor(si):[],used=new Set();
+  STAGES.forEach((s,i)=>{if(liveMode?liveSeen.has(i):i<si)toolsFor(i).forEach(id=>used.add(id))});
+  const key=act.join()+'|'+[...used].join();if(key===toolsKey)return;toolsKey=key;
+  Object.entries(toolRows).forEach(([id,r])=>r.dataset.state=act.includes(id)?'active':used.has(id)?'used':'')}
+function pingTool(id){const r=toolRows[id];if(!r)return;r.classList.remove('ping');void r.offsetWidth;r.classList.add('ping')}
+function toolTags(i,x,y,below,on,act,vis){const T=toolsFor(i);if(!T.length)return;
+  ctx.font='600 11px "IBM Plex Mono", monospace';const ws=T.map(id=>ctx.measureText(TOOLS[id].name).width+26),total=ws.reduce((a,b)=>a+b,0)+(T.length-1)*6;
+  let bx=below?x-total/2:x+14;const by=below?y+38:y+14;if(below)bx=Math.max(8,Math.min(W-8-total,bx));else if(bx+total>W-8)bx=x-14-total;
+  const p=(clock%1400)/1400;
+  T.forEach((id,k)=>{const t=TOOLS[id],w=ws[k];const rr=(a,b,c,d,r)=>{ctx.beginPath();ctx.roundRect?ctx.roundRect(a,b,c,d,r):ctx.rect(a,b,c,d)};
+    ctx.globalAlpha=vis*(act||on?1:.75);
+    if(act){if(!RM){ctx.strokeStyle=t.c;ctx.lineWidth=1.5;ctx.globalAlpha=vis*.6*(1-p);rr(bx-p*5,by-p*5,w+p*10,20+p*10,10+p*5);ctx.stroke();ctx.globalAlpha=vis}
+      ctx.shadowColor=t.c;ctx.shadowBlur=RM?0:14;ctx.fillStyle=t.c;rr(bx,by,w,20,10);ctx.fill();ctx.shadowBlur=0}
+    else{ctx.fillStyle='#FFFFFF';ctx.strokeStyle=on?t.c:'#CDD4E0';ctx.lineWidth=1.2;rr(bx,by,w,20,10);ctx.fill();ctx.stroke()}
+    ctx.fillStyle=act?'#FFFFFF':on?t.c:'#CDD4E0';ctx.beginPath();ctx.arc(bx+11,by+10,3.5,0,6.283);ctx.fill();
+    ctx.font='600 11px "IBM Plex Mono", monospace';ctx.fillStyle=act?'#FFFFFF':on?'#141B2B':'#8C98AD';ctx.fillText(t.name,bx+19,by+14);
+    bx+=w+6});
+  ctx.globalAlpha=vis}
 function paintChips(){[...chips.children].forEach((b,i)=>b.dataset.state=i<si?'done':i===si?'active':'')}
 
 // wave
@@ -406,7 +455,7 @@ function tick(now){
   $('budget').textContent=fmt(600-simElapsed());
   speaking=Math.max(0,speaking-dt/1000);[...wave.children].forEach((b,i)=>b.style.height=(speaking>0?4+Math.abs(Math.sin(clock/120+i*.7))*14*Math.min(1,speaking):4)+'px');
   if(!liveMode&&started&&si>=STAGES.length){logEl.innerHTML='';enter(0);playing=true}
-  if(!liveMode)bwSync();draw();requestAnimationFrame(tick);
+  if(!liveMode)bwSync();paintTools();draw();requestAnimationFrame(tick);
 }
 
 function arc(a,b,col,alpha,w,bend){const[x1,y1]=toS(a.x,a.y),[x2,y2]=toS(b.x,b.y);const m=project({w:{x:(a.w.x+b.w.x)/2*bend,y:(a.w.y+b.w.y)/2*bend-.06,z:(a.w.z+b.w.z)/2*bend}});const[cx,cy]=toS(m.x,m.y);alpha*=depA(Math.min(a.d,b.d)+.3);ctx.strokeStyle=col;ctx.globalAlpha=alpha;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x1,y1);ctx.quadraticCurveTo(cx,cy,x2,y2);ctx.stroke();ctx.globalAlpha=1;return[x1,y1,cx,cy,x2,y2]}
@@ -439,7 +488,7 @@ function draw(){
     if(act&&!RM){ctx.strokeStyle=s.c;ctx.globalAlpha=.5*vis*(1-(clock%1400)/1400);ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,10+(clock%1400)/1400*16,0,6.283);ctx.stroke();ctx.globalAlpha=vis}
     ctx.fillStyle=on?s.c:'#CDD4E0';
     ctx.beginPath();ctx.arc(x,y,(act?10:8)*sz,0,6.283);ctx.fill();ctx.shadowBlur=0;
-    if(!(s.exec&&mazeA>.3)){const below=Math.abs(Math.sin(s.a))<.5;label(s.name,below?x:x+14,below?y+28:y+5,on?'#141B2B':'#5E6B82',14,true,below)}
+    if(!(s.exec&&mazeA>.3)){const below=Math.abs(Math.sin(s.a))<.5;label(s.name,below?x:x+14,below?y+28:y+5,on?'#141B2B':'#5E6B82',14,true,below);toolTags(i,x,y,below,on,act,vis)}
     ctx.globalAlpha=1});
   if(mazeA>0)drawMaze();
 }
@@ -483,7 +532,7 @@ cv.addEventListener('pointerdown',e=>{return;dragging=true;dragMoved=0;dx0=e.cli
 cv.addEventListener('pointermove',e=>{if(!dragging)return;const ddx=e.clientX-dx0,ddy=e.clientY-dy0;dx0=e.clientX;dy0=e.clientY;dragMoved+=Math.abs(ddx)+Math.abs(ddy);rot-=ddx*.008;tilt=Math.max(.05,Math.min(1.1,tilt+ddy*.005));cv.style.cursor='grabbing';tip.hidden=true});
 cv.addEventListener('pointerup',()=>{dragging=false;cv.style.cursor='default'});
 cv.addEventListener('mousemove',e=>{if(dragging)return;const[i,mx,my]=hit(e);if(i<0||mazeA>.3){tip.hidden=true;cv.style.cursor='default';return}
-  const s=STAGES[i];cv.style.cursor=liveMode?'default':'pointer';tip.innerHTML=`<strong style="color:${s.c}">${s.name}</strong><span>${liveMode?'Live backend events':s.tech}</span>${liveMode?'':`<div>${s.cap}</div>`}`;tip.hidden=false;
+  const s=STAGES[i];cv.style.cursor=liveMode?'default':'pointer';const T=toolsFor(i);tip.innerHTML=`<strong style="color:${s.c}">${s.name}</strong><span>${liveMode?'Live backend events':s.tech}</span>${T.length?`<span style="display:block">calls ${T.map(id=>TOOLS[id].name).join(' + ')}</span>`:''}${liveMode?'':`<div>${s.cap}</div>`}`;tip.hidden=false;
   const tw=tip.offsetWidth;tip.style.left=Math.min(mx+14,W-tw-8)+'px';tip.style.top=(my+14)+'px'});
 cv.addEventListener('mouseleave',()=>tip.hidden=true);
 cv.addEventListener('click',e=>{if(dragMoved>5)return;const[i]=hit(e);if(i>=0&&mazeA<.3)jump(i)});
@@ -634,6 +683,7 @@ addEventListener('showcase-mode',e=>{
 addEventListener('showcase-event',e=>{
   if(!liveMode)return;const event=e.detail;
   if(event.type==='stage'){setLiveStage(event.stage);return;}
+  const tool={final_transcript:'gladia',user_reply:'gladia',agent_step:'h',confirm:'h',payment_handoff:'stripe'}[event.type]??(event.type==='feed'?{traffic:'h',research:'linkup'}[event.kind]:undefined);if(tool)pingTool(tool);
   const entry=liveEntry(event);if(entry){const row=document.createElement('li'),stamp=document.createElement('b');const elapsed=Math.floor(Math.max(0,Date.now()-liveStarted)/1000);stamp.textContent=String(Math.floor(elapsed/60)).padStart(2,'0')+':'+String(elapsed%60).padStart(2,'0');row.append(stamp,document.createTextNode('  '+entry[0]+'  '+entry[1]));logEl.append(row);while(logEl.children.length>100)logEl.firstChild.remove();logEl.scrollTop=logEl.scrollHeight;}
   if(event.type==='feed'&&event.kind==='traffic'){for(const match of event.text.matchAll(/\b(?:RER\s+[A-E]|M\s*\d{1,2}(?:bis)?|(?:ligne|line)\s+\d{1,2}(?:bis)?)\b/gi)){researchLines.add(match[0].replace(/^(?:ligne|line)\s+/i,'M').replace(/^M\s+/i,'M').toUpperCase());}if(currentLiveStage==='RESEARCH'&&researchLines.size)setLiveStage('RESEARCH');}
   if(event.type==='say')say('Voilà',event.text);

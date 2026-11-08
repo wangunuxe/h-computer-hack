@@ -8,6 +8,17 @@ const at = new Date('2026-11-09T11:00:00Z');
 describe('shared route fare from narration through checkout', () => {
   beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-09T09:00:00Z')); });
   afterEach(() => vi.useRealTimers());
+  it.each(['pickup', 'destination'])('reuses the verified unchanged %s and geocodes only the changed endpoint', async (unchanged) => {
+    const changed = '20 Rue de la Paix, 75002 Paris', point = { latitude: 48.8584, longitude: 2.2945, paris: true };
+    const store = createStore(), geocodeFetch = vi.fn<typeof fetch>(async (url) => new Response(JSON.stringify({ features: new URL(String(url)).searchParams.get('q') === changed ? [{ geometry: { coordinates: [2.33, 48.8683] }, properties: { score: .9, citycode: '75102' } }] : [] })));
+    const app = createApp({ store, env: {}, geocodeFetch });
+    const response = await app.request('/fr/reservation/?difficulty=easy'), base = response.headers.get('location')!.replace(/\/route$/, '');
+    const draft = [...store.drafts.values()][0]!;
+    draft.fare = { origin: unchanged === 'pickup' ? 'Tour Eiffel' : 'CDG', destination: unchanged === 'pickup' ? 'CDG' : 'Tour Eiffel', from: unchanged === 'pickup' ? point : undefined, to: unchanged === 'destination' ? point : undefined, at: at.toISOString(), passengers: 1 };
+    expect((await app.request(base + '/route', { method: 'POST', body: new URLSearchParams({ pickup: unchanged === 'pickup' ? 'Tour Eiffel' : changed, dropoff: unchanged === 'destination' ? 'Tour Eiffel' : changed, date: '2026-11-09', time: '12:00', pickup_lat: '', pickup_lng: '', dropoff_lat: '', dropoff_lng: '' }) })).status).toBe(303);
+    expect(geocodeFetch).toHaveBeenCalledOnce(); expect(new URL(String(geocodeFetch.mock.calls[0]![0])).searchParams.get('q')).toBe(changed);
+    expect(unchanged === 'pickup' ? draft.fare.from : draft.fare.to).toEqual(point); expect(estimateTaxi(draft.fare).fallback).toBe(false);
+  });
   it('keeps a known expanded landmark without geocoding and never falls back on an unverified route edit', async () => {
     const store = createStore(), geocodeFetch = vi.fn<typeof fetch>(async () => new Response('{"features":[]}'));
     const app = createApp({ store, env: {}, geocodeFetch });

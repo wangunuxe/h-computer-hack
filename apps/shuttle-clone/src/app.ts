@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { TaxiQuoteSchema, resolveTaxiQuote, taxiPlacesEquivalent, taxiPoint, parisPickupTime } from '@voila/shared';
+import { TaxiQuoteSchema, geocodeTaxiPlace, taxiPlacesEquivalent, taxiPoint, parisPickupTime } from '@voila/shared';
 import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -87,11 +87,18 @@ export function createApp({
     if (draft.orderId) return c.text('An order already exists for this draft', 409);
     const pickup = parisPickupTime(r.date, r.time);
     if (!pickup) return c.html(routePage(draft, 'Invalid or ambiguous Paris pickup time.', values), 400);
-    const sameStops = draft.fare && taxiPlacesEquivalent(draft.fare.origin, r.pickup) && taxiPlacesEquivalent(draft.fare.destination, r.dropoff);
-    if (sameStops) draft.fare = { ...draft.fare!, at: pickup.toISOString() };
+    const sameOrigin = draft.fare && taxiPlacesEquivalent(draft.fare.origin, r.pickup);
+    const sameDestination = draft.fare && taxiPlacesEquivalent(draft.fare.destination, r.dropoff);
+    const quotedFrom = draft.fare && (draft.fare.from ?? taxiPoint(draft.fare.origin));
+    const quotedTo = draft.fare && (draft.fare.to ?? taxiPoint(draft.fare.destination));
+    if (sameOrigin && sameDestination) draft.fare = { ...draft.fare!, at: pickup.toISOString() };
     else {
-      const resolved = await resolveTaxiQuote({ origin: r.pickup, destination: r.dropoff, passengers: draft.fare?.passengers ?? Number(draft.info?.passengers ?? 1) }, { now: pickup, fetch: geocodeFetch });
-      if (draft.fare && (((draft.fare.from ?? taxiPoint(draft.fare.origin)) && !resolved.from) || ((draft.fare.to ?? taxiPoint(draft.fare.destination)) && !resolved.to))) return c.html(routePage(draft, 'Could not verify the changed addresses. Keep the original stop or ask Voilà for new options.', values), 400);
+      const [from, to] = await Promise.all([
+        sameOrigin && quotedFrom ? quotedFrom : geocodeTaxiPlace(r.pickup, { fetch: geocodeFetch }),
+        sameDestination && quotedTo ? quotedTo : geocodeTaxiPlace(r.dropoff, { fetch: geocodeFetch }),
+      ]);
+      if ((quotedFrom && !from) || (quotedTo && !to)) return c.html(routePage(draft, 'Could not verify the changed addresses. Keep the original stop or ask Voilà for new options.', values), 400);
+      const resolved = TaxiQuoteSchema.parse({ origin: r.pickup, destination: r.dropoff, from, to, passengers: draft.fare?.passengers ?? Number(draft.info?.passengers ?? 1), at: pickup.toISOString() });
       draft.fare = resolved;
     }
     draft.route = r; draft.vehicle = undefined; draft.info = undefined;

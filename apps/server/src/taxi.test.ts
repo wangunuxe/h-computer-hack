@@ -41,6 +41,10 @@ describe('airport taxi capability policy', () => {
     const result = taxiTurn({ ...input, options: [] }, refusal);
     expect(result.intent).toBe('question'); expect(result.reply).toContain('constraints'); expect(result.option_id).toBeUndefined();
   });
+  it('does not introduce an airport when overriding a refusal on a city trip', () => {
+    const result = taxiTurn({ ...input, transcript: 'Can you help me?', trip: { ...input.trip, destination: 'Bercy' } }, refusal);
+    expect(result.reply).toContain('offered taxi'); expect(result.reply).not.toContain('airport');
+  });
   it.each(['UNDERSTAND', 'RESEARCH', 'EXECUTE', 'CONFIRM', 'HANDOFF', 'AWAIT_PAYMENT'] as const)('does not start duplicate bookings or approve/pay in %s', (stage) => {
     const result = taxiTurn({ ...input, stage }, refusal);
     expect(result.intent).toBe('question'); expect(result.option_id).toBeUndefined(); expect(refusesTaxi(result.reply)).toBe(false);

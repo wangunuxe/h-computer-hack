@@ -38,7 +38,7 @@ export function taxiTurn(input: TaxiContext, result: TurnResult): TurnResult {
   else {
     const taxi = input.options.find((option) => option.id === 'paris-airport-shuttle');
     if (taxi && requested) return { intent: 'choose', option_id: taxi.id, reply: capability, confidence: 1 };
-    if (taxi) reply += fr ? ' Souhaitez-vous choisir le taxi proposé ?' : ' Would you like the offered airport taxi?';
+    if (taxi) reply += fr ? ' Souhaitez-vous choisir le taxi proposé ?' : ' Would you like the offered taxi?';
     else if (trip.origin && trip.destination && !matchesPresetRoute({ origin: trip.origin, destination: trip.destination })) reply = say('no-known-options', {}, input.language);
     else reply += ' ' + fallbackQuestion({ ...input, stage: 'CHOOSE', missing, options: [] });
   }

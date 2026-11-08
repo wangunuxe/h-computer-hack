@@ -45,7 +45,7 @@ async function main() {
     }
     const result = await runBooking({
       startUrl: route.href, signal: controller.signal,
-      trip: { origin: 'Gare du Nord, 18 Rue de Dunkerque, Paris', destination: 'CDG Airport Terminal 2E, Roissy-en-France', passengers: 1, luggage: 1, guide_dog: true, deadline: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString() },
+      trip: { origin: 'La Défense', destination: 'Bercy', passengers: 1, luggage: 1, guide_dog: true },
       profile: { name: 'Karim Demo', email: 'karim@example.com', phone: '+33612345678', language: 'fr', guide_dog: true },
       onProgress: (text) => console.log(`[H] ${text}`),
       confirm: async (summary) => {

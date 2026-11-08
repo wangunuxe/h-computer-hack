@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ServerEventSchema, type MonitorEvent, type ServerEvent, type Trip } from '@voila/shared';
+import { ServerEventSchema, type ServerEvent, type Trip } from '@voila/shared';
 import { VoilaSession, type SessionPorts } from './session.js';
 import type { BookingInput } from './booking.js';
 import { optionsForTrip, presetOptions } from './options.js';
@@ -17,7 +17,6 @@ async function flush() { for (let i = 0; i < 60; i++) await Promise.resolve(); }
 const sessions: VoilaSession[] = [];
 function setup(overrides: Partial<SessionPorts> = {}) {
   const events: ServerEvent[] = [];
-  const observed: (ServerEvent | MonitorEvent)[] = [];
   const activity: Extract<ServerEvent, { type: 'activity' }>[] = [];
   const ports = {
     understand: vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip, missing: [] }),
@@ -27,72 +26,58 @@ function setup(overrides: Partial<SessionPorts> = {}) {
     runBooking: vi.fn<SessionPorts['runBooking']>().mockResolvedValue(completed),
     logger: { error: vi.fn() }, shuttlePublicUrl: () => 'https://shuttle.example', ...overrides,
   };
-  const session = new VoilaSession((event) => {
-    ServerEventSchema.parse(event);
-    if (event.type === 'activity') activity.push(event); else events.push(event);
-    if (event.type === 'location_request') queueMicrotask(() => session.handle({ type: 'location_result', request_id: event.request_id, gps: null }));
-  }, ports, (event) => observed.push(event));
+  const session = new VoilaSession((event) => { ServerEventSchema.parse(event); if (event.type === 'activity') activity.push(event); else events.push(event); if (event.type === 'location_request') queueMicrotask(() => session.handle({ type: 'location_result', request_id: event.request_id, gps: null })); }, ports);
   sessions.push(session);
   const hello = (language = 'en', gps: { latitude: number; longitude: number } | null = null) => session.handle({ type: 'hello', profile: { ...profile, language }, gps, scenario: 'live' });
   const start = async () => { hello(); session.handle({ type: 'final_transcript', text: 'CDG from Gare du Nord' }); await flush(); };
   const choose = async (text = 'shuttle') => { session.handle({ type: 'user_reply', text }); await flush(); };
-  return { session, events, observed, activity, ports, hello, start, choose };
+  return { session, events, activity, ports, hello, start, choose };
 }
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:00:00+01:00')); });
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
-  it('observes the registered profile, accepted transcripts, and understood trip', async () => {
-    const s = setup();
-    s.hello();
-    expect(s.observed.slice(0, 2)).toEqual([
-      { type: 'session', name: profile.name, scenario: 'live', started_at: '2027-01-15T09:00:00.000Z' },
-      { type: 'stage', stage: 'LISTEN' },
-    ]);
-    s.session.handle({ type: 'final_transcript', text: 'CDG from Gare du Nord' }); await flush();
-    expect(s.observed).toContainEqual({ type: 'transcript', text: 'CDG from Gare du Nord' });
-    expect(s.observed).toContainEqual({ type: 'trip', trip: { ...trip } });
-    s.session.handle({ type: 'user_reply', text: 'The first shuttle' }); await flush();
-    expect(s.observed).toContainEqual({ type: 'transcript', text: 'The first shuttle' });
-  });
-  it('uses a neutral monitor label until the phone registers a name', () => {
-    const s = setup();
-    s.session.handle({ type: 'hello', profile: { language: 'en' }, gps: null, scenario: 'live' });
-    expect(s.observed[0]).toEqual({
-      type: 'session', name: 'User', scenario: 'live', started_at: '2027-01-15T09:00:00.000Z',
-    });
-  });
-  it('redacts contact details and GPS coordinates from observed transcripts', () => {
-    const s = setup();
-    s.hello();
-    s.session.handle({ type: 'final_transcript', text: 'My phone number is 0771234567. GPS 48.91000, 2.20000' });
-    expect(s.observed).toContainEqual({ type: 'transcript', text: 'My phone number is [phone]. GPS [position GPS]' });
-  });
-  it('observes every phone event and forwards booking frames, metrics, and agent view', async () => {
-    const s = setup({
-      runBooking: async (input) => {
-        input.onFrame?.({ image: 'data:image/png;base64,abc', url: 'https://shuttle.example/page', step: 3 });
-        input.onMetrics?.({ steps: 3, costUsd: 0.02 });
-        input.onAgentView?.('https://h.example/view/123');
-        await input.confirm('Ready to book', fare);
-        await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: 'Ready' });
-        return completed;
-      },
-    });
-    s.session.handle(null);
-    await s.start();
-    await s.choose();
-    expect(s.session.stage).toBe('CONFIRM');
+  it('keeps an existing payment handoff instead of offering another booking after an H result error', async () => {
+    const s = setup({ runBooking: vi.fn<SessionPorts['runBooking']>(async (input) => {
+      await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: 'Taxi' });
+      throw new Error('Malformed final booking answer');
+    }) });
+    await s.start(); await s.choose();
+    expect(s.session.stage).toBe('HANDOFF');
+    const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toContainEqual({ type: 'payment_handoff', url: booking.payment_url, amount: 65, merchant: 'Shuttle' });
+    expect(s.events).toContainEqual({ type: 'say', text: expect.stringMatching(/before starting another booking/) });
     await s.choose('yes');
-    expect(s.session.stage).toBe('AWAIT_PAYMENT');
-    s.session.markPaid(booking.ref);
-    expect(s.session.stage).toBe('DONE');
-    expect(s.observed).toContainEqual({ type: 'agent_frame', image: 'data:image/png;base64,abc', url: 'https://shuttle.example/page', step: 3 });
-    expect(s.observed).toContainEqual({ type: 'agent_metrics', steps: 3, cost_usd: 0.02 });
-    expect(s.observed).toContainEqual({ type: 'agent_view', url: 'https://h.example/view/123' });
-    for (const type of ['error', 'stage', 'say', 'feed', 'options', 'confirm', 'payment_handoff', 'booking_card']) {
-      expect(s.observed.some((event) => event.type === type), `missing ${type}`).toBe(true);
-    }
+    expect(s.ports.runBooking).toHaveBeenCalledOnce();
+    expect(s.events.some((event) => event.type === 'booking_card')).toBe(false);
+  });
+  it('keeps origin clarification available after a reply interrupts GPS resolution', async () => {
+    const lookup = deferred<string | undefined>();
+    const s = setup({ understand: async () => ({ trip: { destination: 'CDG' }, missing: ['origin'] }), resolveOrigin: () => lookup.promise,
+      converse: async () => ({ intent: 'provide_info', confidence: 1, reply: 'Where should I pick you up?', trip_patch: { destination: 'Bercy' } }) });
+    s.hello('en', { latitude: 48.86, longitude: 2.35 });
+    s.session.handle({ type: 'final_transcript', text: 'Take me to CDG' }); await flush();
+    const before = s.events.length;
+    await s.choose('Actually, Bercy');
+    lookup.resolve('Châtelet'); await flush();
+    expect(s.session.stage).toBe('CLARIFY');
+    expect(s.events.slice(before)).toContainEqual({ type: 'clarify', question: 'Where should I pick you up?' });
+  });
+  it('speaks a next step when fare resolution fails mid-plan', async () => {
+    const s = setup({ resolveFare: async () => { throw new Error('unavailable'); } });
+    await s.start();
+    expect(s.session.stage).toBe('LISTEN');
+    const errorIndex = s.events.findIndex((event) => event.type === 'error');
+    expect(s.events.slice(errorIndex + 1)).toContainEqual({ type: 'say', text: expect.stringMatching(/try again|réessayer/i) });
+  });
+  it.each(['', 'not json'])('recovers a taxi trip through clarification after malformed Gemini output: %j', async (text) => {
+    const client = { models: { generateContent: vi.fn(async () => ({ text })) } };
+    const s = setup({ understand: (input) => understand(input, client), converse: async () => ({ intent: 'provide_info', confidence: 1, reply: 'Merci.', trip_patch: { origin: 'La Défense', destination: 'Bercy' } }) });
+    s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'Je veux un taxi' }); await flush();
+    expect(s.session.stage).toBe('CLARIFY');
+    await s.choose('La Défense vers Bercy');
+    expect(s.session.stage).toBe('CHOOSE');
+    expect(s.events).toContainEqual(expect.objectContaining({ type: 'options', items: expect.arrayContaining([expect.objectContaining({ id: 'paris-airport-shuttle' })]) }));
   });
   it.each(['je veux un taxi', 'taxi', 'un taxi', 'call me a taxi', 'la navette'])('books the airport taxi from Étoile in the demo for "%s", with confirmation and user payment', async (choice) => {
     const client = { models: { generateContent: vi.fn(async () => ({ text: JSON.stringify({ trip: { origin: 'Étoile', destination: 'CDG' } }) })) } };
@@ -204,15 +189,8 @@ describe('VoilaSession', () => {
     expect(s.session.stage).toBe('DONE'); expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
   });
   it.each(['efface mes informations', 'forget my details'])('clears saved and pending profile data without Gemini: %s', async (text) => {
-    const s = setup(); await s.start();
-    const phoneEvents: ServerEvent[] = [];
-    s.session.attach((event) => phoneEvents.push(event));
-    const earlierProfile = s.observed.findIndex((event) => event.type === 'profile');
-    await s.choose(text);
-    const resetSession = s.observed.findIndex((event) => event.type === 'session' && event.name === 'User');
-    expect(earlierProfile).toBeGreaterThanOrEqual(0);
-    expect(resetSession).toBeGreaterThan(earlierProfile);
-    expect(s.session.stage).toBe('LISTEN'); expect(phoneEvents).toContainEqual({ type: 'profile', profile: { language: 'en' } });
+    const s = setup(); await s.start(); await s.choose(text);
+    expect(s.session.stage).toBe('LISTEN'); expect(s.events).toContainEqual({ type: 'profile', profile: { language: 'en' } });
     expect(s.ports.converse).not.toHaveBeenCalled(); expect(s.ports.runBooking).not.toHaveBeenCalled();
   });
   it('accepts spoken Stop before a trip without starting research or Gemini', () => {

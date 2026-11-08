@@ -11,13 +11,14 @@ import { z } from 'zod';
 import { VoilaSession, type SessionPorts } from './session.js';
 import { SessionRegistry, secureEqual } from './session-registry.js';
 import { createGladiaSession } from './adapters/gladia.js';
-import { MonitorHub } from './monitor.js';
+import { WatchRegistry } from './watch-registry.js';
 
 const paymentSchema = z.object({ order_id: z.string().min(1), ref: z.string().min(1), status: z.literal('paid') });
 
 export function createApp({ registry = new SessionRegistry(), token = process.env.INTERNAL_CALLBACK_TOKEN, gladia = createGladiaSession,
+  watches = new WatchRegistry(),
   webDistDir = process.env.NODE_ENV === 'production' ? (process.env.WEB_DIST_DIR ?? fileURLToPath(new URL('../../web/dist', import.meta.url))) : undefined }: {
-  registry?: SessionRegistry; token?: string; gladia?: typeof createGladiaSession; webDistDir?: string;
+  registry?: SessionRegistry; watches?: WatchRegistry; token?: string; gladia?: typeof createGladiaSession; webDistDir?: string;
 } = {}) {
   const app = new Hono();
   app.get('/health', (c) => c.json({ status: 'ok' }));
@@ -46,6 +47,15 @@ export function createApp({ registry = new SessionRegistry(), token = process.en
     return c.json(issued, 201);
   });
   app.get('/ws/session/:id', (c) => c.text('WebSocket upgrade required', 426));
+  app.post('/watch', (c) => {
+    c.header('Cache-Control', 'no-store');
+    let ip = process.env.TRUST_PROXY === '1' ? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() : undefined;
+    if (!ip) { try { ip = getConnInfo(c).remote.address; } catch { ip = 'unknown'; } }
+    const issued = watches.issue(ip ?? 'unknown');
+    if ('error' in issued) return c.json({ error: 'Watch limit reached' }, issued.error === 'client-limit' ? 429 : 503);
+    return c.json(issued, 201);
+  });
+  app.get('/ws/watch/:id', (c) => c.text('WebSocket upgrade required', 426));
   app.post('/internal/payment-completed', async (c) => {
     const provided = c.req.header('authorization') ?? '';
     if (!token || !secureEqual(provided, `Bearer ${token}`)) {
@@ -65,7 +75,7 @@ export function createApp({ registry = new SessionRegistry(), token = process.en
     const assets = serveStatic({ root });
     const index = serveStatic({ path: relative(process.cwd(), resolve(webDistDir, 'index.html')) });
     app.get('*', async (c, next) => {
-      if (/^\/(session|gladia|ws|internal|health)(\/|$)/.test(c.req.path)) return c.notFound();
+      if (/^\/(session|watch|gladia|ws|internal|health)(\/|$)/.test(c.req.path)) return c.notFound();
       return assets(c, next);
     });
     app.get('*', index);
@@ -73,29 +83,28 @@ export function createApp({ registry = new SessionRegistry(), token = process.en
   return app;
 }
 
-export function createSessionServer({ port = Number(process.env.PORT ?? 3000), hostname = '0.0.0.0', ports, token, monitorToken = process.env.MONITOR_TOKEN }: {
-  port?: number; hostname?: string; ports?: Partial<SessionPorts>; token?: string; monitorToken?: string;
+export function createSessionServer({ port = Number(process.env.PORT ?? 3000), hostname = '0.0.0.0', ports, token }: {
+  port?: number; hostname?: string; ports?: Partial<SessionPorts>; token?: string;
 } = {}) {
   const clients = new Map<string, WebSocket>();
   const registry = new SessionRegistry(new Map(), ports?.timers);
   const sessions = registry.sessions;
-  const app = createApp({ registry, token });
+  const watches = new WatchRegistry((id) => sessions.get(id)?.stage ?? 'LISTEN', ports?.timers);
+  const app = createApp({ registry, watches, token });
   const server = serve({ fetch: app.fetch, port, hostname });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
-  const monitorSockets = new WebSocketServer({ noServer: true, maxPayload: 1024 });
-  const monitor = new MonitorHub();
   server.on('upgrade', (request, socket, head) => {
-    const url = new URL(request.url ?? '/', 'http://localhost');
+    let url: URL;
+    try { url = new URL(request.url ?? '/', 'http://localhost'); }
+    catch { socket.destroy(); return; }
     const pathname = url.pathname;
-    if (pathname === '/ws/monitor') {
-      monitorSockets.handleUpgrade(request, socket, head, (ws) => {
-        ws.on('error', () => (ports?.logger ?? console).error('Monitor WebSocket error.'));
-        if (!monitorToken) { ws.close(4403, 'Monitor disabled'); return; }
-        const key = url.searchParams.get('key');
-        if (!key || !secureEqual(key, monitorToken)) { ws.close(4401, 'Invalid monitor key'); return; }
-        const detach = monitor.subscribe(ws, url.searchParams.has('session') ? url.searchParams.get('session')! : undefined);
-        ws.on('message', () => {});
-        ws.on('close', detach);
+    const watch = /^\/ws\/watch\/([^/]+)$/.exec(pathname);
+    if (watch) {
+      sockets.handleUpgrade(request, socket, head, (ws) => {
+        ws.on('error', () => (ports?.logger ?? console).error('Watch WebSocket error.'));
+        const detach = watches.attach(watch[1]!, url.searchParams.get('token') ?? '', (event) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event)); if (event.type === 'unpaired' && event.expired) ws.close(4401, 'Watch expired'); });
+        if (!detach) ws.close(4401, 'Invalid watch token');
+        else ws.on('close', detach);
       });
       return;
     }
@@ -111,34 +120,42 @@ export function createSessionServer({ port = Number(process.env.PORT ?? 3000), h
       }
       clients.get(id)?.close(4409, 'Session active in another connection');
       clients.set(id, ws);
+      watches.connected(id);
       const emit = (event: ServerEvent) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
+        watches.mirror(id, sessions.get(id)?.watchEvent(event));
       };
-      const session = existing ?? new VoilaSession(emit, ports, (event) => monitor.publish(id, event));
+      const session = existing ?? new VoilaSession(emit, ports);
       sessions.set(id, session);
+      session.watchSteps((event) => watches.mirror(id, event));
       const detach = session.attach(emit);
       ws.on('close', () => {
         detach();
-        if (clients.get(id) === ws) { clients.delete(id); registry.disconnect(id); }
+        if (clients.get(id) === ws) { clients.delete(id); registry.disconnect(id); watches.disconnected(id); }
       });
       ws.on('message', (data, binary) => {
         if (clients.get(id) !== ws) return;
         let value: unknown;
         try { value = binary ? null : JSON.parse(data.toString()); } catch { value = null; }
         const parsed = WebEventSchema.safeParse(value);
+        if (parsed.success && parsed.data.type === 'hello' && parsed.data.watch) {
+          const forwarded = process.env.TRUST_PROXY === '1' ? request.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() : undefined;
+          watches.pair(parsed.data.watch, id, forwarded ?? request.socket.remoteAddress ?? 'unknown');
+        }
+        if (parsed.success && parsed.data.type === 'final_transcript' && parsed.data.text.trim() && ['LISTEN', 'DONE'].includes(session.stage)) watches.clearHistory(id);
+        if (parsed.success && (parsed.data.type === 'final_transcript' || parsed.data.type === 'user_reply')) watches.mirror(id, session.watchEvent(parsed.data));
         session.handle(parsed.success ? parsed.data : null);
       });
     });
   });
   const close = async () => {
+    watches.dispose();
     registry.dispose();
     for (const client of sockets.clients) client.terminate();
-    for (const client of monitorSockets.clients) client.terminate();
     await new Promise<void>((resolve) => sockets.close(() => resolve()));
-    await new Promise<void>((resolve) => monitorSockets.close(() => resolve()));
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   };
-  return { app, server, sockets, monitorSockets, monitor, sessions, close };
+  return { app, server, sockets, sessions, close };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) createSessionServer();

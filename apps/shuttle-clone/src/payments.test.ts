@@ -27,6 +27,7 @@ describe('Stripe session lifecycle', () => {
     order.vehicle.price = 61.5;
     await payments.checkout(order, 'https://shuttle.example');
     expect(create.mock.calls[0]![0]!.line_items![0]!.price_data!.unit_amount).toBe(6150);
+    expect(create.mock.calls[0]![0]!.line_items![0]!.price_data!.product_data!.name).toBe('Taxi Paris Réservation — Berline taxi — up to 3 passengers, 2 suitcases');
   });
   it('retrieves and reuses only an open session', async () => {
     const { retrieve, create, order, payments } = fixture();

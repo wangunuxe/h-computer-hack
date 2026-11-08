@@ -1,4 +1,4 @@
-import { ProfileSchema, ScenarioSchema, TripSchema, WebEventSchema, resolveTaxiQuote, type TaxiQuote, type Booking, type Gps, type MonitorEvent, type Option, type TravelerProfile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
+import { ProfileSchema, ScenarioSchema, TripSchema, WebEventSchema, resolveTaxiQuote, type WatchPayload, type TaxiQuote, type Booking, type Gps, type Option, type TravelerProfile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
 import { randomUUID } from 'node:crypto';
 import { understand } from './understand.js';
 import { getDemoDisruption, type Disruption } from './adapters/disruption.js';
@@ -18,6 +18,7 @@ import { mentionsTaxiRequest, requestsTaxi, taxiTurn } from './taxi.js';
 import { relevantLines, trafficPage } from './stations.js';
 import { resolveGpsOrigin, redactGpsCoordinates } from './location.js';
 import { confirmationAnswer } from './confirmation-answer.js';
+import { sanitizeWatchEvent } from './watch-privacy.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 type Research = { traffic: Disruption[]; extraOptions: Option[] };
@@ -37,6 +38,10 @@ export interface SessionPorts {
 }
 
 export class VoilaSession {
+  private stepSink?: (event: WatchPayload) => void;
+  watchSteps(sink: (event: WatchPayload) => void) { this.stepSink = sink; }
+  watchEvent(event: Parameters<typeof sanitizeWatchEvent>[0]) { return sanitizeWatchEvent(event, this.profile, { collecting: !!this.profileCollector, payment: this.agentPaymentPage || ['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) }); }
+  private agentPaymentPage = false;
   get language() { return this.profile?.language ?? 'fr'; }
   stage: Stage = 'LISTEN';
   private profile?: TravelerProfile;
@@ -80,7 +85,7 @@ export class VoilaSession {
   private operations = new Set<symbol>();
   private lastActivity?: boolean;
 
-  constructor(private emit: (event: ServerEvent) => void, ports: Partial<SessionPorts> = {}, private observe: (event: ServerEvent | MonitorEvent) => void = () => {}) {
+  constructor(private emit: (event: ServerEvent) => void, ports: Partial<SessionPorts> = {}) {
     this.ports = { understand, converse, trafficH: readRerBTraffic, linkup: searchDisruptionAndAlternatives, runBooking,
       clock: () => new Date(), timers: globalThis, logger: console, shuttlePublicUrl: () => process.env.SHUTTLE_PUBLIC_URL, resolveOrigin: resolveGpsOrigin, resolveFare: resolveTaxiQuote, ...ports };
     this.lastSay = this.ports.clock().getTime();
@@ -124,11 +129,10 @@ export class VoilaSession {
       return;
     }
     if (event.type === 'hello') {
-      if (this.profile) { this.error('Profile already set; reconnect without restarting the trip.'); return; }
+      if (this.profile) { if (!event.watch) this.error('Profile already set; reconnect without restarting the trip.'); return; }
       this.profile = event.profile;
       this.scenario = event.scenario ?? (ScenarioSchema.safeParse(process.env.VOILA_SCENARIO).data ?? 'demo');
       this.gps = event.gps ?? undefined;
-      this.observeSafely({ type: 'session', name: this.profile.name ?? 'User', scenario: this.scenario, started_at: this.ports.clock().toISOString() });
       this.transition('LISTEN');
       return;
     }
@@ -136,7 +140,6 @@ export class VoilaSession {
     if (event.type === 'location_result') { this.locationResult(event.request_id, event.gps); return; }
     if ((event.type === 'final_transcript' || event.type === 'user_reply') && forgetDetails(event.text)) {
       this.resetTrip(); this.profile = { language: this.language };
-      this.observeSafely({ type: 'session', name: 'User', scenario: this.scenario, started_at: this.ports.clock().toISOString() });
       this.send({ type: 'profile', profile: this.profile }); this.transition('LISTEN');
       this.send({ type: 'say', text: this.language.startsWith('fr') ? 'Vos informations sont effacées de cet appareil et de cette session.' : 'Your details are cleared from this device and session.' }); return;
     }
@@ -175,7 +178,6 @@ export class VoilaSession {
     }
     if (event.type === 'final_transcript' && ['LISTEN', 'DONE'].includes(this.stage)) {
       if (!event.text.trim()) { this.error('Transcript must not be empty.'); return; }
-      this.observeSafely({ type: 'transcript', text: redactGpsCoordinates(redactContactText(event.text, this.profile)) });
       const restarting = this.stage === 'DONE';
       this.resetTrip();
       if (restarting) this.transition('LISTEN');
@@ -190,7 +192,6 @@ export class VoilaSession {
       void this.interpret(event.text, generation);
     } else if (event.type === 'user_reply') {
       if (!event.text.trim()) { this.error('Reply must not be empty.'); return; }
-      this.observeSafely({ type: 'transcript', text: redactGpsCoordinates(redactContactText(event.text, this.profile)) });
       this.turnController?.abort(); ++this.turnVersion;
       this.remember('user', event.text);
       const normalized = event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
@@ -247,13 +248,8 @@ export class VoilaSession {
         }
         return text;
       });
-      const sanitized = JSON.parse(safe) as ServerEvent;
-      try { this.emit(sanitized); } catch { this.ports.logger.error('Session event delivery failed.'); }
-      this.observeSafely(sanitized);
+      this.emit(JSON.parse(safe));
     } catch { this.ports.logger.error('Session event delivery failed.'); }
-  }
-  private observeSafely(event: ServerEvent | MonitorEvent) {
-    try { this.observe(event); } catch { this.ports.logger.error('Session event observation failed.'); }
   }
   private error(message: string) { this.send({ type: 'error', message }); }
   private transition(stage: Stage) {
@@ -354,7 +350,6 @@ export class VoilaSession {
       const result = await this.limited((signal) => this.ports.understand({ transcript: redactGpsCoordinates(redactContactText(transcript, this.profile)), profile: this.profile!, now: this.ports.clock(), previous: this.trip, signal }), 20_500, this.flow.signal);
       if (!this.active(generation)) return;
       this.trip = { passengers: 1, luggage: 0, guide_dog: this.profile!.guide_dog ?? false, ...this.trip, ...result.trip };
-      this.observeSafely({ type: 'trip', trip: { ...this.trip } });
       await this.plan(transcript, generation);
     } catch {
       if (!this.active(generation)) return;
@@ -450,11 +445,10 @@ export class VoilaSession {
     if (['CLARIFY', 'CHOOSE', 'UNDERSTAND', 'RESEARCH', 'PRESENT'].includes(stage) && ['provide_info', 'correct'].includes(result.intent) && result.confidence >= .65 && result.trip_patch && Object.keys(result.trip_patch).length) {
       const before = this.trip;
       if (result.trip_patch.origin && result.trip_patch.origin !== before.origin) this.pickupGps = undefined;
-      this.trip = TripSchema.partial().parse({ ...this.trip, ...result.trip_patch }); this.attempt = 0;
-      this.observeSafely({ type: 'trip', trip: { ...this.trip } });
+      this.trip = TripSchema.partial().parse({ passengers: 1, luggage: 0, guide_dog: this.profile?.guide_dog ?? false, ...this.trip, ...result.trip_patch }); this.attempt = 0;
       const changedRoute = ['origin', 'destination', 'deadline'].some((key) => before[key as keyof Trip] !== undefined && before[key as keyof Trip] !== this.trip[key as keyof Trip]);
       const next = ++this.generation;
-      if (changedRoute || !this.research) { this.flow.abort(); this.flow = new AbortController(); this.research = undefined; }
+      if (changedRoute || !this.research) { this.flow.abort(); this.flow = new AbortController(); this.research = undefined; this.locationResolving = false; }
       this.options = [];
       if (!this.missing().length) this.answer(result.reply);
       await this.plan(transcript, next, result.reply);
@@ -520,6 +514,7 @@ export class VoilaSession {
       this.ports.logger.error('Trip understanding failed.');
       this.error('Could not understand the trip. Please try again.');
       this.cancel(); this.transition('LISTEN');
+      this.answer(this.language.startsWith('fr') ? 'Je n’ai pas pu préparer le trajet. Veuillez réessayer.' : 'I could not prepare the journey. Please try again.');
     }
   }
   private async execute(id: string, generation: number) {
@@ -537,6 +532,7 @@ export class VoilaSession {
       const base = publicShuttleUrl(this.ports.shuttlePublicUrl());
       const startUrl = base.pathname === '/' ? new URL('/fr/reservation/', base) : base;
       if (base.searchParams.get('difficulty') === 'easy') startUrl.searchParams.set('difficulty', 'easy');
+      this.agentPaymentPage = false;
       const result = await this.ports.runBooking({
         trip, pickupGps: this.pickupGps, fareQuote: this.taxiQuote, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
         onRetry: () => { if (current()) { this.pendingBookingAction = undefined; this.speak('booking-retry', {}); } },
@@ -545,10 +541,8 @@ export class VoilaSession {
           if (!current()) return;
           this.send({ type: 'feed', kind: 'agent', text });
         },
-        onFrame: (frame) => { if (current()) this.observeSafely({ type: 'agent_frame', ...frame }); },
-        onMetrics: (metrics) => { if (current()) this.observeSafely({ type: 'agent_metrics', steps: metrics.steps, cost_usd: metrics.costUsd }); },
-        onAgentView: (url) => { if (current()) this.observeSafely({ type: 'agent_view', url }); },
-        onPage: (page) => { if (current() && this.stage === 'EXECUTE') this.speak('booking-page', { page }); },
+        onStep: (event) => { if (current()) { const safe = this.watchEvent(event); if (safe) this.stepSink?.(safe); } },
+        onPage: (page) => { if (current()) this.agentPaymentPage = page === 'payment'; if (current() && this.stage === 'EXECUTE') this.speak('booking-page', { page }); },
         confirm: (summary, details) => {
           if (!current()) return Promise.resolve({ approved: false, reply: 'Stopped' });
           if (this.confirmation) throw new Error('A confirmation is already pending.');
@@ -576,6 +570,11 @@ export class VoilaSession {
       if (!current()) return;
       this.confirmation?.resolve({ approved: false, reply: 'Booking failed' }); this.confirmation = undefined;
       this.ports.logger.error('Booking execution failed.');
+      if (this.payment) {
+        this.transition('HANDOFF');
+        this.answer(this.language.startsWith('fr') ? 'Le paiement reste disponible sur votre téléphone, mais je n’ai pas pu récupérer la référence. Vérifiez la réservation sur le site avant de recommencer une réservation.' : 'Payment remains available on your phone, but I could not retrieve the reference. Check the booking on the site before starting another booking.');
+        return;
+      }
       this.error(say('booking-failed', {}, this.language));
       this.speak('booking-failed', {});
       this.retryOption = id === 'paris-airport-shuttle' ? id : undefined;

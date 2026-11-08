@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { shouldShowcase } from './device.js';
 
 const desktop = { pathname: '/', search: '', userAgent: 'Mozilla/5.0 (X11; Linux x86_64)', coarsePointer: false };
-describe('desktop monitor routing', () => {
-  it('routes desktops with no query to the monitor', () => {
+describe('desktop showcase routing', () => {
+  it('routes desktops with no query to the showcase', () => {
     expect(shouldShowcase(desktop)).toBe(true);
     expect(shouldShowcase({ ...desktop, userAgent: '' })).toBe(true);
   });
@@ -15,7 +15,7 @@ describe('desktop monitor routing', () => {
     expect(shouldShowcase({ ...desktop, search: '?scenario=demo&client=phone' })).toBe(false);
   });
   it('only routes the root and ignores unrelated overrides', () => {
-    expect(shouldShowcase({ ...desktop, pathname: '/monitor.html' })).toBe(false);
+    expect(shouldShowcase({ ...desktop, pathname: '/showcase.html' })).toBe(false);
     expect(shouldShowcase({ ...desktop, pathname: '/unknown' })).toBe(false);
     expect(shouldShowcase({ ...desktop, search: '?client=other' })).toBe(true);
   });

@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { estimateTaxi, type TaxiQuote } from '@voila/shared';
 
 export const vehicles = [
-  { id: 'sedan', text: 'Private Sedan — up to 3 passengers, 2 suitcases', capacity: 3, luggageCapacity: 2 },
-  { id: 'estate', text: 'Comfort Estate — up to 4 passengers, 4 suitcases', capacity: 4, luggageCapacity: 4 },
-  { id: 'van', text: 'Private Minivan — up to 8 passengers, 8 suitcases', capacity: 8, luggageCapacity: 8 },
+  { id: 'sedan', text: 'Berline taxi — up to 3 passengers, 2 suitcases', capacity: 3, luggageCapacity: 2 },
+  { id: 'estate', text: 'Taxi break confort — up to 4 passengers, 4 suitcases', capacity: 4, luggageCapacity: 4 },
+  { id: 'van', text: 'Taxi van — up to 8 passengers, 8 suitcases', capacity: 8, luggageCapacity: 8 },
 ] as const;
 export type Vehicle = { id: string; text: string; price: number; capacity: number; luggageCapacity: number };
 export function vehiclesForDraft(draft: Draft): Vehicle[] {

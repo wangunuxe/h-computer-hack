@@ -1,10 +1,12 @@
 import { once } from 'node:events';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
-import { MonitorMessageSchema, ServerEventSchema, type MonitorMessage, type ServerEvent } from '@voila/shared';
+import { ServerEventSchema, type ServerEvent } from '@voila/shared';
 import { createApp, createSessionServer } from './index.js';
 import { VoilaSession, type SessionPorts } from './session.js';
 import { SessionRegistry } from './session-registry.js';
@@ -32,7 +34,7 @@ describe('web static serving', () => {
     cleanup.push(() => rm(root, { recursive: true, force: true }));
     await writeFile(join(root, 'index.html'), '<!doctype html><title>Voilà</title>');
     await writeFile(join(root, 'app.js'), 'window.voila = true;');
-    await writeFile(join(root, 'monitor.html'), '<!doctype html><title>Voilà Agent Map</title>');
+    await writeFile(join(root, 'showcase.html'), '<!doctype html><title>Voilà Agent Map</title>');
     const registry = new SessionRegistry(); cleanup.push(() => registry.dispose());
     const app = createApp({ webDistDir: root, registry });
     for (const path of ['/', '/unknown/nested']) {
@@ -42,10 +44,10 @@ describe('web static serving', () => {
       expect(await response.text()).toContain('<title>Voilà</title>');
     }
     expect(await (await app.request('/app.js')).text()).toBe('window.voila = true;');
-    const monitor = await app.request('/monitor.html');
-    expect(monitor.status).toBe(200);
-    expect(monitor.headers.get('content-type')).toContain('text/html');
-    expect(await monitor.text()).toContain('<title>Voilà Agent Map</title>');
+    const showcase = await app.request('/showcase.html');
+    expect(showcase.status).toBe(200);
+    expect(showcase.headers.get('content-type')).toContain('text/html');
+    expect(await showcase.text()).toContain('<title>Voilà Agent Map</title>');
     expect(await (await app.request('/health')).json()).toEqual({ status: 'ok' });
     expect((await app.request('/session', { method: 'POST' })).status).toBe(201);
     expect((await app.request('/ws/session/test')).status).toBe(426);
@@ -94,70 +96,23 @@ describe('payment callback', () => {
 });
 
 describe('real WebSocket round-trip', () => {
-  it('rejects monitor upgrades when disabled and when the key is missing or wrong', async () => {
-    const disabled = createSessionServer({ port: 0, hostname: '127.0.0.1', ports, monitorToken: '' });
-    cleanup.push(disabled.close);
-    if (!disabled.server.listening) await once(disabled.server, 'listening');
-    const disabledAddress = disabled.server.address();
-    if (!disabledAddress || typeof disabledAddress === 'string') throw new Error('Expected an ephemeral TCP port');
-    const disabledSocket = new WebSocket(`ws://127.0.0.1:${disabledAddress.port}/ws/monitor?key=anything`);
-    const [disabledCode, disabledReason] = await once(disabledSocket, 'close');
-    expect(disabledCode).toBe(4403);
-    expect(disabledReason.toString()).toBe('Monitor disabled');
-
-    const secured = createSessionServer({ port: 0, hostname: '127.0.0.1', ports, monitorToken: 'monitor-secret' });
-    cleanup.push(secured.close);
-    if (!secured.server.listening) await once(secured.server, 'listening');
-    const address = secured.server.address();
-    if (!address || typeof address === 'string') throw new Error('Expected an ephemeral TCP port');
-    for (const query of ['', '?key=wrong']) {
-      const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws/monitor${query}`);
-      const [code] = await once(ws, 'close');
-      expect(code).toBe(4401);
-    }
+  it('rejects a malformed upgrade URL without an uncaught exception', async () => {
+    const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
+      import { request } from 'node:http';
+      import { once } from 'node:events';
+      import { createSessionServer } from './src/index.ts';
+      const running = createSessionServer({ port: 0, hostname: '127.0.0.1' });
+      if (!running.server.listening) await once(running.server, 'listening');
+      const req = request({ host: '127.0.0.1', port: running.server.address().port, path: '//[', headers: {
+        Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ=='
+      } });
+      req.on('error', () => {}); req.end();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await running.close();
+      console.log('SURVIVED');
+    `], { timeout: 5000 });
+    expect(result.stdout).toContain('SURVIVED');
   });
-
-  it('delivers buffered and live monitor events without controlling the phone socket', async () => {
-    const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports, token: 'test', monitorToken: 'monitor-secret' });
-    cleanup.push(running.close);
-    if (!running.server.listening) await once(running.server, 'listening');
-    const address = running.server.address();
-    if (!address || typeof address === 'string') throw new Error('Expected an ephemeral TCP port');
-    const issued = await (await fetch(`http://127.0.0.1:${address.port}/session`, { method: 'POST' })).json() as { id: string; resume_token: string };
-    const phone = new WebSocket(`ws://127.0.0.1:${address.port}/ws/session/${issued.id}?token=${issued.resume_token}`);
-    const phoneEvents: ServerEvent[] = [];
-    phone.on('message', (data) => phoneEvents.push(ServerEventSchema.parse(JSON.parse(data.toString()))));
-    await once(phone, 'open');
-    const phoneUntil = async (check: () => boolean) => { while (!check()) await once(phone, 'message'); };
-    phone.send(JSON.stringify(hello));
-    await phoneUntil(() => phoneEvents.some((event) => event.type === 'stage' && event.stage === 'LISTEN'));
-    phone.send(JSON.stringify({ type: 'final_transcript', text: 'CDG' }));
-    await phoneUntil(() => phoneEvents.some((event) => event.type === 'stage' && event.stage === 'CHOOSE'));
-
-    const monitorEvents: MonitorMessage[] = [];
-    const monitor = new WebSocket(`ws://127.0.0.1:${address.port}/ws/monitor?key=monitor-secret`);
-    monitor.on('message', (data) => monitorEvents.push(MonitorMessageSchema.parse(JSON.parse(data.toString()))));
-    await once(monitor, 'open');
-    const monitorUntil = async (check: () => boolean) => { while (!check()) await once(monitor, 'message'); };
-    await monitorUntil(() => monitorEvents.some(({ event }) => event.type === 'stage' && event.stage === 'CHOOSE'));
-    expect(monitorEvents[0]).toMatchObject({ session: issued.id, event: { type: 'session', name: 'Karim' } });
-    expect(monitorEvents.some(({ event }) => event.type === 'transcript' && event.text === 'CDG')).toBe(true);
-
-    const session = running.sessions.get(issued.id);
-    monitor.send(JSON.stringify({ type: 'stop' }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(monitor.readyState).toBe(WebSocket.OPEN);
-    expect(phone.readyState).toBe(WebSocket.OPEN);
-    expect(running.sessions.get(issued.id)).toBe(session);
-    expect(session?.stage).toBe('CHOOSE');
-
-    phone.send(JSON.stringify({ type: 'stop' }));
-    await monitorUntil(() => {
-      const last = monitorEvents.at(-1)?.event;
-      return last?.type === 'stage' && last.stage === 'LISTEN';
-    });
-  });
-
   it.each([undefined, '1'])('uses the socket address without a forwarded header with TRUST_PROXY=%s', async (trustProxy) => {
     vi.stubEnv('TRUST_PROXY', trustProxy);
     const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports }); cleanup.push(running.close);

@@ -1,3 +1,5 @@
+<!doctype html>
+<meta charset="UTF-8">
 <title>Voilà Agent Map</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -156,6 +158,9 @@ dialog#bwDlg::backdrop{background:rgba(60,56,100,.28);-webkit-backdrop-filter:bl
   <header>
     <div>
       <h1>Voilà <span>agent map</span></h1>
+      <p class="sub" id="showcase-status" role="status">Scan with the phone · connecting…</p>
+      <div id="pairing"><canvas id="pairing-qr" aria-label="Scan to pair your phone"></canvas><p>Scan with the phone<br><strong id="pairing-code"></strong></p></div>
+      <p class="sub" style="font-size:12px;margin-top:8px"><a id="phone-client-link" href="/?client=phone" style="color:inherit">Open phone client</a> · On your phone: <span id="phone-client-url"></span></p>
     </div>
     <nav class="chips" id="chips" aria-label="Stages"></nav>
   </header>
@@ -182,7 +187,7 @@ dialog#bwDlg::backdrop{background:rgba(60,56,100,.28);-webkit-backdrop-filter:bl
 
     <aside>
       <div class="card">
-        <p class="label">What <span id="personName">Nicolas</span> hears</p>
+        <p class="label">What the traveler hears</p>
         <div class="hear" id="hear"><span class="who">Voilà</span>…</div>
         <div class="wave" id="wave" aria-hidden="true"></div>
       </div>
@@ -197,7 +202,6 @@ dialog#bwDlg::backdrop{background:rgba(60,56,100,.28);-webkit-backdrop-filter:bl
             <div class="bw" id="bw" aria-hidden="true">
               <div class="bwchrome"><i></i><i></i><i></i><div class="bwurl" id="bwUrl">about:blank</div><span class="bwbadge">H · holo4 · cloud browser</span></div>
               <div class="bwpage" id="bwPage">
-                <img id="bwShot" alt="" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:contain">
                 <div class="pv on" id="pvIdle"><div class="orb"></div><div id="idleTxt">Waiting for Voilà’s brief…</div></div>
                 <div class="pv" id="pvForm">
                   <div class="site-top"><b class="logo">PARIS AIRPORT SHUTTLE</b><span class="nav"><i>Accueil</i><i id="t-nav">Réservation</i><i>Tarifs</i><i>FAQ</i><i>Contact</i></span></div>
@@ -255,7 +259,7 @@ dialog#bwDlg::backdrop{background:rgba(60,56,100,.28);-webkit-backdrop-filter:bl
       <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
     </label>
   </div>
-  <p class="note">Prototype with sample data and simulated events. In the live demo each node lights up from real events: Gladia transcripts, PRIM and Linkup results, and the H Agents API <code>changes</code> stream. Element counts describe the clone of the shuttle booking site and are illustrative. Keys: Space play/pause, ← → stages. Hover a node for its tech, click it to jump. The agent browser card replays the same sample run; live, it would show the H agent’s own screenshots.</p>
+  <p class="note">Sample replay with simulated events. Pair a phone using the QR code to show its real session. Screen-reader and agent counts in this replay are illustrative. Space: play/pause; ← →: stages. Live browser steps show redacted text and safe page URLs, not sensitive screenshots.</p>
 </div>
 
 <dialog id="bwDlg" aria-label="Agent browser, enlarged">
@@ -264,12 +268,10 @@ dialog#bwDlg::backdrop{background:rgba(60,56,100,.28);-webkit-backdrop-filter:bl
   <div class="bwstat" id="bwStatBig"></div>
 </dialog>
 <script>
+document.getElementById('phone-client-url').textContent = location.origin + '/?client=phone';
 (()=>{
-const QUERY=new URLSearchParams(location.search);
-const LIVE=QUERY.has('key');
-let PERSON='Nicolas';
-const nm=t=>t.replaceAll('Nicolas',PERSON);
 const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let liveMode=false; const liveSeen=new Set();
 function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
 const R = rng(7);
 
@@ -335,26 +337,11 @@ function execPhases(){const p=[['in',1000]];if(cmpEl.checked)p.push(['sr',5600],
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 const $=id=>document.getElementById(id);
 const capEl=$('caption'),hearEl=$('hear'),logEl=$('log'),cmpEl=$('cmp'),tip=$('tip');
-const personLabel=$('personName'),footnote=document.querySelector('.note'),bwShot=$('bwShot');
 let W=0,H=0,S=1,dpr=1;
 let si=-1,te=0,playing=false,speed=1,last=performance.now();
 let cam={x:0,y:0,z:1},camT={x:0,y:0,z:1};
 let execState={ph:null,pt:0,k:0,j:0,lastSay:-1,lastStep:-1};
 let mazeA=0,clock=0,started=false,focusExec=false;
-let connected=false,monitorSocket=null,reconnectTimer=null,reconnectDelay=1000;
-let monitorClosed=false;
-let sessionActive=false,sessionStartedAt=0,lastServerStage='',liveTrip={},liveMetricsSteps=0,liveCostUsd=null;
-let liveAgentLines=0,liveLastAgentText='',liveAgentView='',livePayment=null,liveBooking=null;
-let liveFrameImage='',liveFrameUrl='',liveFrameVisible=false,liveError=false,liveStatusSignature='';
-let liveExecStarted=false,liveExecPhase='idle',liveExecElapsed=0,liveExecLastAt=performance.now(),liveExecQueue=[];
-let liveHearWho='',liveHearText='';
-
-if(LIVE){
-  $('play').disabled=true;$('prev').disabled=true;$('next').disabled=true;$('restart').disabled=true;$('speed').disabled=true;
-  capEl.textContent='Live monitor · waiting for a session from the phone…';
-  hearEl.replaceChildren();logEl.replaceChildren();$('budget').textContent='—';personLabel.textContent=PERSON;
-  if(footnote)footnote.textContent=`Live monitor: every node, line and screenshot comes from the Voilà server's events for ${PERSON}'s session. The screen-reader comparison is illustrative.`;
-}
 
 function resize(){dpr=Math.min(2,devicePixelRatio||1);const r=cv.getBoundingClientRect();W=r.width;H=r.height;cv.width=W*dpr;cv.height=H*dpr;S=Math.min(W/2.15,H/1.42)}
 addEventListener('resize',resize);
@@ -369,39 +356,22 @@ function paintChips(){[...chips.children].forEach((b,i)=>b.dataset.state=i<si?'d
 const wave=$('wave');for(let i=0;i<28;i++)wave.appendChild(document.createElement('span'));
 let speaking=0;
 
-function log(t,strong){const li=document.createElement('li');const ts=fmt(simElapsed());li.innerHTML=`<b>${ts}</b>  `+nm(t).replace(/</g,'&lt;');logEl.appendChild(li);logEl.scrollTop=logEl.scrollHeight}
-function say(who,text,sr){
-  hearEl.className='hear'+(sr?' sr':'');
-  if(LIVE){const label=document.createElement('span');label.className='who';label.textContent=nm(who);hearEl.replaceChildren(label,document.createTextNode(nm(text)))}
-  else{hearEl.innerHTML=`<span class="who">${nm(who)}</span>`;hearEl.appendChild(document.createTextNode(nm(text)))}
-  speaking=1.6
-}
+function log(t,strong){const li=document.createElement('li');const ts=fmt(simElapsed());li.innerHTML=`<b>${ts}</b>  `+t.replace(/</g,'&lt;');logEl.appendChild(li);logEl.scrollTop=logEl.scrollHeight}
+function say(who,text,sr){hearEl.className='hear'+(sr?' sr':'');hearEl.innerHTML=`<span class="who">${who}</span>`;hearEl.appendChild(document.createTextNode(text));speaking=1.6}
 function fmt(s){s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}
-function liveElapsed(){return fmt((Date.now()-sessionStartedAt)/1000)}
-
-function appendLiveLog(text,source){
-  const li=document.createElement('li'),time=document.createElement('b');
-  time.textContent=liveElapsed();li.append(time,document.createTextNode('  '+nm(text)));
-  let url;
-  if(typeof source==='string'){
-    try{const parsed=new URL(source);if(['http:','https:'].includes(parsed.protocol)&&!parsed.username&&!parsed.password)url=parsed}catch{}
-  }
-  if(url){const link=document.createElement('a');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';link.textContent=url.hostname;li.append(document.createTextNode(' '),link)}
-  logEl.appendChild(li);logEl.scrollTop=logEl.scrollHeight
-}
 
 function stageDur(s){return s.exec?execPhases().reduce((a,p)=>a+p[1],0):s.dur}
 function simElapsed(){let t=0;for(let i=0;i<Math.max(0,si);i++)t+=STAGES[i].sim;if(si>=0&&si<STAGES.length){t+=STAGES[si].sim*Math.min(1,te/stageDur(STAGES[si]))}else if(si>=STAGES.length)t=STAGES.reduce((a,s)=>a+s.sim,0);return t}
 
 function enter(i){
   si=i;te=0;paintChips();
-  if(i>=STAGES.length){capEl.textContent=nm('From one sentence to a paid booking in about 4 minutes. Nicolas never touched the website.');camT={x:0,y:0,z:1};playing=false;$('play').textContent='Replay';return}
-  const s=STAGES[i];capEl.textContent=nm(s.cap);say(s.hear[0],s.hear[1]);s.log.forEach(l=>log(l));
+  if(i>=STAGES.length){capEl.textContent='From one sentence to a paid booking in about 4 minutes. Nicolas never touched the website.';camT={x:0,y:0,z:1};playing=false;$('play').textContent='Replay';return}
+  const s=STAGES[i];capEl.textContent=s.cap;say(s.hear[0],s.hear[1]);s.log.forEach(l=>log(l));
   if(s.exec){execState={ph:null,pt:0,k:0,j:0,lastSay:-1,lastStep:-1}}
   if(!s.exec){camT={x:0,y:0,z:1};focusExec=false}
   $('srBox').hidden=true;$('agBox').hidden=true;$('legend').hidden=true;
 }
-function jump(i){if(LIVE)return;started=true;logEl.innerHTML='';enter(i);if(!playing)togglePlay(true)}
+function jump(i){if(liveMode)return;started=true;logEl.innerHTML='';enter(i);if(!playing)togglePlay(true)}
 
 function updExec(dt){
   const ph=execPhases();let acc=0,cur=null,pt=0;
@@ -411,7 +381,7 @@ function updExec(dt){
   if(cur!==E.ph){E.ph=cur;
     if(cur==='in'){focusExec=true;capEl.textContent=`The booking page as an agent sees it: ${MAZE.length} elements, ${UNLAB} with no label.`;$('legend').hidden=false}
     if(cur==='sr'){$('srBox').hidden=false;capEl.textContent='A screen reader walks them one by one…';log('compare  VoiceOver reading order (illustrative)')}
-    if(cur==='gap'){capEl.textContent=nm(`…${SR_N} elements in, Nicolas still hasn't reached the date picker.`)}
+    if(cur==='gap'){capEl.textContent=`…${SR_N} elements in, Nicolas still hasn't reached the date picker.`}
     if(cur==='ag'){$('agBox').hidden=false;capEl.textContent='The H agent looks at the screen and goes straight to the 23 steps it needs.'}
     if(cur==='hold'){capEl.textContent='Form filled in 23 steps. Nothing submitted yet.'}
     if(cur==='out'){focusExec=false;camT={x:0,y:0,z:1};$('legend').hidden=true}
@@ -425,211 +395,18 @@ function updExec(dt){
   return cur==='done';
 }
 
-function liveSteps(){return Math.max(liveMetricsSteps,liveAgentLines)}
-function liveCaption(index){
-  if(index===0)return `${PERSON} holds the button. Gladia transcribes the request.`;
-  if(index===1)return liveTrip.origin&&liveTrip.destination?`Voilà turns it into a trip: ${liveTrip.origin} → ${liveTrip.destination}.`:'Voilà turns the request into a trip.';
-  if(index===2)return 'Checking the disruption and alternatives, with sources.';
-  if(index===3)return `${PERSON} picks an option by voice.`;
-  if(index===4)return 'The H agent is filling in the booking site in a cloud browser.';
-  if(index===5)return 'Before anything is submitted, Voilà reads it back and waits for a spoken yes.';
-  if(index===6)return `The agent stopped at checkout. ${PERSON} pays on their own phone. Voilà never sees the card.`;
-  return `Done. Booking card sent to ${PERSON}.`;
-}
-function clearLiveBooking(){
-  liveTrip={};liveMetricsSteps=0;liveCostUsd=null;liveAgentLines=0;liveLastAgentText='';
-  liveAgentView='';livePayment=null;liveBooking=null;liveFrameImage='';liveFrameUrl='';liveFrameVisible=false;
-  liveExecStarted=false;liveExecPhase='idle';liveExecElapsed=0;liveExecLastAt=performance.now();liveExecQueue=[];
-  execState={ph:null,pt:0,k:0,j:0,lastSay:-1,lastStep:-1};mazeA=0;focusExec=false;
-  bwShot.style.display='none';bwShot.removeAttribute('src');$('bwUrl').textContent='about:blank';
-  $('srBox').hidden=true;$('agBox').hidden=true;$('legend').hidden=true;
-  liveStatusSignature='';
-}
-function setLiveExecPhase(phase){
-  liveExecPhase=phase;liveExecElapsed=0;liveExecLastAt=performance.now();execState.ph=phase;execState.pt=0;
-  if(phase==='in'){execState.k=0;execState.j=0;$('srBox').hidden=true;$('agBox').hidden=true;$('legend').hidden=true}
-  if(phase==='sr'){$('srBox').hidden=false;$('agBox').hidden=true}
-  if(phase==='gap'){$('srBox').hidden=false;$('agBox').hidden=true}
-  if(phase==='ag'){$('agBox').hidden=false;$('agCount').textContent=`${liveSteps()} / 60`}
-  if(phase==='out'){
-    focusExec=false;liveExecQueue=[];$('srBox').hidden=true;$('agBox').hidden=true;$('legend').hidden=true;
-    camT={x:0,y:0,z:1};cam={...camT};
-  }
-}
-function updateLiveExec(now){
-  const phaseDelta=Math.max(0,now-liveExecLastAt);liveExecLastAt=now;
-  if(si===4){
-    if(['in','sr','gap'].includes(liveExecPhase)){
-      liveExecElapsed+=phaseDelta;
-      const duration=liveExecPhase==='in'?1000:liveExecPhase==='sr'?5600:1500;
-      if(liveExecElapsed>=duration){
-        const next=liveExecQueue.shift();
-        setLiveExecPhase(next??'ag');
-      }
-    }
-    execState.pt=liveExecElapsed;
-    if(liveExecPhase==='sr'){$('srCount').textContent=`${Math.min(SR_N,Math.floor(liveExecElapsed/(5600/SR_N)))} / ${MAZE.length}`;execState.k=Math.min(SR_N,Math.floor(liveExecElapsed/(5600/SR_N)))}
-    if(liveExecPhase==='gap'){execState.k=SR_N;$('srCount').textContent=`${SR_N} / ${MAZE.length}`}
-    if(liveExecPhase==='ag'){execState.j=Math.min(23,liveSteps());$('agCount').textContent=`${liveSteps()} / 60`}
-    const active=['in','sr','gap','ag'].includes(liveExecPhase);
-    mazeA=Math.max(0,Math.min(1,mazeA+(active?1:-1)*phaseDelta/600));
-  }else if(liveExecPhase==='out'){
-    liveExecElapsed+=phaseDelta;mazeA=Math.max(0,mazeA-phaseDelta/600);
-    if(liveExecElapsed>=1000){setLiveExecPhase('idle');mazeA=0;$('srBox').hidden=true;$('agBox').hidden=true;$('legend').hidden=true}
-  }else mazeA=Math.max(0,mazeA-phaseDelta/600);
-}
-function setLiveStage(stage){
-  const indices={LISTEN:0,UNDERSTAND:1,CLARIFY:1,RESEARCH:2,PRESENT:3,CHOOSE:3,EXECUTE:4,CONFIRM:5,HANDOFF:6,AWAIT_PAYMENT:6,DONE:7};
-  if(stage===lastServerStage||!Object.hasOwn(indices,stage))return;
-  const next=indices[stage],previous=si;
-  lastServerStage=stage;liveError=false;appendLiveLog(`stage  ${stage}`);
-  if(next===0&&previous>0)clearLiveBooking();
-  if(next!==si){si=next;te=0;paintChips()}
-  if(next===4){
-    focusExec=true;camT={x:STAGES[4].x,y:STAGES[4].y,z:2.55};
-    if(previous===5||liveExecStarted){liveExecStarted=true;liveExecQueue=[];setLiveExecPhase('ag')}
-    else{liveExecStarted=true;liveExecQueue=cmpEl.checked?['sr','gap','ag']:['ag'];setLiveExecPhase('in')}
-  }else if(previous===4)setLiveExecPhase('out');
-  if(next!==4&&previous!==4){focusExec=false;camT={x:0,y:0,z:1}}
-  capEl.textContent=nm(liveCaption(si));renderLiveStatus()
-}
-function isRecord(value){return typeof value==='object'&&value!==null&&!Array.isArray(value)}
-function resetLiveSession(name,startedAt){
-  PERSON=name;personLabel.textContent=PERSON;sessionActive=true;
-  const parsed=Date.parse(startedAt);sessionStartedAt=Number.isFinite(parsed)?parsed:Date.now();
-  lastServerStage='';liveError=false;clearLiveBooking();si=-1;te=0;paintChips();logEl.replaceChildren();
-  cam={x:0,y:0,z:1};camT={x:0,y:0,z:1};
-  hearEl.replaceChildren();liveHearWho='';liveHearText='';capEl.textContent='Live monitor · waiting for a session from the phone…';
-  $('budget').textContent='—';
-  if(footnote)footnote.textContent=`Live monitor: every node, line and screenshot comes from the Voilà server's events for ${PERSON}'s session. The screen-reader comparison is illustrative.`;
-  liveStatusSignature='';renderLiveStatus();
-}
-function applyLiveEvent(event){
-  if(!isRecord(event)||typeof event.type!=='string')return;
-  if(event.type==='session'){
-    if(typeof event.name!=='string'||!event.name.trim())return;
-    resetLiveSession(event.name,typeof event.started_at==='string'?event.started_at:'');
-    return;
-  }
-  if(!sessionActive)return;
-  if(event.type==='profile'){
-    if(!isRecord(event.profile)||typeof event.profile.name!=='string'||!event.profile.name.trim())return;
-    const previous=PERSON;PERSON=event.profile.name;personLabel.textContent=PERSON;
-    if(footnote)footnote.textContent=`Live monitor: every node, line and screenshot comes from the Voilà server's events for ${PERSON}'s session. The screen-reader comparison is illustrative.`;
-    if(liveHearWho===previous){liveHearWho=PERSON;say(PERSON,liveHearText)}
-    if(!liveError&&si>=0)capEl.textContent=nm(liveCaption(si));
-    renderLiveStatus();
-  }else if(event.type==='stage'){
-    if(typeof event.stage==='string')setLiveStage(event.stage);
-  }else if(event.type==='transcript'){
-    if(typeof event.text!=='string')return;
-    appendLiveLog(`gladia  final  "${event.text}"`);
-    liveHearWho=PERSON;liveHearText=event.text;say(liveHearWho,event.text);
-  }else if(event.type==='trip'){
-    if(!isRecord(event.trip))return;
-    const partial={};
-    for(const key of ['origin','destination','deadline'])if(typeof event.trip[key]==='string')partial[key]=event.trip[key];
-    for(const key of ['passengers','luggage'])if(typeof event.trip[key]==='number'&&Number.isFinite(event.trip[key]))partial[key]=event.trip[key];
-    if(typeof event.trip.guide_dog==='boolean')partial.guide_dog=event.trip.guide_dog;
-    liveTrip={...liveTrip,...partial};
-    if(si===1&&!liveError)capEl.textContent=nm(liveCaption(1));
-  }else if(event.type==='agent_frame'){
-    if(typeof event.image!=='string'||(!event.image.startsWith('data:image/')&&!event.image.startsWith('https:')))return;
-    if(!Number.isInteger(event.step)||event.step<0)return;
-    liveFrameImage=event.image;liveFrameUrl=typeof event.url==='string'?event.url:'';
-    liveFrameVisible=true;bwShot.onerror=()=>{liveFrameVisible=false;bwShot.style.display='none';$('pvIdle').classList.add('on')};
-    bwShot.onload=()=>{$('pvIdle').classList.remove('on')};
-    bwShot.src=liveFrameImage;bwShot.style.display='block';$('pvIdle').classList.remove('on');
-  }else if(event.type==='agent_metrics'){
-    if(!Number.isInteger(event.steps)||event.steps<0)return;
-    liveMetricsSteps=event.steps;
-    if(event.cost_usd===null||typeof event.cost_usd==='number'&&Number.isFinite(event.cost_usd))liveCostUsd=event.cost_usd;
-    if(si===4&&liveExecPhase==='ag'){execState.j=Math.min(23,liveSteps());$('agCount').textContent=`${liveSteps()} / 60`}
-    renderLiveStatus();
-  }else if(event.type==='agent_view'){
-    if(typeof event.url!=='string')return;
-    try{const url=new URL(event.url);if(url.protocol==='https:'&&!url.username&&!url.password)liveAgentView=url.href}catch{}
-    renderLiveStatus();
-  }else if(event.type==='say'){
-    if(typeof event.text==='string'){liveHearWho='Voilà';liveHearText=event.text;say(liveHearWho,liveHearText)}
-  }else if(event.type==='feed'){
-    if(typeof event.kind!=='string'||typeof event.text!=='string')return;
-    const mode=typeof event.mode==='string'?event.mode:undefined,status=typeof event.status==='string'?event.status:undefined;
-    let line;
-    if(event.kind==='traffic'){
-      line=`traffic  [${mode??'?'}] ${status??'unknown'} — ${event.text}`;
-      if(mode==='demo')STAGES[2].tech='Recorded PRIM fixture (demo mode)';
-      else if(mode==='live')STAGES[2].tech='RATP status via H agent (text) + Linkup search';
-    }else if(event.kind==='research')line=`linkup  ${event.text}`;
-    else if(event.kind==='agent'){
-      line=`policy_event  ${event.text}`;liveAgentLines++;liveLastAgentText=event.text;
-      if(si===4&&liveExecPhase==='ag'){execState.j=Math.min(23,liveSteps());$('agCount').textContent=`${liveSteps()} / 60`}
-    }else line=`${event.kind}  ${event.text}`;
-    appendLiveLog(line,typeof event.source==='string'?event.source:undefined);
-    if(event.kind==='traffic')tip.hidden=true;
-    renderLiveStatus();
-  }else if(event.type==='options'){
-    if(!Array.isArray(event.items))return;
-    for(const item of event.items){
-      if(!isRecord(item)||typeof item.name!=='string'||typeof item.price!=='number'||typeof item.pickup_wait_minutes!=='number'||typeof item.journey_minutes!=='number'||typeof item.guide_dog_status!=='string')continue;
-      appendLiveLog(`option  ${item.name} · ${item.price} € · wait ${item.pickup_wait_minutes} + ${item.journey_minutes} min · dog ${item.guide_dog_status}`);
-    }
-  }else if(event.type==='confirm'){
-    appendLiveLog('tool  confirm_with_user');
-  }else if(event.type==='payment_handoff'){
-    const amount=typeof event.amount==='number'&&Number.isFinite(event.amount)?event.amount:'?';
-    const merchant=typeof event.merchant==='string'?event.merchant:'?';
-    livePayment={amount,merchant};appendLiveLog(`tool  handoff_payment(${amount} EUR, ${merchant})`);renderLiveStatus();
-  }else if(event.type==='booking_card'){
-    if(!isRecord(event.booking))return;
-    const booking=event.booking,ref=typeof booking.ref==='string'?booking.ref:'?';
-    const pickup=typeof booking.pickup_time==='string'?booking.pickup_time:'';
-    const dog=typeof booking.guide_dog_status==='string'?booking.guide_dog_status:'?';
-    let time='?';
-    if(pickup){const date=new Date(pickup);if(Number.isFinite(date.getTime()))time=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Paris',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(date)}
-    liveBooking={ref,pickup_time:pickup,guide_dog_status:dog};
-    appendLiveLog(`card  ref=${ref}  pickup=${time}  guide_dog_status=${dog}`);renderLiveStatus();
-  }else if(event.type==='error'){
-    if(typeof event.message!=='string')return;
-    appendLiveLog(`error  ${event.message}`);liveError=true;capEl.textContent=nm(`⚠ ${event.message}`);
-  }
-}
-function connectMonitor(){
-  if(!LIVE)return;
-  const protocol=location.protocol==='https:'?'wss':'ws';
-  const params=new URLSearchParams();params.set('key',QUERY.get('key')??'');
-  if(QUERY.has('session'))params.set('session',QUERY.get('session')??'');
-  const socket=new WebSocket(`${protocol}://${location.host}/ws/monitor?${params}`);
-  monitorSocket=socket;
-  socket.onopen=()=>{connected=true;monitorClosed=false;reconnectDelay=1000;if(!sessionActive)capEl.textContent='Live monitor · waiting for a session from the phone…';renderLiveStatus()};
-  socket.onmessage=({data})=>{
-    let message;try{message=JSON.parse(typeof data==='string'?data:'')}catch{return}
-    if(isRecord(message)&&isRecord(message.event))applyLiveEvent(message.event);
-  };
-  socket.onerror=()=>{};
-  socket.onclose=()=>{
-    if(monitorSocket!==socket)return;
-    connected=false;monitorClosed=true;
-    if(!sessionActive)capEl.textContent='Live monitor · connection lost, reconnecting…';
-    renderLiveStatus();
-    const delay=reconnectDelay;reconnectDelay=Math.min(10_000,reconnectDelay*2);
-    reconnectTimer=setTimeout(connectMonitor,delay);
-  };
-}
-
 function tick(now){
   const dt=Math.min(64,now-last);last=now;clock+=dt;
-  if(LIVE)updateLiveExec(now);
-  else if(playing&&si<STAGES.length){te+=dt*speed;const s=STAGES[si];
+  if(playing&&si<STAGES.length){te+=dt*speed;const s=STAGES[si];
     if(s.exec){if(updExec(dt*speed))enter(si+1)}else if(te>=s.dur)enter(si+1)}
-  if(!LIVE&&!(si>=0&&STAGES[si]&&STAGES[si].exec)){mazeA=Math.max(0,mazeA-dt/600)}
+  if(!(si>=0&&STAGES[si]&&STAGES[si].exec)){mazeA=Math.max(0,mazeA-dt/600)}
  
   projectAll();if(focusExec)camT={x:EX.x,y:EX.y,z:2.55};
   const k=RM?1:Math.min(1,dt/260);cam.x+=(camT.x-cam.x)*k;cam.y+=(camT.y-cam.y)*k;cam.z+=(camT.z-cam.z)*k;
-  if(LIVE){$('budget').textContent=liveTrip.deadline?fmt((Date.parse(liveTrip.deadline)-Date.now())/1000):'—';renderLiveStatus()}
-  else $('budget').textContent=fmt(600-simElapsed());
+  $('budget').textContent=fmt(600-simElapsed());
   speaking=Math.max(0,speaking-dt/1000);[...wave.children].forEach((b,i)=>b.style.height=(speaking>0?4+Math.abs(Math.sin(clock/120+i*.7))*14*Math.min(1,speaking):4)+'px');
-  bwSync();draw();requestAnimationFrame(tick);
+  if(!liveMode&&started&&si>=STAGES.length){logEl.innerHTML='';enter(0);playing=true}
+  if(!liveMode)bwSync();draw();requestAnimationFrame(tick);
 }
 
 function arc(a,b,col,alpha,w,bend){const[x1,y1]=toS(a.x,a.y),[x2,y2]=toS(b.x,b.y);const m=project({w:{x:(a.w.x+b.w.x)/2*bend,y:(a.w.y+b.w.y)/2*bend-.06,z:(a.w.z+b.w.z)/2*bend}});const[cx,cy]=toS(m.x,m.y);alpha*=depA(Math.min(a.d,b.d)+.3);ctx.strokeStyle=col;ctx.globalAlpha=alpha;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x1,y1);ctx.quadraticCurveTo(cx,cy,x2,y2);ctx.stroke();ctx.globalAlpha=1;return[x1,y1,cx,cy,x2,y2]}
@@ -642,19 +419,20 @@ function draw(){
   const C=CORE;
   // faint loops between all stages
   // spokes to core
-  STAGES.forEach((s,i)=>arc(C,s,'#7C889E',(i<=si?.18:.06)*fadeBG,1,1));
+  STAGES.forEach((s,i)=>arc(C,s,'#7C889E',((liveMode?liveSeen.has(i):i<=si)?.18:.06)*fadeBG,1,1));
   // flow arcs
-  for(let i=0;i<STAGES.length;i++){const from=i===0?C:STAGES[i-1],s=STAGES[i];
-    if(i<si||(i===si)){const p=arc(from,s,s.c,(i===si?.95:.6)*fadeBG,i===si?2.4:1.6,.35);
+  const flow=liveMode?[...liveSeen]:STAGES.map((s,i)=>i);
+  for(let j=0;j<flow.length;j++){const i=flow[j],from=j===0?C:STAGES[flow[j-1]],s=STAGES[i];
+    if(liveMode||i<=si){const p=arc(from,s,s.c,(i===si?.95:.6)*fadeBG,i===si?2.4:1.6,.35);
       if(i===si&&!RM&&te<1100){const[x,y]=qpt(p,Math.min(1,te/900));ctx.fillStyle=s.c;ctx.beginPath();ctx.arc(x,y,4.5,0,6.283);ctx.fill();ctx.shadowBlur=0}}}
   // core rings
   const[cx,cy]=toS(CORE.x,CORE.y);ctx.strokeStyle='#7C889E';ctx.lineWidth=1;
   ctx.globalAlpha=.3*fadeBG;ctx.beginPath();ctx.arc(cx,cy,26*Math.min(cam.z,1.6),0,6.283);ctx.stroke();
   ctx.globalAlpha=fadeBG;ctx.fillStyle='#5E6B82';ctx.beginPath();ctx.arc(cx,cy,13*Math.min(cam.z,1.6),0,6.283);ctx.fill();
-  label(PERSON,cx,cy+44,'#141B2B',14,true,true);
+  label(liveMode?'Traveler':'Nicolas',cx,cy+44,'#141B2B',14,true,true);
   ctx.globalAlpha=1;
   // satellites + nodes
-  STAGES.map((s,i)=>[s,i]).sort((A,B)=>A[0].d-B[0].d).forEach(([s,i])=>{const on=i<=si,act=i===si;const vis=(s.exec?1-mazeA:fadeBG)*depA(s.d),sz=s.f;if(vis<.02)return;
+  STAGES.map((s,i)=>[s,i]).sort((A,B)=>A[0].d-B[0].d).forEach(([s,i])=>{const on=liveMode?liveSeen.has(i):i<=si,act=i===si;const vis=(s.exec?1-mazeA:fadeBG)*depA(s.d),sz=s.f;if(vis<.02)return;
     s.sat.forEach((p,k)=>{const[x,y]=toS(p.x,p.y);const appear=act?Math.min(1,(te-k*120)/300):on?1:0;
       ctx.globalAlpha=(on?.85*Math.max(0,appear):.25)*vis;ctx.fillStyle=on?s.c:'#8C98AD';ctx.beginPath();ctx.arc(x,y,2.4*p.f,0,6.283);ctx.fill();});
     const[x,y]=toS(s.x,s.y);ctx.globalAlpha=vis;
@@ -689,11 +467,11 @@ function drawMaze(){
     for(let q=0;q<E.j;q++){const m=MAZE[PATH[q]];const[x,y]=toS(m.x,m.y);ctx.fillStyle='#F07F1B';ctx.beginPath();ctx.arc(x,y,rr+1.5,0,6.283);ctx.fill()}
     const cur=E.j-1,m=MAZE[PATH[cur]],[x,y]=toS(m.x,m.y);
     if(!RM){ctx.strokeStyle='#F07F1B';ctx.globalAlpha=A*(1-(clock%900)/900);ctx.beginPath();ctx.arc(x,y,6+(clock%900)/900*14,0,6.283);ctx.stroke();ctx.globalAlpha=A}
-    if(!LIVE){let lab=null;for(let q=cur;q>=Math.max(0,cur-2);q--)if(STEP_LABEL[q]){lab=[q,STEP_LABEL[q]];break}
-      if(lab){const mm=MAZE[PATH[lab[0]]];const[lx,ly]=toS(mm.x,mm.y);ctx.font='700 13px "Atkinson Hyperlegible", sans-serif';const w=ctx.measureText(lab[1]).width+16;
-        let bx=lx+12,by=ly-30;if(bx+w>W-8)bx=lx-w-12;if(by<50)by=ly+14;
-        ctx.fillStyle='#FFFFFF';ctx.strokeStyle='#F07F1B';ctx.lineWidth=1;ctx.beginPath();ctx.roundRect?ctx.roundRect(bx,by,w,24,6):ctx.rect(bx,by,w,24);ctx.fill();ctx.stroke();
-        ctx.fillStyle='#141B2B';ctx.fillText(lab[1],bx+8,by+16)}}}
+    let lab=null;for(let q=cur;q>=Math.max(0,cur-2);q--)if(STEP_LABEL[q]){lab=[q,STEP_LABEL[q]];break}
+    if(lab){const mm=MAZE[PATH[lab[0]]];const[lx,ly]=toS(mm.x,mm.y);ctx.font='700 13px "Atkinson Hyperlegible", sans-serif';const w=ctx.measureText(lab[1]).width+16;
+      let bx=lx+12,by=ly-30;if(bx+w>W-8)bx=lx-w-12;if(by<50)by=ly+14;
+      ctx.fillStyle='#FFFFFF';ctx.strokeStyle='#F07F1B';ctx.lineWidth=1;ctx.beginPath();ctx.roundRect?ctx.roundRect(bx,by,w,24,6):ctx.rect(bx,by,w,24);ctx.fill();ctx.stroke();
+      ctx.fillStyle='#141B2B';ctx.fillText(lab[1],bx+8,by+16)}}
   ctx.globalAlpha=1;
 }
 
@@ -705,33 +483,21 @@ cv.addEventListener('pointerdown',e=>{return;dragging=true;dragMoved=0;dx0=e.cli
 cv.addEventListener('pointermove',e=>{if(!dragging)return;const ddx=e.clientX-dx0,ddy=e.clientY-dy0;dx0=e.clientX;dy0=e.clientY;dragMoved+=Math.abs(ddx)+Math.abs(ddy);rot-=ddx*.008;tilt=Math.max(.05,Math.min(1.1,tilt+ddy*.005));cv.style.cursor='grabbing';tip.hidden=true});
 cv.addEventListener('pointerup',()=>{dragging=false;cv.style.cursor='default'});
 cv.addEventListener('mousemove',e=>{if(dragging)return;const[i,mx,my]=hit(e);if(i<0||mazeA>.3){tip.hidden=true;cv.style.cursor='default';return}
-  const s=STAGES[i];cv.style.cursor='pointer';
-  if(LIVE){const title=document.createElement('strong'),tech=document.createElement('span'),caption=document.createElement('div');title.style.color=s.c;title.textContent=nm(s.name);tech.textContent=nm(s.tech);caption.textContent=nm(s.cap);tip.replaceChildren(title,tech,caption)}
-  else tip.innerHTML=`<strong style="color:${s.c}">${nm(s.name)}</strong><span>${nm(s.tech)}</span><div>${nm(s.cap)}</div>`;
-  tip.hidden=false;
+  const s=STAGES[i];cv.style.cursor=liveMode?'default':'pointer';tip.innerHTML=`<strong style="color:${s.c}">${s.name}</strong><span>${liveMode?'Live backend events':s.tech}</span>${liveMode?'':`<div>${s.cap}</div>`}`;tip.hidden=false;
   const tw=tip.offsetWidth;tip.style.left=Math.min(mx+14,W-tw-8)+'px';tip.style.top=(my+14)+'px'});
 cv.addEventListener('mouseleave',()=>tip.hidden=true);
 cv.addEventListener('click',e=>{if(dragMoved>5)return;const[i]=hit(e);if(i>=0&&mazeA<.3)jump(i)});
 
 function togglePlay(force){
-  if(LIVE)return;
+  if(liveMode)return;
   if(!started||si>=STAGES.length||si<0){started=true;logEl.innerHTML='';mazeA=0;enter(0)}
   playing=force===undefined?!playing:force;$('play').textContent=playing?'Pause':'Play'}
 $('play').onclick=()=>togglePlay();
-$('next').onclick=()=>enter(Math.min(STAGES.length,si+1));
-$('prev').onclick=()=>enter(Math.max(0,si-1));
-$('restart').onclick=()=>{started=true;focusExec=false;logEl.innerHTML='';mazeA=0;cam={x:0,y:0,z:1};enter(0);togglePlay(true)};
+$('next').onclick=()=>{if(!liveMode)enter(Math.min(STAGES.length,si+1))};
+$('prev').onclick=()=>{if(!liveMode)enter(Math.max(0,si-1))};
+$('restart').onclick=()=>{if(liveMode)return;started=true;focusExec=false;logEl.innerHTML='';mazeA=0;cam={x:0,y:0,z:1};enter(0);togglePlay(true)};
 $('speed').onchange=e=>speed=+e.target.value;
-addEventListener('keydown',e=>{
-  if(LIVE){
-    if(e.target.id==='cmp'||e.target.tagName==='SELECT'||(dlg.open&&e.code==='Space'))return;
-    if(e.code==='Space'||e.key==='ArrowRight'||e.key==='ArrowLeft')e.preventDefault();
-    return
-  }
-  if(e.target.tagName==='SELECT'||(dlg.open&&e.code==='Space'))return;
-  if(e.code==='Space'){e.preventDefault();togglePlay()}
-  if(e.key==='ArrowRight')$('next').click();if(e.key==='ArrowLeft')$('prev').click()
-});
+addEventListener('keydown',e=>{if(e.target.tagName==='SELECT'||(dlg.open&&e.code==='Space'))return;if(e.code==='Space'){e.preventDefault();togglePlay()}if(e.key==='ArrowRight')$('next').click();if(e.key==='ArrowLeft')$('prev').click()});
 
 
 // ---- agent browser card
@@ -785,48 +551,8 @@ function bwForm(j,anim){
   $(st.t).classList.add('tgt');bwPoint($(st.t),anim&&st.op!=='move'&&st.op!=='stop');
   if(st.op==='type'&&anim){sp(st.t).textContent=from;bw.typ={el:sp(st.t),from,to:st.v,t0:clock}}
 }
-function bwStatus(html){if(LIVE)return;$('bwStat').innerHTML=nm(html);$('bwStatBig').innerHTML=nm(html)}
-function renderLiveStatus(){
-  if(!LIVE)return;
-  const parts=[],add=(text,bold=false,href='')=>parts.push({text,bold,href});
-  if(si<4){
-    if(connected)add('live · connected · no H session yet');
-    else add(monitorClosed?'live · connection lost, reconnecting…':'live · connecting…');
-  }else if(si===4){
-    add(`step ${liveSteps()} · ${liveLastAgentText.slice(0,90)}`);
-    if(liveCostUsd!==null)add(` · $${liveCostUsd.toFixed(3)}`);
-  }else if(si===5){add('tool ');add('confirm_with_user',true);add(` · waiting for ${PERSON}`)}
-  else if(si===6){add('tool ');add('handoff_payment',true);add(`(${livePayment?.amount??'?'} EUR) · agent never pays`)}
-  else if(si===7)add(`final answer → booking card · ref ${liveBooking?.ref??'?'}`);
-  if(liveAgentView){add(' · ');add('open in H Agent View ↗',false,liveAgentView)}
-  if(sessionActive&&!connected)add(' · connection lost, reconnecting…');
-  const signature=JSON.stringify(parts);
-  if(signature===liveStatusSignature)return;
-  liveStatusSignature=signature;
-  for(const target of [$('bwStat'),$('bwStatBig')]){
-    target.replaceChildren();
-    for(const part of parts){
-      if(part.href){const link=document.createElement('a');link.href=part.href;link.target='_blank';link.rel='noopener noreferrer';link.textContent=nm(part.text);target.append(document.createTextNode(''),link)}
-      else if(part.bold){const bold=document.createElement('b');bold.textContent=nm(part.text);target.append(bold)}
-      else target.append(document.createTextNode(nm(part.text)))
-    }
-  }
-}
-function liveBwSync(){
-  for(const id of ['pvForm','pvPay','pvDone'])$(id).classList.remove('on');
-  $('pvIdle').classList.toggle('on',!liveFrameVisible);
-  bwShot.style.display=liveFrameVisible?'block':'none';
-  bw.cur.style.display='none';bw.rip.style.display='none';bw.ring.style.display='none';
-  $('paidMsg').classList.remove('on');
-  $('bwUrl').textContent=liveFrameVisible&&liveFrameUrl?liveFrameUrl.replace(/^https?:\/\//i,''):'about:blank';
-  let banner='';
-  if(si===5)banner=`⏸ confirm_with_user · waiting for ${PERSON}`;
-  else if(si===6)banner=`⏹ Agent stopped · handoff_payment → ${PERSON}’s phone`;
-  bw.ban.textContent=nm(banner);bw.ban.style.display=banner?'block':'none';
-  renderLiveStatus();
-}
+function bwStatus(html){$('bwStat').innerHTML=html;$('bwStatBig').innerHTML=html}
 function bwSync(){
-  if(LIVE){liveBwSync();return}
   let view='idle',url='about:blank',stat='idle · no H session yet',ban='',j=0,mode='',sub=0,cursor=false;
   const E=execState;
   if(si===3){stat='choice made · briefing the H agent…'}
@@ -842,7 +568,7 @@ function bwSync(){
   const key=[view,mode,j,sub].join('|');
   if(key!==bw.key){bw.key=key;
     ['Idle','Form','Pay','Done'].forEach(v=>$('pv'+v).classList.toggle('on',v.toLowerCase()===view));
-    $('bwUrl').textContent=url;bwStatus(stat);bw.ban.textContent=nm(ban);bw.ban.style.display=ban?'block':'none';
+    $('bwUrl').textContent=url;bwStatus(stat);bw.ban.textContent=ban;bw.ban.style.display=ban?'block':'none';
     bw.cur.style.display=cursor?'flex':'none';$('paidMsg').classList.toggle('on',view==='pay'&&sub===1);
     if(view==='form'){if(mode==='load'||mode==='sr'){bwForm(0);bw.cur.style.left='24px';bw.cur.style.top='60px'}
       else if(mode==='ag')bwForm(j,true);
@@ -862,15 +588,75 @@ $('bwClose').onclick=()=>dlg.close();
 dlg.addEventListener('click',e=>{if(e.target===dlg)dlg.close()});
 dlg.addEventListener('close',()=>{fitS.appendChild(bw.el);fitK(fitS);$('bwBox').focus()});
 
-resize();projectAll();paintChips();
-if(LIVE){
-  STAGES[0].tech='Gladia live STT (on the phone)';
-  liveBwSync();connectMonitor();
-}else{
-  // resting frame: show the map mid-flight so the first view is complete
-  si=2;te=2000;paintChips();capEl.textContent=nm('One sentence in a noisy station → a booked, paid ride. Press Play to run it.');
-  say('Nicolas','RER B est en panne ! … réserve-moi une voiture pour CDG 2E, avec mon chien guide !');speaking=0;
+const demoNames=STAGES.map(s=>s.name);
+const liveNames=['Listen','Understand','Research','Present','Confirm','Execute','Payment','Done'];
+const liveStage={LISTEN:0,UNDERSTAND:1,CLARIFY:1,RESEARCH:2,PRESENT:3,CHOOSE:3,CONFIRM:4,EXECUTE:5,HANDOFF:6,AWAIT_PAYMENT:6,DONE:7};
+const liveCaptions={LISTEN:'Listening to the traveler.',UNDERSTAND:'Gemini is understanding the trip.',CLARIFY:'Asking the traveler for a missing detail.',RESEARCH:'Checking live RATP traffic for the route.',PRESENT:'Reading the route options aloud.',CHOOSE:"Options read aloud — waiting for the traveler's choice.",CONFIRM:'Waiting for the traveler to confirm.',EXECUTE:'H agent is booking on the taxi site.',HANDOFF:"Payment handed to the traveler's phone.",AWAIT_PAYMENT:"Payment handed to the traveler's phone.",DONE:'Booking confirmed.'};
+let liveStarted=0,currentLiveStage='LISTEN';const researchLines=new Set();
+function liveEntry(event){
+  const short=text=>String(text??'').replace(/\s+/g,' ').trim().slice(0,220);
+  switch(event.type){
+    case 'activity':return;
+    case 'feed':return ['feed',short(event.text)];
+    case 'final_transcript':case 'user_reply':return ['transcript','"'+short(event.text)+'"'];
+    case 'options':return ['options',event.items.length?event.items.map(o=>`${o.name} · ${o.price} € · ${o.journey_minutes} min`).join(' / '):'No options available.'];
+    case 'agent_step':return ['agent',short(event.action)];
+    case 'payment_handoff':return ['payment',`handed to phone · ${event.amount} €`];
+    case 'confirm':return ['confirm',short(event.summary)];
+    case 'booking_card':return ['booking',short([event.booking.ref,event.booking.pickup_point].filter(Boolean).join(' · '))];
+    case 'say':return ['say',short(event.text)];
+    case 'clarify':case 'profile_request':return ['question',short(event.question)];
+    case 'error':return ['error',short(event.message)];
+    case 'location_request':return ['location','Asked the phone for its location.'];
+  }
 }
+const demoNote=document.querySelector('.note').textContent;
+const livePage=document.createElement('div');livePage.id='pvLive';livePage.className='pv';livePage.style.cssText='padding:24px;overflow:auto;white-space:pre-wrap;font:30px/1.5 system-ui';bw.page.append(livePage);
+function liveBrowser(text,url='about:blank'){
+  document.querySelectorAll('.pv').forEach(p=>p.classList.toggle('on',p===livePage));
+  livePage.textContent=text;$('bwUrl').textContent=url;
+  bw.cur.style.display='none';bw.ring.style.display='none';bw.ban.style.display='none';bw.typ=null;
+  $('bwStat').textContent=url==='about:blank'?'Live backend events · private details hidden':url;$('bwStatBig').textContent=$('bwStat').textContent;
+}
+function setLiveStage(stage){currentLiveStage=stage;si=liveStage[stage]??0;liveSeen.add(si);paintChips();[...chips.children].forEach((chip,i)=>chip.dataset.state=i===si?'active':liveSeen.has(i)?'done':'');capEl.textContent=stage==='RESEARCH'&&researchLines.size?'Reading RATP: '+[...researchLines].join(', '):liveCaptions[stage]??'Following the traveler’s trip.';}
+addEventListener('showcase-mode',e=>{
+  const paired=e.detail.paired;
+  if(paired===liveMode)return;
+  liveMode=paired;playing=false;started=false;mazeA=0;focusExec=false;camT={x:0,y:0,z:1};liveSeen.clear();logEl.innerHTML='';
+  liveStarted=Date.now();researchLines.clear();
+  bw.el.setAttribute('aria-hidden',String(!paired));
+  document.querySelector('.note').textContent=paired?'Live phone session. Contact details and GPS coordinates are hidden. The browser card shows redacted H actions and safe page URLs; sensitive screenshots are not shared. Payment stays on the phone.':demoNote;
+  document.querySelector('.hud').hidden=paired;document.querySelector('.controls').hidden=paired;$('legend').hidden=true;
+  STAGES.forEach((s,i)=>{s.name=paired?liveNames[i]:demoNames[i];chips.children[i].textContent=s.name;});
+  if(paired){setLiveStage(e.detail.stage??'LISTEN');say('Voilà','Waiting for the traveler’s request…');liveBrowser('Waiting for live H steps. No booking has started.');}
+  else{bw.key='';livePage.classList.remove('on');togglePlay(true);}
+});
+addEventListener('showcase-event',e=>{
+  if(!liveMode)return;const event=e.detail;
+  if(event.type==='stage'){setLiveStage(event.stage);return;}
+  const entry=liveEntry(event);if(entry){const row=document.createElement('li'),stamp=document.createElement('b');const elapsed=Math.floor(Math.max(0,Date.now()-liveStarted)/1000);stamp.textContent=String(Math.floor(elapsed/60)).padStart(2,'0')+':'+String(elapsed%60).padStart(2,'0');row.append(stamp,document.createTextNode('  '+entry[0]+'  '+entry[1]));logEl.append(row);while(logEl.children.length>100)logEl.firstChild.remove();logEl.scrollTop=logEl.scrollHeight;}
+  if(event.type==='feed'&&event.kind==='traffic'){for(const match of event.text.matchAll(/\b(?:RER\s+[A-E]|M\s*\d{1,2}(?:bis)?|(?:ligne|line)\s+\d{1,2}(?:bis)?)\b/gi)){researchLines.add(match[0].replace(/^(?:ligne|line)\s+/i,'M').replace(/^M\s+/i,'M').toUpperCase());}if(currentLiveStage==='RESEARCH'&&researchLines.size)setLiveStage('RESEARCH');}
+  if(event.type==='say')say('Voilà',event.text);
+  if(event.type==='clarify'||event.type==='profile_request')say('Voilà',event.question);
+  if(event.type==='confirm'){say('Voilà',event.summary);liveBrowser('Awaiting traveler approval\n\n'+event.summary);}
+  if(event.type==='options'){capEl.textContent=event.items.length?liveCaptions.CHOOSE:'No options available';liveBrowser(event.items.length?event.items.map(o=>o.name+'\nEstimated €'+o.price+' · pickup ~'+o.pickup_wait_minutes+' min · journey ~'+o.journey_minutes+' min').join('\n\n'):'No options available.');}
+  if(event.type==='agent_step')liveBrowser(event.action,event.url);
+  if(event.type==='payment_handoff')liveBrowser(event.merchant+'\n€'+event.amount);
+  if(event.type==='booking_card')liveBrowser('Booking\n'+JSON.stringify(event.booking,null,2));
+  if(event.type==='error')capEl.textContent=event.message;
+});
+resize();projectAll();paintChips();
+// resting frame: show the map mid-flight so the first view is complete
+si=2;te=2000;paintChips();capEl.textContent='One sentence in a noisy station → a booked, paid ride. Press Play to run it.';
+say('Nicolas','RER B est en panne ! … réserve-moi une voiture pour CDG 2E, avec mon chien guide !');speaking=0;
 requestAnimationFrame(t=>{last=t;tick(t)});
+togglePlay(true);
 })();
+</script>
+<style>
+#pairing{display:flex;align-items:center;gap:16px;margin-top:12px}#pairing[hidden]{display:none}#pairing-qr{width:116px!important;height:116px!important;border:8px solid white;border-radius:12px}#pairing-code{font:700 24px var(--mono);letter-spacing:.2em}[hidden]{display:none!important}#pvLive{background:#fafafd;color:#30354f}.bwstat{white-space:normal;overflow-wrap:anywhere}
+</style>
+<script type="module">
+import { startWatchPage } from '/src/showcase-live.ts';
+startWatchPage();
 </script>

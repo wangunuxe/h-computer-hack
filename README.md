@@ -24,10 +24,3 @@ to its own compiled file; missing web builds leave API routes available.
 Free services sleep when idle, so allow for cold starts. Sessions, reservations,
 and payment state are in memory and are lost on sleep/restart/redeploy; this is
 a demo deployment, not durable production booking infrastructure.
-
-## Live monitor
-
-Open `/monitor.html?key=<MONITOR_TOKEN>` on a desktop to follow the latest phone
-session; add `&session=<id>` to pin the monitor to one session. Without `key`,
-the page plays its scripted replay. Render generates `MONITOR_TOKEN` for the
-Voilà service.

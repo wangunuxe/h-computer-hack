@@ -41,6 +41,72 @@ async function complete(app: App, easy = false) {
 }
 
 describe('four-step booking', () => {
+  it.each([false, true])('offers taxi booking for a non-airport route (easy=%s)', async (easy) => {
+    const { app, store } = setup();
+    const base = await start(app, easy);
+    const home = await (await app.request(base + '/route')).text();
+    expect(home).toContain('Taxi Paris Réservation');
+    expect(home).toContain('Step 1 — Taxi route');
+    expect(home).toContain('Address, station or landmark');
+    expect(home).toContain('Choose your taxi');
+    expect(home).not.toMatch(/Paris Airport Shuttle|airport-only|navette/i);
+    expect(home).not.toMatch(/<label[^>]*\bfor="pickup"/);
+    const invalid = await post(app, base + '/route', { ...route, pickup: '' });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.text()).toContain('Taxi Paris Réservation');
+    expect((await post(app, base + '/route', {
+      ...route, pickup: 'La Défense', dropoff: 'Bercy',
+      pickup_lat: '48.8919', pickup_lng: '2.2387', dropoff_lat: '48.8404', dropoff_lng: '2.3795',
+    })).status).toBe(303);
+    const taxis = await (await app.request(base + '/vehicle')).text();
+    expect(taxis).toContain('Berline taxi');
+    expect(taxis).toContain('Taxi break confort');
+    expect(taxis).toContain('Taxi van');
+    expect(taxis).not.toMatch(/Private Sedan|Private Minivan|Comfort Estate/);
+    await post(app, base + '/vehicle', { vehicle: 'sedan' });
+    const passengers = await (await app.request(base + '/info')).text();
+    expect(passengers).toContain('Guide dog / assistance animal and driver notes');
+    expect(passengers).toContain('A note does not confirm operator acceptance');
+    expect(passengers).toContain('Book taxi and continue to payment');
+    const response = await post(app, base + '/info', info);
+    const checkout = await (await app.request(response.headers.get('location')!)).text();
+    expect(checkout).toContain('Step 4 — Taxi payment');
+    expect(checkout).toContain('Pay for taxi by card');
+    expect(checkout).toContain('Merchant: Taxi Paris Réservation');
+    expect(checkout).toContain('UNPAID');
+    const order = [...store.orders.values()][0]!;
+    expect(order.route.pickup).toBe('La Défense');
+    expect(order.route.dropoff).toBe('Bercy');
+    expect(order.info.notes).toBe(info.notes);
+    expect(order.paid).toBe(false);
+    const confirmation = await (await app.request('/fr/reservation/confirmation/' + order.id)).text();
+    expect(confirmation).toContain('Taxi booking confirmation');
+    expect(confirmation).toContain('UNPAID');
+  });
+  it('asks Stripe to retry a failed callback and tolerates duplicate and stale unpaid events', async () => {
+    const { app, store, fetcher } = setup({ STRIPE_WEBHOOK_SECRET: 'whsec_demo', SERVER_PUBLIC_URL: 'https://server.example' });
+    await complete(app); const order = [...store.orders.values()][0]!;
+    const deliver = (paid: boolean) => {
+      const payload = JSON.stringify({ type: 'checkout.session.completed', data: { object: { metadata: { orderId: order.id }, payment_status: paid ? 'paid' : 'unpaid' } } });
+      const signature = new Stripe('sk_test_signature_only').webhooks.generateTestHeaderString({ payload, secret: 'whsec_demo' });
+      return app.request('/stripe/webhook', { method: 'POST', headers: { 'stripe-signature': signature }, body: payload });
+    };
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      fetcher.mockRejectedValueOnce(new Error('offline'));
+      expect((await deliver(true)).status).toBe(503); expect(order.paid).toBe(true);
+      expect((await deliver(true)).status).toBe(200);
+      expect((await deliver(false)).status).toBe(200); expect(order.paid).toBe(true);
+      expect((await deliver(true)).status).toBe(200); expect(store.orders.size).toBe(1);
+    } finally { log.mockRestore(); }
+  });
+  it('creates only one order for concurrent passenger form submissions', async () => {
+    const { app, store } = setup(); const base = await start(app);
+    await post(app, base + '/route', route); await post(app, base + '/vehicle', { vehicle: 'sedan' });
+    const results = await Promise.all([post(app, base + '/info', info), post(app, base + '/info', info)]);
+    expect(store.orders.size).toBe(1);
+    expect(results[0]!.headers.get('location')).toBe(results[1]!.headers.get('location'));
+  });
   it('requires an explicit simulated payment and sends the same authenticated callback as Stripe', async () => {
     const { app, store, fetcher } = setup({ SERVER_PUBLIC_URL: 'https://server.example/', INTERNAL_CALLBACK_TOKEN: 'demo-token' }); await complete(app);
     const order = [...store.orders.values()][0]!;
@@ -74,7 +140,7 @@ describe('four-step booking', () => {
           expect(response.status).toBe(400);
           const body = await response.text();
           expect(body).toContain('Pickup date and time cannot be in the past (Europe/Paris).');
-          expect(body).toContain('Step 1 — Route');
+          expect(body).toContain('Step 1 — Taxi route');
           expect(body).toContain(`<option value="${time}" selected>`);
           expect([...store.drafts.values()][0]!.route).toBeUndefined();
         }
@@ -110,7 +176,7 @@ describe('four-step booking', () => {
       expect(response.status).toBe(400);
       const body = await response.text();
       expect(body).toContain(`Selected vehicle allows at most ${vehicle.luggageCapacity} suitcases.`);
-      expect(body).toContain('Step 3 — Passenger information');
+      expect(body).toContain('Step 3 — Taxi passengers');
       expect(body).toContain('<option value="8" selected>');
       expect(store.orders.size).toBe(0);
     }
@@ -195,7 +261,7 @@ describe('four-step booking', () => {
     const { paymentPath } = await complete(app);
     const body = await (await app.request(paymentPath + '?cancelled=1')).text();
     expect(body).toContain('Payment cancelled.');
-    expect(body).toContain('Pay via Credit Card');
+    expect(body).toContain('Pay for taxi by card');
     expect(body).toContain('id="checkout-form"');
     expect(body).not.toContain('id="countdown"');
     expect(body).toContain('UNPAID');
@@ -213,8 +279,8 @@ describe('four-step booking', () => {
     const { base, paymentPath } = await complete(app);
     const payment = await app.request(paymentPath);
     const body = await payment.text();
-    expect(body).toContain('Step 4 — Payment');
-    expect(body).toContain('Pay via Credit Card');
+    expect(body).toContain('Step 4 — Taxi payment');
+    expect(body).toContain('Pay for taxi by card');
     expect(body).toContain('id="countdown">2');
     expect(body).toContain(info.notes);
     expect(store.orders.size).toBe(1);
@@ -359,7 +425,7 @@ describe('payments', () => {
     }));
     expect(await (await app.request('/fr/reservation/confirmation/' + order.id)).text()).toContain('<dd>PAID</dd>');
   });
-  it('acknowledges callback failure without losing paid status', async () => {
+  it('returns a retryable callback failure without losing paid status', async () => {
     const { app, store, fetcher } = setup({ STRIPE_WEBHOOK_SECRET: 'whsec_demo', SERVER_PUBLIC_URL: 'https://server.example' });
     await complete(app);
     const order = [...store.orders.values()][0]!;
@@ -367,7 +433,7 @@ describe('payments', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const payload = JSON.stringify({ type: 'checkout.session.completed', data: { object: { metadata: { orderId: order.id }, payment_status: 'paid' } } });
     const signature = new Stripe('sk_test_signature_only').webhooks.generateTestHeaderString({ payload, secret: 'whsec_demo' });
-    expect((await app.request('/stripe/webhook', { method: 'POST', headers: { 'stripe-signature': signature }, body: payload })).status).toBe(200);
+    expect((await app.request('/stripe/webhook', { method: 'POST', headers: { 'stripe-signature': signature }, body: payload })).status).toBe(503);
     expect(order.paid).toBe(true);
     expect(log).toHaveBeenCalledWith('Payment callback failed', 'offline');
     log.mockRestore();

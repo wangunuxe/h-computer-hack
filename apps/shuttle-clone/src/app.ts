@@ -141,6 +141,7 @@ export function createApp({
     if (Number(parsed.data.luggage) > draft.vehicle.luggageCapacity) {
       return c.html(infoPage(draft, `Selected vehicle allows at most ${draft.vehicle.luggageCapacity} suitcases. Choose a larger vehicle or reduce the luggage count.`, values), 400);
     }
+    if (draft.orderId) return c.redirect(`/fr/reservation/payment/${draft.orderId}`, 303);
     draft.info = parsed.data;
     draft.vehicle = vehiclesForDraft(draft).find((vehicle) => vehicle.id === draft.vehicle!.id)!;
     const id = randomUUID();
@@ -199,7 +200,7 @@ export function createApp({
       const order = store.orders.get(session.metadata?.orderId ?? session.client_reference_id ?? '');
       if (!order) return c.text('Order not found', 404);
       if (session.payment_status !== 'paid') return c.json({ received: true });
-      await completePayment(order);
+      if (!await completePayment(order)) return c.text('Payment recorded; callback unavailable. Please retry.', 503);
     }
     return c.json({ received: true });
   });

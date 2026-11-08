@@ -9,12 +9,10 @@ const answer = { ref: 'PAS-123', pickup_time: '2027-01-15T12:15:00+01:00', picku
 const stub = 'https://shuttle.example/stub-payment/order-123?mode=no-stripe-key';
 const stripe = 'https://checkout.stripe.com/c/pay/cs_test_123#long-fragment';
 const observation = (url?: string): HaiAgents.SessionEvent => ({ type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', metadata: url ? { url } : {} } });
-const imageObservation = (image: unknown, url?: string): HaiAgents.SessionEvent => ({ type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', image, metadata: url ? { url } : {} } });
-const metadataImageObservation = (image: unknown, url?: string): HaiAgents.SessionEvent => ({ type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', metadata: { image, ...(url ? { url } : {}) } } });
 const call = async (tools: readonly Tool[], name: string, args: Record<string, unknown>) => tools.find((item) => item.name === name)!.fn(args);
 const confirmationFields = { pickup_date: '2027-01-15', pickup_time: '12:15', total_price: 65, currency: 'EUR' };
 const confirm = (tools: readonly Tool[]) => call(tools, 'confirm_with_user', { summary: 'Karim to CDG, EUR 65, guide dog', ...confirmationFields });
-const handoff = (tools: readonly Tool[]) => call(tools, 'handoff_payment', { amount: 65, merchant: 'Paris Airport Shuttle', summary: 'PAS-123' });
+const handoff = (tools: readonly Tool[]) => call(tools, 'handoff_payment', { amount: 65, merchant: 'Taxi Paris Réservation', summary: 'PAS-123' });
 
 function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.SessionEvent> = async function* (tools) {
   await confirm(tools);
@@ -41,89 +39,77 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
-  it.each([
-    [{ source: 'https://images.example/frame.png', type: 'url' }, 'https://images.example/frame.png'],
-    [{ source: 'AAAA', type: 'base64', mediaType: 'image/jpeg' }, 'data:image/jpeg;base64,AAAA'],
-    [{ source: 'data:image/webp;base64,AAAA', type: 'base64' }, 'data:image/webp;base64,AAAA'],
-    ['https://images.example/string.png', 'https://images.example/string.png'],
-    ['data:image/png;base64,AAAA', 'data:image/png;base64,AAAA'],
-    ['AAAA', 'data:image/png;base64,AAAA'],
-  ])('normalizes observation images %j', async (image, expected) => {
+  it.each(['Taxi class', 'Choose your taxi', 'Berline taxi', 'Taxi break confort', 'Taxi van', 'Choose your shuttle', 'Vehicle class', 'Private Sedan', 'Comfort Estate', 'Private Minivan', 'Continue to vehicles'])('recognizes vehicle-selection wording: %s', (element) => {
+    expect(bookingAction(element)).toBe('vehicle');
+  });
+  it('recognizes an assistance animal request as driver notes', () => {
+    expect(bookingAction('assistance animal request')).toBe('notes');
+  });
+  it.each([29.6, 29.60000001])('compares handoff amount %s in cents, rejecting one cent of difference', async (amount) => {
     const mock = setup(async function* (tools) {
-      yield imageObservation(image, 'https://shuttle.example/fr/reservation/draft/route');
-      await confirm(tools); yield observation(stub); await handoff(tools);
+      await call(tools, 'confirm_with_user', { summary: 'Taxi', ...confirmationFields, total_price: 29.6 });
+      yield observation(stub);
+      expect(await call(tools, 'handoff_payment', { amount: 29.61, merchant: 'Shuttle', summary: 'Taxi' })).toContain('ERROR');
+      expect(mock.input.onPaymentHandoff).not.toHaveBeenCalled();
+      expect(await call(tools, 'handoff_payment', { amount, merchant: 'Shuttle', summary: 'Taxi' })).toContain('Payment handed off');
     });
-    mock.input.onFrame = vi.fn();
     await runBooking(mock.input, mock.client);
-    expect(mock.input.onFrame).toHaveBeenCalledWith({ image: expected, url: 'https://shuttle.example/fr/reservation/draft/route', step: 0 });
+    expect(mock.input.onPaymentHandoff).toHaveBeenCalledOnce();
   });
-  it('falls back to a metadata image only when the top-level image is absent', async () => {
+  it('rejects a payment handoff amount that differs from the approved fare', async () => {
     const mock = setup(async function* (tools) {
-      yield metadataImageObservation('metadata-frame', 'https://shuttle.example/fr/reservation/draft/route');
-      await confirm(tools); yield observation(stub); await handoff(tools);
+      await confirm(tools); yield observation(stub);
+      expect(await call(tools, 'handoff_payment', { amount: 1, merchant: 'Taxi Paris Réservation', summary: 'PAS-123' })).toContain('ERROR');
+      expect(mock.input.onPaymentHandoff).not.toHaveBeenCalled();
+      await handoff(tools);
     });
-    mock.input.onFrame = vi.fn();
     await runBooking(mock.input, mock.client);
-    expect(mock.input.onFrame).toHaveBeenCalledWith({
-      image: 'data:image/png;base64,metadata-frame',
-      url: 'https://shuttle.example/fr/reservation/draft/route',
-      step: 0,
-    });
+    expect(mock.input.onPaymentHandoff).toHaveBeenCalledOnce();
+    expect(mock.input.onPaymentHandoff).toHaveBeenCalledWith(expect.objectContaining({ amount: 65 }));
   });
-  it('ignores malformed and oversized image values without interrupting booking', async () => {
+  it('stops promptly while the H quota request is pending', async () => {
+    const mock = setup();
+    let resolve!: (value: { available: number }) => void;
+    mock.getSessionQuota.mockImplementation(() => new Promise((done) => { resolve = done; }));
+    const controller = new AbortController(); mock.input.signal = controller.signal;
+    let settled = false;
+    const result = runBooking(mock.input, mock.client).catch((error: unknown) => { settled = true; return error; });
+    await vi.waitFor(() => expect(mock.getSessionQuota).toHaveBeenCalledOnce());
+    controller.abort(new Error('stop'));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    const stoppedPromptly = settled;
+    resolve({ available: 3 });
+    expect(await result).toEqual(new Error('stop'));
+    expect(mock.startSession).not.toHaveBeenCalled();
+    expect(stoppedPromptly).toBe(true);
+  });
+  it('stops promptly during H creation and cancels a late-created session', async () => {
+    const mock = setup();
+    let created!: (value: typeof mock.handle) => void;
+    mock.startSession.mockImplementation(() => new Promise((resolve) => { created = resolve; }));
+    const controller = new AbortController(); mock.input.signal = controller.signal;
+    let settled = false;
+    const result = runBooking(mock.input, mock.client).catch((error: unknown) => { settled = true; return error; });
+    await vi.waitFor(() => expect(mock.startSession).toHaveBeenCalledOnce());
+    controller.abort(new Error('stop'));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    const stoppedPromptly = settled;
+    created(mock.handle);
+    expect(await result).toEqual(new Error('stop'));
+    expect(mock.cancel).toHaveBeenCalledOnce();
+    expect(mock.handle.stream).not.toHaveBeenCalled();
+    expect(stoppedPromptly).toBe(true);
+  });
+  it('exposes observation URLs and action descriptions, but not screenshot payloads or typed values', async () => {
     const mock = setup(async function* (tools) {
-      yield imageObservation({ source: 123, type: 'base64' });
-      yield imageObservation(`data:image/png;base64,${'a'.repeat(1_500_000)}`);
+      yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', metadata: { url: 'https://shuttle.example/fr/reservation/draft/route' }, image: { type: 'url', source: 'https://images.example/private-screenshot' } } };
+      yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'policy_event', content: 'Selecting vehicle', toolReqs: [{ toolName: 'write', args: { element: 'Name', text: 'private typed value' } }] } };
       await confirm(tools); yield observation(stub); await handoff(tools);
     });
-    mock.input.onFrame = vi.fn();
-    await expect(runBooking(mock.input, mock.client)).resolves.toMatchObject({ booking: { ref: answer.ref } });
-    expect(mock.input.onFrame).not.toHaveBeenCalled();
-  });
-  it('throttles observation frames to one per second', async () => {
-    const now = vi.spyOn(Date, 'now');
-    let current = 10_000;
-    now.mockImplementation(() => current);
-    try {
-      const mock = setup(async function* (tools) {
-        yield imageObservation('first');
-        current += 500;
-        yield imageObservation('second');
-        current += 500;
-        yield imageObservation('third');
-        await confirm(tools); yield observation(stub); await handoff(tools);
-      });
-      mock.input.onFrame = vi.fn();
-      await runBooking(mock.input, mock.client);
-      expect(mock.input.onFrame).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(mock.input.onFrame).mock.calls.map(([frame]) => frame.image)).toEqual([
-        'data:image/png;base64,first', 'data:image/png;base64,third',
-      ]);
-    } finally {
-      now.mockRestore();
-    }
-  });
-  it('reports metrics updates and the agent view URL', async () => {
-    const mock = setup(async function* (tools) {
-      yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 4, totalCost: 0.12 } } };
-      await confirm(tools); yield observation(stub); await handoff(tools);
-    });
-    mock.input.onMetrics = vi.fn();
-    mock.input.onAgentView = vi.fn();
-    await runBooking(mock.input, mock.client);
-    expect(mock.input.onMetrics).toHaveBeenCalledWith({ steps: 4, costUsd: 0.12 });
-    expect(mock.input.onAgentView).toHaveBeenCalledWith('https://h.example/view/123');
-  });
-  it('swallows throwing monitor callbacks without affecting booking', async () => {
-    const mock = setup(async function* (tools) {
-      yield imageObservation('frame');
-      yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 4, totalCost: 0.12 } } };
-      await confirm(tools); yield observation(stub); await handoff(tools);
-    });
-    mock.input.onFrame = () => { throw new Error('frame callback failed'); };
-    mock.input.onMetrics = () => { throw new Error('metrics callback failed'); };
-    mock.input.onAgentView = () => { throw new Error('view callback failed'); };
-    await expect(runBooking(mock.input, mock.client)).resolves.toMatchObject({ booking: { ref: answer.ref } });
+    mock.input.onStep = vi.fn(); await runBooking(mock.input, mock.client);
+    expect(mock.input.onStep).toHaveBeenCalledWith({ type: 'agent_step', action: 'Observed booking page', url: 'https://shuttle.example/fr/reservation/draft/route' });
+    expect(mock.input.onStep).toHaveBeenCalledWith({ type: 'agent_step', action: 'Selecting vehicle', url: 'https://shuttle.example/fr/reservation/draft/route' });
+    expect(JSON.stringify(vi.mocked(mock.input.onStep).mock.calls)).not.toMatch(/private-screenshot|private typed value/);
   });
   it('checks the observed pickup tariff, rejects the stale fare, and reads the updated amount for approval', async () => {
     const quote = { origin: 'Châtelet', destination: 'Montparnasse', at: '2027-01-15T05:00:00Z', passengers: 1 };
@@ -260,69 +246,6 @@ describe('H booking runner', () => {
       await ready(mock); controller.abort(new Error('stop')); expect(await result).toEqual(new Error('stop')); expect(mock.startSession).toHaveBeenCalledOnce();
       expect(vi.getTimerCount()).toBe(0);
     });
-    it('keeps monitor callbacks cumulative across retries and ignores late events from the stalled attempt', async () => {
-      let releaseLateEvents!: () => void;
-      const lateEvents = new Promise<void>((resolve) => { releaseLateEvents = resolve; });
-      const mock = setup(async function* () {
-        for (let i = 0; i < 2; i++) {
-          yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'policy_event', content: '', toolReqs: [] } };
-        }
-        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 2, totalCost: 0.01 } } };
-        yield imageObservation('first-frame');
-        await lateEvents;
-        yield imageObservation('late-first-frame');
-        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 90, totalCost: 0.99 } } };
-        await new Promise(() => {});
-      });
-      const retry = setup(async function* (tools) {
-        for (let i = 0; i < 3; i++) {
-          yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'policy_event', content: '', toolReqs: [] } };
-        }
-        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 3, totalCost: 0.02 } } };
-        yield imageObservation('second-frame');
-        await confirm(tools); yield observation(stub); await handoff(tools);
-      });
-      const firstView = 'https://h.example/view/attempt-1';
-      const secondView = 'https://h.example/view/attempt-2';
-      mock.handle.get.mockResolvedValue({ agentViewUrl: firstView });
-      retry.handle.get.mockResolvedValue({ agentViewUrl: secondView });
-      mock.startSession.mockResolvedValueOnce(mock.handle).mockResolvedValueOnce(retry.handle);
-      const onFrame = vi.fn<NonNullable<BookingInput['onFrame']>>();
-      const onMetrics = vi.fn<NonNullable<BookingInput['onMetrics']>>();
-      const onAgentView = vi.fn<NonNullable<BookingInput['onAgentView']>>();
-      mock.input.onFrame = onFrame;
-      mock.input.onMetrics = onMetrics;
-      mock.input.onAgentView = onAgentView;
-      let retrySnapshot: { frames: number; metrics: number; views: number } | undefined;
-      mock.input.onRetry = vi.fn(() => {
-        retrySnapshot = { frames: onFrame.mock.calls.length, metrics: onMetrics.mock.calls.length, views: onAgentView.mock.calls.length };
-      });
-
-      const result = runBooking(mock.input, mock.client);
-      await ready(mock);
-      await vi.waitFor(() => {
-        expect(onMetrics).toHaveBeenLastCalledWith({ steps: 2, costUsd: 0.01 });
-        expect(onFrame).toHaveBeenCalledWith({ image: 'data:image/png;base64,first-frame', url: undefined, step: 2 });
-      });
-      await vi.advanceTimersByTimeAsync(60_000);
-      await vi.waitFor(() => expect(mock.input.onRetry).toHaveBeenCalledOnce());
-      expect(retrySnapshot).toEqual({ frames: 1, metrics: 1, views: 1 });
-      releaseLateEvents();
-      await vi.waitFor(() => expect(retry.handle.stream).toHaveBeenCalled());
-      await expect(result).resolves.toMatchObject({ booking: { ref: answer.ref } });
-
-      expect(onAgentView).toHaveBeenCalledTimes(2);
-      expect(onAgentView).toHaveBeenNthCalledWith(1, firstView);
-      expect(onAgentView).toHaveBeenNthCalledWith(2, secondView);
-      expect(onFrame.mock.calls.map(([frame]) => frame)).toEqual([
-        { image: 'data:image/png;base64,first-frame', url: undefined, step: 2 },
-        { image: 'data:image/png;base64,second-frame', url: undefined, step: 5 },
-      ]);
-      expect(onMetrics).toHaveBeenCalledTimes(2);
-      const lastMetrics = onMetrics.mock.calls.at(-1)![0];
-      expect(lastMetrics.steps).toBe(5);
-      expect(lastMetrics.costUsd).toBeCloseTo(0.03);
-    });
     it.each([['Pickup address input', 'pickup'], ['Dropoff address', 'dropoff'], ['Pickup date calendar', 'date'], ['Pickup time', 'time'], ['Vehicle class', 'vehicle'], ['Email', 'passenger'], ['Notes for the driver', 'notes'], ['Unrelated private text', undefined]])('maps only known element descriptions: %s', (element, expected) => {
       expect(bookingAction(element!)).toBe(expected);
     });
@@ -398,6 +321,11 @@ describe('H booking runner', () => {
     const params = mock.startSession.mock.calls[0] as unknown as [{ agent: { instructions: string } }];
     const playbook = await readFile(new URL('../../../playbooks/paris-airport-shuttle.md', import.meta.url), 'utf8');
     expect(params[0].agent.instructions).toContain(playbook);
+    expect(params[0].agent.instructions).toContain('The merchant is Taxi Paris Réservation');
+    expect(playbook).toContain('Step 4 — Taxi payment');
+    expect(playbook).toContain('Berline taxi — up to 3 passengers, 2 suitcases');
+    expect(playbook).toContain('Guide dog / assistance animal and driver notes');
+    expect(params[0].agent.instructions).not.toContain('Paris Airport Shuttle');
     expect(params[0].agent.instructions).toContain('Never enter payment details or pay');
     expect(params[0].agent.instructions).toContain(JSON.stringify(mock.input.trip));
     expect(params[0].agent.instructions).toContain(JSON.stringify(mock.input.profile));

@@ -329,7 +329,7 @@ describe('H booking runner', () => {
     expect(params[0].agent.instructions).toContain('Never enter payment details or pay');
     expect(params[0].agent.instructions).toContain(JSON.stringify(mock.input.trip));
     expect(params[0].agent.instructions).toContain(JSON.stringify(mock.input.profile));
-    expect(mock.startSession).toHaveBeenCalledWith(expect.objectContaining({ maxSteps: 60, maxTimeS: 240, timezone: 'Europe/Paris', answerSchema: expect.anything(), agent: expect.objectContaining({ reasoningEffort: 'disabled', environments: [expect.objectContaining({ startUrl: mock.input.startUrl, settleS: 0.3, mode: { type: 'visual', width: 1280, height: 800 } })] }) }));
+    expect(mock.startSession).toHaveBeenCalledWith(expect.objectContaining({ maxSteps: 60, maxTimeS: 420, timezone: 'Europe/Paris', answerSchema: expect.anything(), agent: expect.objectContaining({ reasoningEffort: 'disabled', environments: [expect.objectContaining({ startUrl: mock.input.startUrl, settleS: 0.3, mode: { type: 'visual', width: 1280, height: 800 } })] }) }));
     expect(result.booking).toEqual({ ...answer, payment_url: stub });
     expect(result.metrics).toEqual({ steps: 12, costUsd: 0.03, durationMs: expect.any(Number) });
     expect(result.agentViewUrl).toBe('https://h.example/view/123');
@@ -393,7 +393,7 @@ describe('H booking runner', () => {
     expect(bookingErrorMessage(error)).toBe('Booking failed: unknown error.');
   });
 
-  it.each([stub, stripe])('uses only the observed payment URL: %s', async (url) => {
+  it.each([stub, stripe, 'https://shuttle.example/fr/reservation/payment/order-123'])('uses only the observed payment URL: %s', async (url) => {
     const mock = setup(async function* (tools) {
       await confirm(tools);
       yield observation(url);
@@ -405,7 +405,7 @@ describe('H booking runner', () => {
     expect(mock.input.onPaymentHandoff).toHaveBeenCalledWith({ url, amount: 65, merchant: 'Shuttle', summary: 'PAS-123' });
   });
 
-  it.each([undefined, 'https://evil.example/pay', 'https://checkout.stripe.com.evil.example/pay', 'http://checkout.stripe.com/pay', 'https://shuttle.example/fr/reservation/payment/123', 'https://other.example/stub-payment/123', 'https://checkout.stripe.com@evil.example/pay'])('rejects unsafe or missing observed URL: %s', async (url) => {
+  it.each([undefined, 'https://evil.example/pay', 'https://checkout.stripe.com.evil.example/pay', 'http://checkout.stripe.com/pay', 'https://other.example/fr/reservation/payment/123', 'https://other.example/stub-payment/123', 'https://checkout.stripe.com@evil.example/pay'])('rejects unsafe or missing observed URL: %s', async (url) => {
     const mock = setup(async function* (tools) {
       await confirm(tools);
       yield observation(url);
@@ -414,6 +414,36 @@ describe('H booking runner', () => {
     await expect(runBooking(mock.input, mock.client)).rejects.toThrow('without payment handoff');
     expect(mock.input.onPaymentHandoff).not.toHaveBeenCalled();
     expect(mock.cancel).toHaveBeenCalledOnce();
+  });
+
+  it('hands off the observed payment page when the approved agent finishes without calling handoff_payment', async () => {
+    const page = 'https://shuttle.example/fr/reservation/payment/order-123';
+    const mock = setup(async function* (tools) {
+      await confirm(tools);
+      yield observation(page);
+    });
+    const result = await runBooking(mock.input, mock.client);
+    expect(result.booking.payment_url).toBe(page);
+    expect(mock.input.onPaymentHandoff).toHaveBeenCalledWith({ url: page, amount: 65, merchant: 'Taxi Paris Réservation', summary: 'Karim to CDG, EUR 65, guide dog' });
+  });
+  it('never hands off a payment page without user approval', async () => {
+    const mock = setup(async function* () {
+      yield observation('https://shuttle.example/fr/reservation/payment/order-123');
+    });
+    await expect(runBooking(mock.input, mock.client)).rejects.toThrow('without payment handoff');
+    expect(mock.input.onPaymentHandoff).not.toHaveBeenCalled();
+  });
+  it('books without a shared fare quote when quote registration fails', async () => {
+    const mock = setup();
+    mock.input.fareQuote = { origin: 'Gare du Nord', destination: 'CDG 2E', at: '2027-01-15T10:00:00Z', passengers: 1 };
+    vi.stubEnv('INTERNAL_CALLBACK_TOKEN', '');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await runBooking(mock.input, mock.client);
+      expect(mock.startSession).toHaveBeenCalledWith(expect.objectContaining({ agent: expect.objectContaining({ environments: [expect.objectContaining({ startUrl: mock.input.startUrl })] }) }));
+      expect(mock.input.onPaymentHandoff).toHaveBeenCalledOnce();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('Fare quote authentication is not configured'));
+    } finally { error.mockRestore(); vi.unstubAllEnvs(); }
   });
 
   it('does not reuse a URL when the latest observation has no URL', async () => {

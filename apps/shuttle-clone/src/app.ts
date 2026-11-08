@@ -162,7 +162,7 @@ export function createApp({
     if (!order) return c.text('Order not found', 404);
     if (order.paid) return c.redirect(`/fr/reservation/confirmation/${order.id}`, 303);
     try {
-      const baseUrl = (env.SHUTTLE_PUBLIC_URL || `http://localhost:${env.PORT || 3001}`).replace(/\/$/, '');
+      const baseUrl = (env.SHUTTLE_PUBLIC_URL || env.RENDER_EXTERNAL_URL || `http://localhost:${env.PORT || 3001}`).replace(/\/$/, '');
       order.checkoutUrl = await payments.checkout(order, baseUrl);
       c.header('X-Payment-Mode', env.STRIPE_SECRET_KEY ? 'stripe' : 'fake-local-stub');
       return c.redirect(order.checkoutUrl, 303);

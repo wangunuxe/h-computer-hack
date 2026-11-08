@@ -573,7 +573,9 @@ export class VoilaSession {
     } catch (error) {
       if (!current()) return;
       this.confirmation?.resolve({ approved: false, reply: 'Booking failed' }); this.confirmation = undefined;
-      this.ports.logger.error(`Booking execution failed: ${bookingErrorMessage(error).slice(0, 300)}`);
+      const reason = redactContactText(bookingErrorMessage(error).replace(/\s+/g, ' ').trim().slice(0, 240), this.profile);
+      this.ports.logger.error(`Booking execution failed: ${reason}`);
+      this.send({ type: 'feed', kind: 'agent', text: `Booking error: ${reason}` });
       if (this.payment) {
         this.transition('HANDOFF');
         this.answer(this.language.startsWith('fr') ? 'Le paiement reste disponible sur votre téléphone, mais je n’ai pas pu récupérer la référence. Vérifiez la réservation sur le site avant de recommencer une réservation.' : 'Payment remains available on your phone, but I could not retrieve the reference. Check the booking on the site before starting another booking.');

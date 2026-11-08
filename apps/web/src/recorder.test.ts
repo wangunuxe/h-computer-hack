@@ -44,6 +44,13 @@ beforeEach(() => { vi.useFakeTimers(); Socket.instances = []; Worklet.instances 
 afterEach(() => { for (const recorder of active.splice(0)) recorder.cancel(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('recorder audio startup and finalization', () => {
+  it('releases capture on a mid-stream socket close without sending an incomplete request', async () => {
+    const s = setup(); await s.recorder.start(credentials); const socket = Socket.instances[0]!; socket.open();
+    Worklet.instances[0]!.emit(new ArrayBuffer(2)); socket.onclose?.({ code: 1006 });
+    expect(s.track.stop).toHaveBeenCalled(); expect(s.done).toHaveBeenCalledOnce();
+    expect(s.error).toHaveBeenCalledWith(expect.objectContaining({ kind: 'service', code: 'connection-closed' }));
+    socket.finish('late reply'); expect(s.transcript).not.toHaveBeenCalled();
+  });
   it('bounds a suspended audio resume after permission and ignores its late resolution', async () => {
     const resume = deferred<void>(); const s = setup();
     vi.stubGlobal('AudioContext', class extends Context { resume = vi.fn(() => resume.promise); });

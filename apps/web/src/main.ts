@@ -27,6 +27,7 @@ if (savedSession) { credentials = { id: savedSession.id, resume_token: savedSess
 let attempt: ConnectionAttempt | undefined;
 let recorder: Recorder | undefined; let releasing = false;
 let lastSay = ''; let pendingFocus: Stage | undefined;
+let optionPending = false;
 let lastCards = ''; let lastNarrated = Date.now(); let speechNeedsGesture = true; let progressCue = 0;
 const t = () => labels[language];
 
@@ -115,6 +116,7 @@ async function connect() {
       try {
         const event = ServerEventSchema.parse(JSON.parse(String(message.data)));
         const previous = state.stage; state = reduce(state, event);
+        if (['stage', 'options', 'clarify', 'profile_request', 'say', 'error'].includes(event.type)) optionPending = false;
         if (event.type === 'profile') {
           profile = clientProfile(event.profile, language);
           try { if (Object.keys(profile).length === 1) localStorage.removeItem('voila.profile'); else localStorage.setItem('voila.profile', JSON.stringify(profile)); } catch { /* Storage may be unavailable. */ }
@@ -209,7 +211,8 @@ function render() {
   actions.replaceChildren();
   if (!collectingProfile && ['PRESENT', 'CHOOSE'].includes(state.stage)) {
     for (const [index, option] of state.options.entries()) {
-      const choice = button('', () => { const event = optionEvent(state.options, option.id); if (event && send(event)) actions.querySelectorAll<HTMLButtonElement>('.option-card').forEach((button) => { button.disabled = true; }); });
+      const choice = button('', () => { const event = optionEvent(state.options, option.id); if (event && send(event)) { optionPending = true; actions.querySelectorAll<HTMLButtonElement>('.option-card').forEach((button) => { button.disabled = true; }); } });
+      choice.disabled = optionPending;
       choice.id = 'option-' + option.id; choice.className = 'option-card';
       const name = `${index + 1}. ${optionLabel(option, language)}`;
       const arrival = new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }).format(new Date(Date.now() + (option.pickup_wait_minutes + option.journey_minutes) * 60_000));

@@ -42,6 +42,20 @@ afterEach(() => {
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 describe('phone client lifecycle and controls', () => {
+  it('works without storage, retries a closed socket, and resumes without issuing another session', async () => {
+    const unavailable = () => { throw new DOMException('Unavailable', 'SecurityError'); };
+    vi.stubGlobal('localStorage', { getItem: unavailable, setItem: unavailable, removeItem: unavailable });
+    vi.stubGlobal('sessionStorage', { getItem: unavailable, setItem: unavailable, removeItem: unavailable });
+    const socket = await boot(); socket.close(); await vi.advanceTimersByTimeAsync(1499); expect(Socket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1); expect(Socket.instances).toHaveLength(2); expect(fetch).toHaveBeenCalledTimes(1);
+    Socket.instances[1]!.open(); expect(Socket.instances[1]!.send).toHaveBeenCalledWith(JSON.stringify({ type: 'language', language: 'en' }));
+  });
+  it('submits approval once and retains final Confirm/Cancel accessible names', async () => {
+    const socket = await boot(); socket.message({ type: 'stage', stage: 'CONFIRM' }); socket.message({ type: 'confirm', summary: 'Approve taxi' });
+    const yes = document.getElementById('confirm-yes')!;
+    expect(yes.getAttribute('aria-label')).toBe('Confirm'); expect(document.getElementById('confirm-no')?.getAttribute('aria-label')).toBe('Cancel');
+    yes.click(); yes.click(); expect(socket.send).toHaveBeenCalledTimes(1);
+  });
   it('observes rejected earcon audio promises rather than leaking rejections', async () => {
     const rejection = Promise.reject(new Error('Audio unavailable')); void rejection.catch(() => {});
     const handled = vi.spyOn(rejection, 'catch');
@@ -77,6 +91,9 @@ describe('phone client lifecycle and controls', () => {
     const socket = await boot(); socket.message({ type: 'stage', stage: 'CHOOSE' });
     socket.message({ type: 'options', items: [{ id: 'taxi', name: 'Taxi', price: 30, pickup_wait_minutes: 5, journey_minutes: 25, guide_dog_status: 'accepted' }] });
     const option = document.querySelector<HTMLButtonElement>('.option-card')!; option.click(); option.click();
+    expect(socket.send).toHaveBeenCalledTimes(1);
+    socket.message({ type: 'activity', cancellable: true });
+    document.querySelector<HTMLButtonElement>('.option-card')!.click();
     expect(socket.send).toHaveBeenCalledTimes(1);
   });
   it('does not submit a detached approval button after its stage changed', async () => {

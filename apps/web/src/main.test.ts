@@ -42,6 +42,13 @@ afterEach(() => {
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 describe('phone client lifecycle and controls', () => {
+  it('focuses and labels dynamically shown GPS decision controls', async () => {
+    const socket = await boot(); document.getElementById('talk')!.focus();
+    socket.message({ type: 'stage', stage: 'CLARIFY' }); socket.message({ type: 'clarify', question: 'Use this origin?', yes_no: true });
+    expect(document.activeElement?.getAttribute('role')).toBe('group');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Yes / No');
+    expect(document.getElementById('confirm-yes')?.getAttribute('aria-label')).toBe('Yes');
+  });
   it('does not resume old playback while a newer recorder is capturing', async () => {
     await boot(); const talk = document.getElementById('talk')!; talk.click();
     const first = mocks.recorders[0]!; first.cancel(); talk.click();

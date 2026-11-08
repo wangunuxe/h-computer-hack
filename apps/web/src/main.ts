@@ -120,6 +120,7 @@ async function connect() {
           try { if (Object.keys(profile).length === 1) localStorage.removeItem('voila.profile'); else localStorage.setItem('voila.profile', JSON.stringify(profile)); } catch { /* Storage may be unavailable. */ }
         }
         if (event.type === 'profile_request') collectingProfile = true;
+        if ((event.type === 'clarify' || event.type === 'profile_request') && event.yes_no) pendingFocus = state.stage;
         if (event.type === 'stage' && state.stage !== previous) collectingProfile = false;
         if (event.type === 'stage' && state.stage !== previous) pendingFocus = ['UNDERSTAND', 'RESEARCH', 'EXECUTE'].includes(state.stage) ? undefined : state.stage;
         if (event.type === 'say') announce(event.text);
@@ -220,8 +221,8 @@ function render() {
   }
   if (state.yesNo) {
     const decisions = element('div'); decisions.className = 'decision';
-    decisions.setAttribute('aria-label', t().confirm);
     const decision = decisionLabels(language, state.stage);
+    decisions.setAttribute('role', 'group'); decisions.setAttribute('aria-label', `${decision.yes} / ${decision.no}`);
     const answer = (text: string) => { recorder?.cancel(); voice.bargeIn(); voice.resume(); sendTranscript(text); };
     const yes = button(decision.yes, () => answer(language === 'fr' ? 'oui' : 'yes')); yes.id = 'confirm-yes'; yes.setAttribute('aria-label', decision.yes);
     const no = button(decision.no, () => answer(language === 'fr' ? 'non' : 'no')); no.id = 'confirm-no'; no.className = 'secondary'; no.setAttribute('aria-label', decision.no);

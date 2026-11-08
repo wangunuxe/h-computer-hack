@@ -64,7 +64,7 @@ function sendTranscript(text: string) {
     credentials = undefined; helloSent = false; state = initialState();
     render(); void connect(); return;
   }
-  if (event && send(event) && credentials) sessionStorage.save(credentials, helloSent);
+  if (event && send(event)) { state = { ...state, yesNo: false }; render(); if (credentials) sessionStorage.save(credentials, helloSent); }
 }
 const requestPhoneLocation = phoneLocation((request_id, gps) => { send({ type: 'location_result', request_id, gps }); });
 function connection(ready: boolean) {
@@ -126,7 +126,7 @@ async function connect() {
         if (event.type === 'error') announce(event.message, true);
         if (event.type === 'clarify') announce(event.question);
         if (event.type === 'location_request') requestPhoneLocation(event.request_id);
-        if (!['say', 'clarify', 'error', 'feed'].includes(event.type)) render();
+        if (!['say', 'error', 'feed'].includes(event.type)) render();
         if (event.type === 'feed') renderFeed();
       } catch { announce(t().error, true); }
     };
@@ -214,11 +214,12 @@ function render() {
       actions.append(index === 0 ? primary(choice) : choice);
     }
   }
-  if (state.stage === 'CONFIRM' && state.summary) {
+  if (state.yesNo) {
     const decisions = element('div'); decisions.className = 'decision';
     decisions.setAttribute('aria-label', t().confirm);
-    const yes = button(t().yes, () => send({ type: 'user_reply', text: 'oui' })); yes.id = 'confirm-yes';
-    const no = button(t().no, () => send({ type: 'user_reply', text: 'non' })); no.id = 'confirm-no'; no.className = 'secondary';
+    const answer = (text: string) => { recorder?.cancel(); voice.bargeIn(); voice.resume(); sendTranscript(text); };
+    const yes = button(t().yes, () => answer(language === 'fr' ? 'oui' : 'yes')); yes.id = 'confirm-yes';
+    const no = button(t().no, () => answer(language === 'fr' ? 'non' : 'no')); no.id = 'confirm-no'; no.className = 'secondary';
     decisions.append(yes, no); actions.append(primary(decisions));
   }
   if (['HANDOFF', 'AWAIT_PAYMENT'].includes(state.stage) && state.payment) {
@@ -232,7 +233,7 @@ function render() {
     card.append(heading, element('p', `${pickup} · ${booking.pickup_point}`), element('p', `${t().ref} ${booking.ref} · ${money(booking.price)}`)); actions.append(card);
   }
   document.body.dataset.cards = String(actions.children.length > 0);
-  const cards = Array.from(actions.children).map((node) => node.tagName === 'A' || node.tagName === 'BUTTON' ? node.getAttribute('aria-label') ?? node.textContent : node.textContent).join('. ');
+  const cards = Array.from(actions.children).filter((node) => node.className !== 'decision').map((node) => node.tagName === 'A' || node.tagName === 'BUTTON' ? node.getAttribute('aria-label') ?? node.textContent : node.textContent).join('. ');
   if (cards !== lastCards) { lastCards = cards; if (cards) { voice.enqueue(cards, 'cards'); lastNarrated = Date.now(); } }
   {
     const target = document.getElementById('primary-content');

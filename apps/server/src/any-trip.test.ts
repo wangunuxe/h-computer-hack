@@ -17,7 +17,7 @@ describe('any-destination ASAP trips', () => {
   it('asks for the destination, not GPS, when only an explicit origin is known', async () => {
     vi.useFakeTimers(); vi.setSystemTime(now);
     const events: ServerEvent[] = [];
-    const session = new VoilaSession((event) => events.push(event), { understand: (input) => understand(input, { models: { generateContent: async () => ({ text: '{"trip":{}}' }) } }) }); sessions.push(session);
+    const session = new VoilaSession((event) => events.push(event), { understand: (input) => understand(input, { models: { generateContent: async () => ({ text: '{"trip":{}}' }) } }), converse: async () => ({ intent: 'unclear', confidence: 0, reply: 'Où voulez-vous aller ?' }) }); sessions.push(session);
     session.handle({ type: 'hello', profile: { language: 'fr' }, gps: null, scenario: 'demo' });
     session.handle({ type: 'final_transcript', text: 'Je suis à La Défense' });
     await vi.waitFor(() => expect(events.some((event) => event.type === 'clarify')).toBe(true));

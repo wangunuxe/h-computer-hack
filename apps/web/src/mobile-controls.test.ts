@@ -5,6 +5,14 @@ import { canStop, initialState, type Stage } from './state.js';
 import { labels } from './labels.js';
 import { captureFailure, recordingDiagnostic, recordingErrorKeys, SpeechInitializationError } from './recording-error.js';
 describe('tap-only mobile microphone controls', () => {
+  it('uses full-width accessible buttons for pending yes/no questions and clears them on a spoken or tapped reply', () => {
+    const source = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+    const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+    expect(source).toContain('if (state.yesNo)'); expect(source).toContain('node.type = \'button\'');
+    expect(source).toContain("yes.id = 'confirm-yes'"); expect(source).toContain("no.id = 'confirm-no'");
+    expect(source).toContain('state = { ...state, yesNo: false }; render()'); expect(source).toContain('recorder?.cancel(); voice.bargeIn(); voice.resume(); sendTranscript(text)');
+    expect(css).toMatch(/\.decision button\s*\{[^}]*width: 100%/);
+  });
   it.each(['fr', 'en'] as const)('keeps connection retries focusable and labelled in %s, restoring normal controls on recovery', (language) => {
     const t = labels[language];
     for (const failed of [false, true]) expect(micControlState({ connected: false, failed, active: false, releasing: true }, t)).toEqual({ caption: failed ? t.connectionRetry : t.connecting, label: failed ? t.connectionRetry : t.tap, disabled: false, pressed: false });

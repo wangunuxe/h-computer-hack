@@ -22,8 +22,12 @@ Three-minute transcripts fit the existing shared text schema and 64 KiB WebSocke
 limit; trip extraction allows 20 seconds for Gemini.
 The circular microphone defaults to tap-to-toggle: activate once to start and
 again to finish, including with VoiceOver/TalkBack or keyboard activation.
-Pointer/touch release does not stop recording; activate the button again to finish.
+Each touch/pen tap activates on pointer release, with the following generated
+click suppressed; mouse, keyboard and screen-reader clicks remain supported.
+The first tap starts recording and the next tap finishes; holding is unnecessary.
 There is no hold-to-talk mode. Enter and Space use the native button activation.
+An early tap during connection gives a cue and queues recording until connected;
+tap again to cancel. Only a failed connection reads the existing retry guidance.
 Client-only `tts_enabled` preferences persist beside the profile;
 they are stripped from the wire profile. Choose “Screen reader only” to disable
 all Voilà speech synthesis and use the live caption card instead. Screen-reader

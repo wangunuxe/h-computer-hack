@@ -8,6 +8,17 @@ const at = new Date('2026-11-09T11:00:00Z');
 describe('shared route fare from narration through checkout', () => {
   beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-09T09:00:00Z')); });
   afterEach(() => vi.useRealTimers());
+  it.each([['10 Rue Victor Hugo, 75001 Paris', '10 Rue Victor Hugo, 75020 Paris', 48.86, 2.40, '75120'], ['10 Rue Victor Hugo, 75017 Paris', '10 Rue Victor Hugo, 92300 Levallois-Perret', 48.8987, 2.28, '92044']] as const)('regeocodes different postcodes/communes instead of reusing %s', async (origin, selected, latitude, longitude, citycode) => {
+    const store = createStore(), geocodeFetch = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ features: [{ geometry: { coordinates: [longitude, latitude] }, properties: { score: .9, citycode } }] })));
+    const app = createApp({ store, env: {}, geocodeFetch });
+    const response = await app.request('/fr/reservation/'), base = response.headers.get('location')!.replace(/\/route$/, '');
+    const draft = [...store.drafts.values()][0]!;
+    draft.fare = { origin, destination: 'CDG', from: { latitude: citycode === '92044' ? 48.8988 : 48.86, longitude: citycode === '92044' ? 2.28005 : 2.33, paris: true }, at: at.toISOString(), passengers: 1 };
+    expect((await app.request(base + '/route', { method: 'POST', body: new URLSearchParams({ pickup: selected, dropoff: 'CDG', date: '2026-11-09', time: '12:00', pickup_lat: String(latitude), pickup_lng: String(longitude), dropoff_lat: '49.0097', dropoff_lng: '2.5479' }) })).status).toBe(303);
+    expect(geocodeFetch).toHaveBeenCalledOnce(); expect(draft.fare.origin).toBe(selected);
+    expect(draft.fare.from).toEqual({ latitude, longitude, paris: citycode !== '92044' });
+    if (citycode === '92044') expect(estimateTaxi(draft.fare).tariff).not.toBe('forfait');
+  });
   it('does not retain the quoted stop when H actually selects a different station', async () => {
     const store = createStore(), app = createApp({ store, env: {} });
     const response = await app.request('/fr/reservation/'), base = response.headers.get('location')!.replace(/\/route$/, '');
@@ -17,14 +28,14 @@ describe('shared route fare from narration through checkout', () => {
     expect(draft.fare.origin).toBe('Gare du Nord, 18 Rue de Dunkerque, Paris'); expect(estimateTaxi(draft.fare).price).toBe(56);
   });
   it.each([['Tour Eiffel', 'Tour Eiffel, 5 Avenue Anatole France, Paris', 48.8584, 2.2945], ['Louvre Museum', 'Louvre Museum, Rue de Rivoli, Paris', 48.8606, 2.3376], ['Hôtel de Ville', 'Hôtel de Ville, Place de l’Hôtel de Ville, Paris', 48.8566, 2.3522]] as const)('keeps %s when H selects its expanded address suggestion', async (origin, expanded, latitude, longitude) => {
-    const store = createStore(), geocodeFetch = vi.fn<typeof fetch>(async () => new Response('{"features":[]}'));
+    const store = createStore(), geocodeFetch = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ features: [{ geometry: { coordinates: [longitude, latitude] }, properties: { score: .9, citycode: '75056' } }] })));
     const app = createApp({ store, env: {}, geocodeFetch });
     const response = await app.request('/fr/reservation/'), base = response.headers.get('location')!.replace(/\/route$/, '');
     const draft = [...store.drafts.values()][0]!;
     const quote = await resolveTaxiQuote({ origin, destination: 'CDG' }, { now: at, fetch: async () => new Response(JSON.stringify({ features: [{ geometry: { coordinates: [longitude, latitude] }, properties: { score: .9, citycode: '75056' } }] })) });
     draft.fare = quote;
     expect((await app.request(base + '/route', { method: 'POST', body: new URLSearchParams({ pickup: expanded, dropoff: 'CDG Airport Terminal 1, Roissy-en-France', date: '2026-11-09', time: '12:00', pickup_lat: String(latitude), pickup_lng: String(longitude), dropoff_lat: '49.0097', dropoff_lng: '2.5479' }) })).status).toBe(303);
-    expect(estimateTaxi(draft.fare!).price).toBe(estimateTaxi(quote).price); expect(draft.fare!.origin).toBe(origin); expect(draft.fare!.from).toEqual(quote.from); expect(geocodeFetch).not.toHaveBeenCalled();
+    expect(estimateTaxi(draft.fare!).price).toBe(estimateTaxi(quote).price); expect(draft.fare!.origin).toBe(expanded); expect(draft.fare!.from).toEqual(quote.from); expect(geocodeFetch).toHaveBeenCalledOnce();
   });
   it('reprices the same route when only the pickup time or holiday date changes', async () => {
     const store = createStore(), geocodeFetch = vi.fn<typeof fetch>();

@@ -15,6 +15,8 @@ const parisStations = new Set(['Bercy', 'Gare de Lyon', 'Gare du Nord', 'Châtel
 function taxiStation(place: string) {
   const station = stationForPlace(place);
   const text = normalizePlace(place.replace(/^près (?:du|de)\s+/iu, '')).replace(/^(?:(?:paris|aeroport(?: de paris)?|airport|metro|station)\s+)+/, '');
+  if (/\b\d{5}\b/.test(text)) return;
+  if (station && parisStations.has(station.name) && ![station.name, ...station.aliases].some((name) => text === normalizePlace(name)) && !/\bparis$/.test(text)) return;
   return station && [station.name, ...station.aliases].some((name) => text === normalizePlace(name) || text.startsWith(normalizePlace(name) + ' ')) ? station : undefined;
 }
 export function taxiPlaceKey(place: string): string {
@@ -25,11 +27,8 @@ export function taxiPoint(place: string): TaxiPoint | undefined {
   const station = taxiStation(place);
   return station ? { latitude: station.latitude, longitude: station.longitude, paris: parisStations.has(station.name) } : undefined;
 }
-export function taxiPlacesEquivalent(quoted: string, selected: string, point?: TaxiPoint, selection?: TaxiPoint): boolean {
-  const key = (place: string) => normalizePlace(taxiPlaceKey(place)).replace(/\b\d{5}\b/g, '').replace(/\s+/g, ' ').trim();
-  if (key(quoted) === key(selected)) return true;
-  const from = PointSchema.safeParse(point ?? taxiPoint(quoted)), to = PointSchema.safeParse(selection);
-  return from.success && to.success && distanceMeters(from.data, to.data) <= 75;
+export function taxiPlacesEquivalent(quoted: string, selected: string): boolean {
+  return normalizePlace(taxiPlaceKey(quoted)) === normalizePlace(taxiPlaceKey(selected));
 }
 export async function geocodeTaxiPlace(place: string, { fetch: fetcher = globalThis.fetch, signal }: { fetch?: typeof fetch; signal?: AbortSignal } = {}): Promise<TaxiPoint | undefined> {
   const station = taxiPoint(place);

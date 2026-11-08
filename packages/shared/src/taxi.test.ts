@@ -2,14 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { estimateTaxi, geocodeTaxiPlace, resolveTaxiQuote, parisPickupTime, taxiPlacesEquivalent } from './taxi.js';
 const at = '2026-11-09T11:00:00Z';
 describe('shared regulated taxi estimates', () => {
-  it('matches address aliases, postal variants and nearby coordinates without merging distant or unknown stops', () => {
-    const point = { latitude: 48.8584, longitude: 2.2945 };
+  it('matches canonical stations and complete normalized addresses, never postal or proximity guesses', () => {
     expect(taxiPlacesEquivalent('Gare du Nord', 'Gare du Nord, 18 Rue de Dunkerque, Paris')).toBe(true);
-    expect(taxiPlacesEquivalent('12 Rue de la Paix, Paris', '12 Rue de la Paix, 75002 Paris')).toBe(true);
-    expect(taxiPlacesEquivalent('Tour Eiffel', 'Tour Eiffel, 5 Avenue Anatole France, Paris', point, { ...point, latitude: 48.8585 })).toBe(true);
-    expect(taxiPlacesEquivalent('Tour Eiffel', 'Tour Eiffel Restaurant, Nice', point, { latitude: 43.7, longitude: 7.26 })).toBe(false);
+    expect(taxiPlacesEquivalent('12 Rue de la Paix, 75002 Paris', '12 rue de la paix 75002 Paris')).toBe(true);
+    expect(taxiPlacesEquivalent('12 Rue de la Paix, Paris', '12 Rue de la Paix, 75002 Paris')).toBe(false);
+    expect(taxiPlacesEquivalent('12 Rue de la Paix, 75002 Paris', '12 Rue de la Paix, 75008 Paris')).toBe(false);
+    expect(taxiPlacesEquivalent('Gare du Nord', 'Gare du Nord, Saint-Denis')).toBe(false);
+    expect(taxiPlacesEquivalent('Tour Eiffel', 'Tour Eiffel, 5 Avenue Anatole France, Paris')).toBe(false);
+    expect(taxiPlacesEquivalent('Tour Eiffel', 'Tour Eiffel Restaurant, Nice')).toBe(false);
     expect(taxiPlacesEquivalent('Tour Eiffel', 'Unknown')).toBe(false);
-    expect(taxiPlacesEquivalent('Tour Eiffel', 'Unknown', point, { latitude: NaN, longitude: 2 })).toBe(false);
   });
   it('resolves summer/winter pickup clocks and rejects missing, invalid or ambiguous times', () => {
     expect(parisPickupTime('2026-11-09', '18:00')?.toISOString()).toBe('2026-11-09T17:00:00.000Z');

@@ -62,6 +62,15 @@ describe('consented phone origins', () => {
     expect(s.ports.converse).not.toHaveBeenCalled();
     await s.reply('euh'); expect(JSON.stringify(s.ports.converse.mock.calls)).not.toContain('La Défense');
   });
+  it.each(['Non, je pars de Châtelet', 'No, I start at Châtelet'])('interprets a spoken GPS rejection and correction in the same turn: %s', async (text) => {
+    const converse = vi.fn<SessionPorts['converse']>().mockResolvedValue({ intent: 'provide_info', confidence: 1, trip_patch: { origin: 'Châtelet' }, reply: 'Merci.' });
+    const s = setup(null, { converse }); await flush(); await s.result(station);
+    const before = s.events.length; await s.reply(text);
+    expect(converse).toHaveBeenCalledOnce(); expect(converse.mock.calls[0]![0].transcript).toBe(text);
+    expect(s.session.stage).toBe('CHOOSE'); expect(s.events.slice(before).some((event) => event.type === 'clarify')).toBe(false);
+    expect(JSON.stringify(converse.mock.calls)).not.toContain('La Défense');
+    await s.reply('taxi'); expect(s.ports.runBooking.mock.calls[0]![0]).toMatchObject({ trip: { origin: 'Châtelet', destination: 'Bercy' } });
+  });
   it('lets an explicitly spoken origin take precedence when its interpretation races with GPS', async () => {
     let resolve!: (value: Awaited<ReturnType<SessionPorts['converse']>>) => void;
     const converse = vi.fn<SessionPorts['converse']>(() => new Promise((done) => { resolve = done; }));

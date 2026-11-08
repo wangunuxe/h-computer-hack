@@ -127,17 +127,21 @@ export class VoilaSession {
     }
     if ((event.type === 'final_transcript' || event.type === 'user_reply') && /^(stop|arrete|arretez|annule|cancel)[.!? ]*$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim())) { this.stop(); return; }
     if (event.type === 'user_reply' && this.pendingOrigin) {
-      this.remember('user', event.text);
       const reply = event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
       if (/^(oui|oui c est ca|oui c est correct|yes|yes please|yes that s right|that s right|correct)$/.test(reply)) {
+        this.remember('user', event.text);
         this.trip.origin = this.pendingOrigin; this.pendingOrigin = undefined;
         this.speak('origin-confirmed', { origin: this.trip.origin });
         void this.plan('', ++this.generation);
+        return;
       } else if (/^(non|non merci|no|no thanks)$/.test(reply)) {
+        this.remember('user', event.text);
         this.pendingOrigin = undefined; this.gps = undefined;
         this.ask(this.fallback());
-      } else this.confirmOrigin();
-      return;
+        return;
+      } else if (/^(non|no)\b/.test(reply)) {
+        this.pendingOrigin = undefined; this.gps = undefined;
+      } else { this.remember('user', event.text); this.confirmOrigin(); return; }
     }
     if (event.type === 'user_reply' && ['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) && this.payment && /^\/stub-payment\/[^/]+$/.test(new URL(this.payment.url).pathname) && /^(j ai paye|jai paye|i ve paid|i have paid|i paid)$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim())) { this.handle({ type: 'paid' }); return; }
     if (event.type === 'user_reply' && this.profileCollector) {

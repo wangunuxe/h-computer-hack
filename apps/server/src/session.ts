@@ -4,7 +4,7 @@ import { understand } from './understand.js';
 import { getDemoDisruption, type Disruption } from './adapters/disruption.js';
 import { readRerBTraffic } from './adapters/traffic-h.js';
 import { searchDisruptionAndAlternatives } from './adapters/linkup.js';
-import { runBooking, type BookingAction } from './booking.js';
+import { bookingErrorMessage, runBooking, type BookingAction } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
 import { assessOptions } from './feasibility.js';
 import { bookingMethods, isAirport, mergeOptions, optionsForTrip } from './options.js';
@@ -570,10 +570,10 @@ export class VoilaSession {
       if (this.paidRefs.has(this.booking.ref) || this.paidRefs.has(userPayment)) this.finishPayment();
       else this.transition('AWAIT_PAYMENT');
       this.paidRefs.clear();
-    } catch {
+    } catch (error) {
       if (!current()) return;
       this.confirmation?.resolve({ approved: false, reply: 'Booking failed' }); this.confirmation = undefined;
-      this.ports.logger.error('Booking execution failed.');
+      this.ports.logger.error(`Booking execution failed: ${bookingErrorMessage(error).slice(0, 300)}`);
       if (this.payment) {
         this.transition('HANDOFF');
         this.answer(this.language.startsWith('fr') ? 'Le paiement reste disponible sur votre téléphone, mais je n’ai pas pu récupérer la référence. Vérifiez la réservation sur le site avant de recommencer une réservation.' : 'Payment remains available on your phone, but I could not retrieve the reference. Check the booking on the site before starting another booking.');

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { HaiAgentsClient, tool, type SessionHandle } from 'hai-agents';
-import { BookingSchema, estimateTaxi, parisPickupTime, type Booking, type Trip, type Profile } from '@voila/shared';
+import { BookingSchema, estimateTaxi, parisPickupTime, type AgentStep, type Booking, type Trip, type Profile } from '@voila/shared';
 import { z } from 'zod';
 import { ConfirmationToolSchema, sanitizeConfirmationFields, type ConfirmationFields } from './confirmation.js';
 import { pickupWindow, pickupProblem } from './pickup-window.js';
@@ -35,6 +35,7 @@ export interface BookingInput {
   startUrl: string;
   signal?: AbortSignal;
   onProgress(text: string): void;
+  onStep?(event: AgentStep): void;
   onPage?(page: BookingPage): void;
   onAction?(action: BookingAction): void;
   onRetry?(): void;
@@ -224,6 +225,8 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
                 } else if (url.protocol === 'https:' && url.host === 'checkout.stripe.com') page = 'payment';
               }
               if (page && page !== lastPage) { lastPage = page; input.onPage?.(page); }
+              // Screenshots can contain contact and payment data; expose text-only observations.
+              input.onStep?.({ type: 'agent_step', action: page === 'payment' ? 'Payment stays on the phone' : 'Observed booking page', url: observedUrl });
             }
             if (kind === 'policy_event') {
               const { content, toolReqs } = z.object({
@@ -241,6 +244,7 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
                 typeof args?.element === 'string' ? `${toolName} — ${args.element}` : toolName,
               ).join('; ');
               input.onProgress(line || `Step ${steps}: ${actions || 'Working on booking'}`.replace(/\s+/g, ' ').trim().slice(0, 240));
+              input.onStep?.({ type: 'agent_step', action: line || actions || 'Working on booking', url: observedUrl });
             }
             if (kind === 'error_event') {
               const { error } = z.object({ error: z.string() }).parse(event.data);

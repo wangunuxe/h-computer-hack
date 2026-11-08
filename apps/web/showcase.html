@@ -156,8 +156,9 @@ dialog#bwDlg::backdrop{background:rgba(60,56,100,.28);-webkit-backdrop-filter:bl
   <header>
     <div>
       <h1>Voilà <span>agent map</span></h1>
-      <p class="sub">RER B is down. Nicolas is blind, at Gare du Nord with his guide dog, and his flight leaves CDG 2E in 3 hours.</p>
-      <p class="sub" style="font-size:12px;margin-top:8px"><a href="/?client=phone" style="color:inherit">Open phone client</a> · On your phone: <span id="phone-client-url"></span></p>
+      <p class="sub" id="showcase-status" role="status">Scan with the phone · connecting…</p>
+      <div id="pairing"><canvas id="pairing-qr" aria-label="Scan to pair your phone"></canvas><p>Scan with the phone<br><strong id="pairing-code"></strong></p></div>
+      <p class="sub" style="font-size:12px;margin-top:8px"><a id="phone-client-link" href="/?client=phone" style="color:inherit">Open phone client</a> · On your phone: <span id="phone-client-url"></span></p>
     </div>
     <nav class="chips" id="chips" aria-label="Stages"></nav>
   </header>
@@ -184,7 +185,7 @@ dialog#bwDlg::backdrop{background:rgba(60,56,100,.28);-webkit-backdrop-filter:bl
 
     <aside>
       <div class="card">
-        <p class="label">What Nicolas hears</p>
+        <p class="label">What the traveler hears</p>
         <div class="hear" id="hear"><span class="who">Voilà</span>…</div>
         <div class="wave" id="wave" aria-hidden="true"></div>
       </div>
@@ -256,7 +257,7 @@ dialog#bwDlg::backdrop{background:rgba(60,56,100,.28);-webkit-backdrop-filter:bl
       <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
     </label>
   </div>
-  <p class="note">Prototype with sample data and simulated events. In the live demo each node lights up from real events: Gladia transcripts, PRIM and Linkup results, and the H Agents API <code>changes</code> stream. Element counts describe the clone of the shuttle booking site and are illustrative. Keys: Space play/pause, ← → stages. Hover a node for its tech, click it to jump. The agent browser card replays the same sample run; live, it would show the H agent’s own screenshots.</p>
+  <p class="note">Sample replay with simulated events. Pair a phone using the QR code to show its real session. Screen-reader and agent counts in this replay are illustrative. Space: play/pause; ← →: stages. Live browser steps show redacted text and safe page URLs, not sensitive screenshots.</p>
 </div>
 
 <dialog id="bwDlg" aria-label="Agent browser, enlarged">
@@ -268,6 +269,7 @@ dialog#bwDlg::backdrop{background:rgba(60,56,100,.28);-webkit-backdrop-filter:bl
 document.getElementById('phone-client-url').textContent = location.origin + '/?client=phone';
 (()=>{
 const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let liveMode=false; const liveSeen=new Set();
 function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
 const R = rng(7);
 
@@ -367,7 +369,7 @@ function enter(i){
   if(!s.exec){camT={x:0,y:0,z:1};focusExec=false}
   $('srBox').hidden=true;$('agBox').hidden=true;$('legend').hidden=true;
 }
-function jump(i){started=true;logEl.innerHTML='';enter(i);if(!playing)togglePlay(true)}
+function jump(i){if(liveMode)return;started=true;logEl.innerHTML='';enter(i);if(!playing)togglePlay(true)}
 
 function updExec(dt){
   const ph=execPhases();let acc=0,cur=null,pt=0;
@@ -401,7 +403,8 @@ function tick(now){
   const k=RM?1:Math.min(1,dt/260);cam.x+=(camT.x-cam.x)*k;cam.y+=(camT.y-cam.y)*k;cam.z+=(camT.z-cam.z)*k;
   $('budget').textContent=fmt(600-simElapsed());
   speaking=Math.max(0,speaking-dt/1000);[...wave.children].forEach((b,i)=>b.style.height=(speaking>0?4+Math.abs(Math.sin(clock/120+i*.7))*14*Math.min(1,speaking):4)+'px');
-  bwSync();draw();requestAnimationFrame(tick);
+  if(!liveMode&&started&&si>=STAGES.length){logEl.innerHTML='';enter(0);playing=true}
+  if(!liveMode)bwSync();draw();requestAnimationFrame(tick);
 }
 
 function arc(a,b,col,alpha,w,bend){const[x1,y1]=toS(a.x,a.y),[x2,y2]=toS(b.x,b.y);const m=project({w:{x:(a.w.x+b.w.x)/2*bend,y:(a.w.y+b.w.y)/2*bend-.06,z:(a.w.z+b.w.z)/2*bend}});const[cx,cy]=toS(m.x,m.y);alpha*=depA(Math.min(a.d,b.d)+.3);ctx.strokeStyle=col;ctx.globalAlpha=alpha;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x1,y1);ctx.quadraticCurveTo(cx,cy,x2,y2);ctx.stroke();ctx.globalAlpha=1;return[x1,y1,cx,cy,x2,y2]}
@@ -414,19 +417,20 @@ function draw(){
   const C=CORE;
   // faint loops between all stages
   // spokes to core
-  STAGES.forEach((s,i)=>arc(C,s,'#7C889E',(i<=si?.18:.06)*fadeBG,1,1));
+  STAGES.forEach((s,i)=>arc(C,s,'#7C889E',((liveMode?liveSeen.has(i):i<=si)?.18:.06)*fadeBG,1,1));
   // flow arcs
-  for(let i=0;i<STAGES.length;i++){const from=i===0?C:STAGES[i-1],s=STAGES[i];
-    if(i<si||(i===si)){const p=arc(from,s,s.c,(i===si?.95:.6)*fadeBG,i===si?2.4:1.6,.35);
+  const flow=liveMode?[...liveSeen]:STAGES.map((s,i)=>i);
+  for(let j=0;j<flow.length;j++){const i=flow[j],from=j===0?C:STAGES[flow[j-1]],s=STAGES[i];
+    if(liveMode||i<=si){const p=arc(from,s,s.c,(i===si?.95:.6)*fadeBG,i===si?2.4:1.6,.35);
       if(i===si&&!RM&&te<1100){const[x,y]=qpt(p,Math.min(1,te/900));ctx.fillStyle=s.c;ctx.beginPath();ctx.arc(x,y,4.5,0,6.283);ctx.fill();ctx.shadowBlur=0}}}
   // core rings
   const[cx,cy]=toS(CORE.x,CORE.y);ctx.strokeStyle='#7C889E';ctx.lineWidth=1;
   ctx.globalAlpha=.3*fadeBG;ctx.beginPath();ctx.arc(cx,cy,26*Math.min(cam.z,1.6),0,6.283);ctx.stroke();
   ctx.globalAlpha=fadeBG;ctx.fillStyle='#5E6B82';ctx.beginPath();ctx.arc(cx,cy,13*Math.min(cam.z,1.6),0,6.283);ctx.fill();
-  label('Nicolas',cx,cy+44,'#141B2B',14,true,true);
+  label(liveMode?'Traveler':'Nicolas',cx,cy+44,'#141B2B',14,true,true);
   ctx.globalAlpha=1;
   // satellites + nodes
-  STAGES.map((s,i)=>[s,i]).sort((A,B)=>A[0].d-B[0].d).forEach(([s,i])=>{const on=i<=si,act=i===si;const vis=(s.exec?1-mazeA:fadeBG)*depA(s.d),sz=s.f;if(vis<.02)return;
+  STAGES.map((s,i)=>[s,i]).sort((A,B)=>A[0].d-B[0].d).forEach(([s,i])=>{const on=liveMode?liveSeen.has(i):i<=si,act=i===si;const vis=(s.exec?1-mazeA:fadeBG)*depA(s.d),sz=s.f;if(vis<.02)return;
     s.sat.forEach((p,k)=>{const[x,y]=toS(p.x,p.y);const appear=act?Math.min(1,(te-k*120)/300):on?1:0;
       ctx.globalAlpha=(on?.85*Math.max(0,appear):.25)*vis;ctx.fillStyle=on?s.c:'#8C98AD';ctx.beginPath();ctx.arc(x,y,2.4*p.f,0,6.283);ctx.fill();});
     const[x,y]=toS(s.x,s.y);ctx.globalAlpha=vis;
@@ -477,18 +481,19 @@ cv.addEventListener('pointerdown',e=>{return;dragging=true;dragMoved=0;dx0=e.cli
 cv.addEventListener('pointermove',e=>{if(!dragging)return;const ddx=e.clientX-dx0,ddy=e.clientY-dy0;dx0=e.clientX;dy0=e.clientY;dragMoved+=Math.abs(ddx)+Math.abs(ddy);rot-=ddx*.008;tilt=Math.max(.05,Math.min(1.1,tilt+ddy*.005));cv.style.cursor='grabbing';tip.hidden=true});
 cv.addEventListener('pointerup',()=>{dragging=false;cv.style.cursor='default'});
 cv.addEventListener('mousemove',e=>{if(dragging)return;const[i,mx,my]=hit(e);if(i<0||mazeA>.3){tip.hidden=true;cv.style.cursor='default';return}
-  const s=STAGES[i];cv.style.cursor='pointer';tip.innerHTML=`<strong style="color:${s.c}">${s.name}</strong><span>${s.tech}</span><div>${s.cap}</div>`;tip.hidden=false;
+  const s=STAGES[i];cv.style.cursor=liveMode?'default':'pointer';tip.innerHTML=`<strong style="color:${s.c}">${s.name}</strong><span>${liveMode?'Live backend events':s.tech}</span>${liveMode?'':`<div>${s.cap}</div>`}`;tip.hidden=false;
   const tw=tip.offsetWidth;tip.style.left=Math.min(mx+14,W-tw-8)+'px';tip.style.top=(my+14)+'px'});
 cv.addEventListener('mouseleave',()=>tip.hidden=true);
 cv.addEventListener('click',e=>{if(dragMoved>5)return;const[i]=hit(e);if(i>=0&&mazeA<.3)jump(i)});
 
 function togglePlay(force){
+  if(liveMode)return;
   if(!started||si>=STAGES.length||si<0){started=true;logEl.innerHTML='';mazeA=0;enter(0)}
   playing=force===undefined?!playing:force;$('play').textContent=playing?'Pause':'Play'}
 $('play').onclick=()=>togglePlay();
-$('next').onclick=()=>enter(Math.min(STAGES.length,si+1));
-$('prev').onclick=()=>enter(Math.max(0,si-1));
-$('restart').onclick=()=>{started=true;focusExec=false;logEl.innerHTML='';mazeA=0;cam={x:0,y:0,z:1};enter(0);togglePlay(true)};
+$('next').onclick=()=>{if(!liveMode)enter(Math.min(STAGES.length,si+1))};
+$('prev').onclick=()=>{if(!liveMode)enter(Math.max(0,si-1))};
+$('restart').onclick=()=>{if(liveMode)return;started=true;focusExec=false;logEl.innerHTML='';mazeA=0;cam={x:0,y:0,z:1};enter(0);togglePlay(true)};
 $('speed').onchange=e=>speed=+e.target.value;
 addEventListener('keydown',e=>{if(e.target.tagName==='SELECT'||(dlg.open&&e.code==='Space'))return;if(e.code==='Space'){e.preventDefault();togglePlay()}if(e.key==='ArrowRight')$('next').click();if(e.key==='ArrowLeft')$('prev').click()});
 
@@ -581,10 +586,75 @@ $('bwClose').onclick=()=>dlg.close();
 dlg.addEventListener('click',e=>{if(e.target===dlg)dlg.close()});
 dlg.addEventListener('close',()=>{fitS.appendChild(bw.el);fitK(fitS);$('bwBox').focus()});
 
+const demoNames=STAGES.map(s=>s.name);
+const liveNames=['Listen','Understand','Research','Present','Confirm','Execute','Payment','Done'];
+const liveStage={LISTEN:0,UNDERSTAND:1,CLARIFY:1,RESEARCH:2,PRESENT:3,CHOOSE:3,CONFIRM:4,EXECUTE:5,HANDOFF:6,AWAIT_PAYMENT:6,DONE:7};
+const liveCaptions={LISTEN:'Listening to the traveler.',UNDERSTAND:'Gemini is understanding the trip.',CLARIFY:'Asking the traveler for a missing detail.',RESEARCH:'Checking live RATP traffic for the route.',PRESENT:'Reading the route options aloud.',CHOOSE:"Options read aloud — waiting for the traveler's choice.",CONFIRM:'Waiting for the traveler to confirm.',EXECUTE:'H agent is booking on the taxi site.',HANDOFF:"Payment handed to the traveler's phone.",AWAIT_PAYMENT:"Payment handed to the traveler's phone.",DONE:'Booking confirmed.'};
+let liveStarted=0,currentLiveStage='LISTEN';const researchLines=new Set();
+function liveEntry(event){
+  const short=text=>String(text??'').replace(/\s+/g,' ').trim().slice(0,220);
+  switch(event.type){
+    case 'activity':return;
+    case 'feed':return ['feed',short(event.text)];
+    case 'final_transcript':case 'user_reply':return ['transcript','"'+short(event.text)+'"'];
+    case 'options':return ['options',event.items.length?event.items.map(o=>`${o.name} · ${o.price} € · ${o.journey_minutes} min`).join(' / '):'No options available.'];
+    case 'agent_step':return ['agent',short(event.action)];
+    case 'payment_handoff':return ['payment',`handed to phone · ${event.amount} €`];
+    case 'confirm':return ['confirm',short(event.summary)];
+    case 'booking_card':return ['booking',short([event.booking.ref,event.booking.pickup_point].filter(Boolean).join(' · '))];
+    case 'say':return ['say',short(event.text)];
+    case 'clarify':case 'profile_request':return ['question',short(event.question)];
+    case 'error':return ['error',short(event.message)];
+    case 'location_request':return ['location','Asked the phone for its location.'];
+  }
+}
+const demoNote=document.querySelector('.note').textContent;
+const livePage=document.createElement('div');livePage.id='pvLive';livePage.className='pv';livePage.style.cssText='padding:24px;overflow:auto;white-space:pre-wrap;font:30px/1.5 system-ui';bw.page.append(livePage);
+function liveBrowser(text,url='about:blank'){
+  document.querySelectorAll('.pv').forEach(p=>p.classList.toggle('on',p===livePage));
+  livePage.textContent=text;$('bwUrl').textContent=url;
+  bw.cur.style.display='none';bw.ring.style.display='none';bw.ban.style.display='none';bw.typ=null;
+  $('bwStat').textContent=url==='about:blank'?'Live backend events · private details hidden':url;$('bwStatBig').textContent=$('bwStat').textContent;
+}
+function setLiveStage(stage){currentLiveStage=stage;si=liveStage[stage]??0;liveSeen.add(si);paintChips();[...chips.children].forEach((chip,i)=>chip.dataset.state=i===si?'active':liveSeen.has(i)?'done':'');capEl.textContent=stage==='RESEARCH'&&researchLines.size?'Reading RATP: '+[...researchLines].join(', '):liveCaptions[stage]??'Following the traveler’s trip.';}
+addEventListener('showcase-mode',e=>{
+  const paired=e.detail.paired;
+  if(paired===liveMode)return;
+  liveMode=paired;playing=false;started=false;mazeA=0;focusExec=false;camT={x:0,y:0,z:1};liveSeen.clear();logEl.innerHTML='';
+  liveStarted=Date.now();researchLines.clear();
+  bw.el.setAttribute('aria-hidden',String(!paired));
+  document.querySelector('.note').textContent=paired?'Live phone session. Contact details and GPS coordinates are hidden. The browser card shows redacted H actions and safe page URLs; sensitive screenshots are not shared. Payment stays on the phone.':demoNote;
+  document.querySelector('.hud').hidden=paired;document.querySelector('.controls').hidden=paired;$('legend').hidden=true;
+  STAGES.forEach((s,i)=>{s.name=paired?liveNames[i]:demoNames[i];chips.children[i].textContent=s.name;});
+  if(paired){setLiveStage(e.detail.stage??'LISTEN');say('Voilà','Waiting for the traveler’s request…');liveBrowser('Waiting for live H steps. No booking has started.');}
+  else{bw.key='';livePage.classList.remove('on');togglePlay(true);}
+});
+addEventListener('showcase-event',e=>{
+  if(!liveMode)return;const event=e.detail;
+  if(event.type==='stage'){setLiveStage(event.stage);return;}
+  const entry=liveEntry(event);if(entry){const row=document.createElement('li'),stamp=document.createElement('b');const elapsed=Math.floor(Math.max(0,Date.now()-liveStarted)/1000);stamp.textContent=String(Math.floor(elapsed/60)).padStart(2,'0')+':'+String(elapsed%60).padStart(2,'0');row.append(stamp,document.createTextNode('  '+entry[0]+'  '+entry[1]));logEl.append(row);while(logEl.children.length>100)logEl.firstChild.remove();logEl.scrollTop=logEl.scrollHeight;}
+  if(event.type==='feed'&&event.kind==='traffic'){for(const match of event.text.matchAll(/\b(?:RER\s+[A-E]|M\s*\d{1,2}(?:bis)?|(?:ligne|line)\s+\d{1,2}(?:bis)?)\b/gi)){researchLines.add(match[0].replace(/^(?:ligne|line)\s+/i,'M').replace(/^M\s+/i,'M').toUpperCase());}if(currentLiveStage==='RESEARCH'&&researchLines.size)setLiveStage('RESEARCH');}
+  if(event.type==='say')say('Voilà',event.text);
+  if(event.type==='clarify'||event.type==='profile_request')say('Voilà',event.question);
+  if(event.type==='confirm'){say('Voilà',event.summary);liveBrowser('Awaiting traveler approval\n\n'+event.summary);}
+  if(event.type==='options'){capEl.textContent=event.items.length?liveCaptions.CHOOSE:'No options available';liveBrowser(event.items.length?event.items.map(o=>o.name+'\nEstimated €'+o.price+' · pickup ~'+o.pickup_wait_minutes+' min · journey ~'+o.journey_minutes+' min').join('\n\n'):'No options available.');}
+  if(event.type==='agent_step')liveBrowser(event.action,event.url);
+  if(event.type==='payment_handoff')liveBrowser(event.merchant+'\n€'+event.amount);
+  if(event.type==='booking_card')liveBrowser('Booking\n'+JSON.stringify(event.booking,null,2));
+  if(event.type==='error')capEl.textContent=event.message;
+});
 resize();projectAll();paintChips();
 // resting frame: show the map mid-flight so the first view is complete
 si=2;te=2000;paintChips();capEl.textContent='One sentence in a noisy station → a booked, paid ride. Press Play to run it.';
 say('Nicolas','RER B est en panne ! … réserve-moi une voiture pour CDG 2E, avec mon chien guide !');speaking=0;
 requestAnimationFrame(t=>{last=t;tick(t)});
+togglePlay(true);
 })();
+</script>
+<style>
+#pairing{display:flex;align-items:center;gap:16px;margin-top:12px}#pairing[hidden]{display:none}#pairing-qr{width:116px!important;height:116px!important;border:8px solid white;border-radius:12px}#pairing-code{font:700 24px var(--mono);letter-spacing:.2em}[hidden]{display:none!important}#pvLive{background:#fafafd;color:#30354f}.bwstat{white-space:normal;overflow-wrap:anywhere}
+</style>
+<script type="module">
+import { startWatchPage } from '/src/showcase-live.ts';
+startWatchPage();
 </script>

@@ -1,4 +1,4 @@
-import { ProfileSchema, ScenarioSchema, TripSchema, WebEventSchema, resolveTaxiQuote, type TaxiQuote, type Booking, type Gps, type Option, type TravelerProfile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
+import { ProfileSchema, ScenarioSchema, TripSchema, WebEventSchema, resolveTaxiQuote, type WatchPayload, type TaxiQuote, type Booking, type Gps, type Option, type TravelerProfile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
 import { randomUUID } from 'node:crypto';
 import { understand } from './understand.js';
 import { getDemoDisruption, type Disruption } from './adapters/disruption.js';
@@ -18,6 +18,7 @@ import { mentionsTaxiRequest, requestsTaxi, taxiTurn } from './taxi.js';
 import { relevantLines, trafficPage } from './stations.js';
 import { resolveGpsOrigin, redactGpsCoordinates } from './location.js';
 import { confirmationAnswer } from './confirmation-answer.js';
+import { sanitizeWatchEvent } from './watch-privacy.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 type Research = { traffic: Disruption[]; extraOptions: Option[] };
@@ -37,6 +38,10 @@ export interface SessionPorts {
 }
 
 export class VoilaSession {
+  private stepSink?: (event: WatchPayload) => void;
+  watchSteps(sink: (event: WatchPayload) => void) { this.stepSink = sink; }
+  watchEvent(event: Parameters<typeof sanitizeWatchEvent>[0]) { return sanitizeWatchEvent(event, this.profile, { collecting: !!this.profileCollector, payment: this.agentPaymentPage || ['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) }); }
+  private agentPaymentPage = false;
   get language() { return this.profile?.language ?? 'fr'; }
   stage: Stage = 'LISTEN';
   private profile?: TravelerProfile;
@@ -124,7 +129,7 @@ export class VoilaSession {
       return;
     }
     if (event.type === 'hello') {
-      if (this.profile) { this.error('Profile already set; reconnect without restarting the trip.'); return; }
+      if (this.profile) { if (!event.watch) this.error('Profile already set; reconnect without restarting the trip.'); return; }
       this.profile = event.profile;
       this.scenario = event.scenario ?? (ScenarioSchema.safeParse(process.env.VOILA_SCENARIO).data ?? 'demo');
       this.gps = event.gps ?? undefined;
@@ -526,6 +531,7 @@ export class VoilaSession {
       const base = publicShuttleUrl(this.ports.shuttlePublicUrl());
       const startUrl = base.pathname === '/' ? new URL('/fr/reservation/', base) : base;
       if (base.searchParams.get('difficulty') === 'easy') startUrl.searchParams.set('difficulty', 'easy');
+      this.agentPaymentPage = false;
       const result = await this.ports.runBooking({
         trip, pickupGps: this.pickupGps, fareQuote: this.taxiQuote, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
         onRetry: () => { if (current()) { this.pendingBookingAction = undefined; this.speak('booking-retry', {}); } },
@@ -534,7 +540,8 @@ export class VoilaSession {
           if (!current()) return;
           this.send({ type: 'feed', kind: 'agent', text });
         },
-        onPage: (page) => { if (current() && this.stage === 'EXECUTE') this.speak('booking-page', { page }); },
+        onStep: (event) => { if (current()) { const safe = this.watchEvent(event); if (safe) this.stepSink?.(safe); } },
+        onPage: (page) => { if (current()) this.agentPaymentPage = page === 'payment'; if (current() && this.stage === 'EXECUTE') this.speak('booking-page', { page }); },
         confirm: (summary, details) => {
           if (!current()) return Promise.resolve({ approved: false, reply: 'Stopped' });
           if (this.confirmation) throw new Error('A confirmation is already pending.');

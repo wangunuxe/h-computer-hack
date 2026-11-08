@@ -1,4 +1,5 @@
-import { ScenarioSchema, ServerEventSchema, type WebEvent } from '@voila/shared';
+import { ServerEventSchema, type WebEvent } from '@voila/shared';
+import { phoneHello } from './pairing.js';
 import { canStop, initialState, optionEvent, reduce, transcriptEvent, type Stage } from './state.js';
 import { BrowserSpeech, SpeechQueue } from './speech.js';
 import { Recorder, type Credentials } from './recorder.js';
@@ -103,7 +104,7 @@ async function connect() {
       if (ws !== socket) return;
       current.clear();
       connection(true);
-      if (!helloSent) { send({ type: 'hello', profile, gps: null, scenario: ScenarioSchema.safeParse(new URLSearchParams(location.search).get('scenario')).data }); helloSent = true; }
+      if (!helloSent || new URLSearchParams(location.search).get('watch')) { send(phoneHello(profile, location.search)); helloSent = true; }
       else send({ type: 'language', language });
       sessionStorage.save(credentials!, helloSent);
       if (queuedTranscript) { const text = queuedTranscript; queuedTranscript = undefined; sendTranscript(text); }

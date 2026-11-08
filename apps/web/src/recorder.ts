@@ -2,6 +2,7 @@ import workletUrl from './pcm-worklet.ts?worker&url';
 import { parseGladia, stopRecording } from './protocol.js';
 import { captureFailure, SpeechInitializationError, type RecordingFailure } from './recording-error.js';
 import { playbackSession } from './speech.js';
+import { micDebug, traceAudioContext } from './mic-debug.js';
 
 export interface Credentials { id: string; resume_token: string }
 export class Recorder {
@@ -18,6 +19,7 @@ export class Recorder {
       this.ticker = setInterval(() => this.elapsed(Math.floor((Date.now() - started) / 1000)), 1000);
       this.timer = setTimeout(() => { if (!this.stopping) { this.stop(); if (!this.controller.signal.aborted) this.limit(); } }, 180_000);
       playbackSession('play-and-record'); this.context = new AudioContext();
+      traceAudioContext(this.context, 'recorder');
       const resumed = this.context.resume();
       void resumed.catch(() => {});
       await this.capture(resumed);
@@ -28,6 +30,10 @@ export class Recorder {
   }
   private async capture(resumed: Promise<void>) {
     const stream = this.stream = await navigator.mediaDevices.getUserMedia({ audio: { noiseSuppression: true, echoCancellation: true, channelCount: 1 } });
+    for (const track of stream.getTracks()) {
+      micDebug('track.state', { state: track.readyState, muted: track.muted });
+      for (const type of ['mute', 'unmute', 'ended']) track.addEventListener?.(type, () => micDebug('track.event', { type, state: track.readyState, muted: track.muted }));
+    }
     if (this.controller.signal.aborted || this.stopping) { stream.getTracks().forEach((track) => track.stop()); return; }
     let timer: ReturnType<typeof setTimeout> | undefined;
     let abort!: () => void;
@@ -68,8 +74,9 @@ export class Recorder {
         if (message.type === 'error') this.fail({ kind: 'provider', code: 'provider-event', cause: event.data });
       };
       socket.onerror = (cause) => this.fail({ kind: 'service', code: 'connection', cause });
-      socket.onclose = (event) => { if (this.stopping && event.code === 1000) this.finish(); else this.fail({ kind: 'service', code: 'connection-closed', cause: event }); };
+      socket.onclose = (event) => { micDebug('gladia.close', { code: event.code }); if (this.stopping && event.code === 1000) this.finish(); else this.fail({ kind: 'service', code: 'connection-closed', cause: event }); };
       socket.onopen = () => {
+        micDebug('gladia.open');
         if (this.controller.signal.aborted) { socket.close(); return; }
         for (const buffer of this.buffered) socket.send(buffer);
         this.buffered = []; this.bufferedBytes = 0;
@@ -77,6 +84,7 @@ export class Recorder {
       };
   }
   stop() {
+    micDebug('recorder.stop', { audioBytes: this.audioBytes });
     if (this.stopping) return;
     if (!this.audioBytes) { this.fail({ kind: 'empty', code: 'released-before-audio' }); return; }
     clearTimeout(this.timer); clearInterval(this.ticker);
@@ -96,17 +104,19 @@ export class Recorder {
     const context = this.context; this.context = undefined;
     void Promise.resolve(context?.close()).catch(() => {}).then(() => { playbackSession('playback'); this.playback(); });
   }
-  cancel() {
+  cancel(reason = 'cancel') {
     if (this.controller.signal.aborted) return;
+    micDebug('recorder.cancel', { reason });
     this.controller.abort(); clearTimeout(this.timer); clearTimeout(this.tailTimer); clearTimeout(this.endTimer); clearInterval(this.ticker); this.releaseCapture();
     this.buffered = []; this.bufferedBytes = 0;
     this.socket?.close(); this.done();
   }
-  private fail(failure: RecordingFailure) { if (this.controller.signal.aborted) return; this.cancel(); this.error(failure); }
+  private fail(failure: RecordingFailure) { if (this.controller.signal.aborted) return; this.cancel('failure'); this.error(failure); }
   private finish() {
+    micDebug('recorder.finish');
     if (this.controller.signal.aborted || this.endTimer) return;
     if ([...this.segments.values()].some((segment) => segment.partial && !segment.final) || !this.segments.size) this.endTimer = setTimeout(() => this.finishNow(), 300);
     else this.finishNow();
   }
-  private finishNow() { if (this.controller.signal.aborted) return; const text = [...this.segments.values()].map((segment) => segment.final || segment.partial).join(' ').trim(); if (text) { this.cancel(); this.transcript(text); } else this.fail({ kind: 'empty', code: 'empty-transcript' }); }
+  private finishNow() { if (this.controller.signal.aborted) return; const text = [...this.segments.values()].map((segment) => segment.final || segment.partial).join(' ').trim(); if (text) { this.cancel('transcript-complete'); this.transcript(text); } else this.fail({ kind: 'empty', code: 'empty-transcript' }); }
 }

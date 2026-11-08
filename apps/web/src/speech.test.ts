@@ -7,12 +7,13 @@ describe('speech queue', () => {
     queue.enqueue('Old options', 'cards'); queue.enqueue('Taxi from Étoile', 'cards'); queue.unlock(); queue.unlock();
     expect(cancel).not.toHaveBeenCalled(); expect(speak).toHaveBeenCalledExactlyOnceWith('Taxi from Étoile', 'fr-FR', expect.any(Function));
   });
-  it('unlocks a real question in the first microphone gesture before holding capture speech', () => {
+  it('holds before gesture unlock and defers the first question until capture has ended', () => {
     const speak = vi.fn(); const queue = new SpeechQueue({ speak, cancel: vi.fn() }, 'fr-FR');
-    queue.enqueue('Où souhaitez-vous aller ?'); queue.bargeIn(); queue.resume();
-    queue.enqueue('Où souhaitez-vous aller ?'); queue.unlock(); queue.hold();
+    queue.enqueue('Où souhaitez-vous aller ?'); queue.bargeIn(); queue.hold();
+    queue.enqueue('Où souhaitez-vous aller ?'); queue.unlock();
+    expect(speak).not.toHaveBeenCalled(); queue.resume();
     expect(speak).toHaveBeenCalledExactlyOnceWith('Où souhaitez-vous aller ?', 'fr-FR', expect.any(Function));
-    speak.mock.calls[0]![2](); queue.enqueue('D’où partez-vous ?'); expect(speak).toHaveBeenCalledOnce();
+    queue.hold(); speak.mock.calls[0]![2](); queue.enqueue('D’où partez-vous ?'); expect(speak).toHaveBeenCalledOnce();
     queue.resume(); expect(speak).toHaveBeenLastCalledWith('D’où partez-vous ?', 'fr-FR', expect.any(Function));
   });
   it('defers captions during capture and resumes them after playback is restored', () => {
@@ -63,4 +64,53 @@ describe('mobile browser speech', () => {
     s.port.speak('Two', 'en-GB', s.done); vi.advanceTimersByTime(10_000); expect(s.failed).toHaveBeenCalledTimes(2); expect(s.done).toHaveBeenCalledTimes(2);
   });
   it('tolerates browsers without the optional Audio Session API', () => { vi.stubGlobal('navigator', {}); expect(() => playbackSession('playback')).not.toThrow(); });
+  it('primes speech silently once in the gesture and retains audible speech for after capture', () => {
+    const s = setup(); s.port.prime('fr-FR'); s.port.prime('fr-FR');
+    expect(s.synthesis.speak).toHaveBeenCalledOnce();
+    expect(s.synthesis.speak.mock.calls[0]![0].volume).toBe(0);
+    s.port.speak('Bonjour', 'fr-FR', s.done);
+    expect(s.synthesis.cancel).toHaveBeenCalledBefore(s.synthesis.speak);
+    expect(s.synthesis.speak.mock.calls[1]![0].volume).toBe(1);
+  });
+  it('uses engine fallback without a matching voice and resumes before an audible request', () => {
+    const s = setup(); s.synthesis.getVoices.mockReturnValue([{ lang: 'en-US' } as SpeechSynthesisVoice]);
+    s.port.speak('Bonjour', 'fr-FR', s.done);
+    const utterance = s.synthesis.speak.mock.calls[0]![0];
+    expect(utterance.voice).toBeNull(); expect(utterance.lang).toBe('fr-FR');
+    expect(s.synthesis.cancel).toHaveBeenCalledBefore(s.synthesis.resume);
+    expect(s.synthesis.resume).toHaveBeenCalledBefore(s.synthesis.speak);
+  });
+  it.each(['interrupted', 'canceled'])('finishes an external %s without holding the speech queue', (error) => {
+    const s = setup(); s.port.speak('Bonjour', 'fr-FR', s.done);
+    s.synthesis.speak.mock.calls[0]![0].onerror!({ error } as SpeechSynthesisErrorEvent);
+    expect(s.done).toHaveBeenCalledOnce(); expect(s.failed).not.toHaveBeenCalled();
+  });
+  it('allows gesture priming again after not-allowed and ignores stale cancellation callbacks', () => {
+    const s = setup(); s.port.prime('fr-FR'); s.port.speak('Bonjour', 'fr-FR', s.done);
+    const utterance = s.synthesis.speak.mock.calls[1]![0];
+    utterance.onerror!({ error: 'not-allowed' } as SpeechSynthesisErrorEvent);
+    expect(s.done).toHaveBeenCalledOnce(); expect(s.failed).toHaveBeenCalledOnce();
+    s.port.prime('fr-FR'); expect(s.synthesis.speak).toHaveBeenCalledTimes(3);
+    s.port.cancel(); utterance.onerror!({ error: 'interrupted' } as SpeechSynthesisErrorEvent);
+    expect(s.done).toHaveBeenCalledOnce();
+  });
+  it.each(['not-allowed', 'network', 'timeout'])('does not re-prime over a queued reply after %s and keeps later replies flowing', (error) => {
+    const s = setup(), queue = new SpeechQueue(s.port, 'fr-FR');
+    queue.enqueue('First'); queue.enqueue('Second'); queue.enqueue('Third'); queue.unlock();
+    const first = s.synthesis.speak.mock.calls[1]![0];
+    if (error === 'timeout') vi.advanceTimersByTime(10_000);
+    else first.onerror!({ error } as SpeechSynthesisErrorEvent);
+    expect(s.failed).toHaveBeenCalledOnce();
+    expect(s.synthesis.speak).toHaveBeenCalledTimes(3);
+    const second = s.synthesis.speak.mock.calls[2]![0];
+    expect(second.text).toBe('Second');
+    const cancellations = s.synthesis.cancel.mock.calls.length;
+    queue.unlock();
+    expect(s.synthesis.cancel).toHaveBeenCalledTimes(cancellations);
+    expect(s.synthesis.speak).toHaveBeenCalledTimes(3);
+    second.onend!({} as SpeechSynthesisEvent);
+    expect(s.synthesis.speak.mock.calls[3]![0].text).toBe('Third');
+    s.synthesis.speak.mock.calls[3]![0].onend!({} as SpeechSynthesisEvent);
+    expect(queue.idle).toBe(true);
+  });
 });

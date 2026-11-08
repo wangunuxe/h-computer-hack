@@ -26,6 +26,15 @@ Each touch/pen tap activates on pointer release, with the following generated
 click suppressed; mouse, keyboard and screen-reader clicks remain supported.
 The next click within 700 ms of touch/pen release or cancellation is consumed,
 regardless of `detail`; pointer activation also guards all toggles for 700 ms.
+All activation paths ignore a stop within 600 ms of starting, including click-only
+keyboard/screen-reader bursts. Speech is cancelled and held before gesture unlock;
+a silent synthesis primer unlocks playback, with the question deferred until capture ends.
+Transient backgrounding shorter than one second preserves capture; sustained hiding
+or page navigation cancels it. Start/stop earcons still use a separate AudioContext.
+
+For device diagnostics, open `?debug=1`: an AT-hidden overlay logs bounded event,
+audio, socket and synthesis lifecycle metadata, never transcripts, URLs or credentials.
+The setting and last 80 lines persist in this tab's session storage; `?debug=0` disables it.
 The first tap starts recording and the next tap finishes; holding is unnecessary.
 There is no hold-to-talk mode. Enter and Space use the native button activation.
 An early tap during connection gives a cue and queues recording until connected;

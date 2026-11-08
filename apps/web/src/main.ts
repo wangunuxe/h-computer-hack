@@ -3,6 +3,7 @@ import { phoneHello } from './pairing.js';
 import { canStop, initialState, optionEvent, paymentCommand, reduce, transcriptEvent, type Stage } from './state.js';
 import { BrowserSpeech, SpeechQueue } from './speech.js';
 import { Recorder, type Credentials } from './recorder.js';
+import { micDebug, traceAudioContext, traceMicEvents } from './mic-debug.js';
 import { clientProfile, deviceLanguage } from './preferences.js';
 import { decisionLabels, labels, optionLabel, stages } from './labels.js';
 import { bindMicControls, micControlState } from './mic-controls.js';
@@ -40,7 +41,7 @@ function announce(text: string, assertive = false) {
   lastNarrated = Date.now(); voice.enqueue(text);
 }
 const voice = new SpeechQueue(new BrowserSpeech(() => {
-  voice.hold(); speechNeedsGesture = true;
+  speechNeedsGesture = true;
   $('errors').textContent = language === 'fr' ? 'La voix est indisponible. Touchez le micro pour réessayer.' : 'Speech is unavailable. Tap the microphone to retry.';
   $('errors').setAttribute('role', 'alert'); $('errors').setAttribute('aria-live', 'assertive');
 }), language === 'fr' ? 'fr-FR' : 'en-GB');
@@ -52,6 +53,7 @@ function cue(stopping = false) {
   navigator.vibrate?.(stopping ? [20, 30, 20] : 35);
   try {
     const audio = new AudioContext(); void audio.resume().catch(() => {});
+    traceAudioContext(audio, 'cue');
     const oscillator = audio.createOscillator(); const gain = audio.createGain(); gain.gain.value = 0.08;
     oscillator.frequency.value = stopping ? 440 : 660; oscillator.connect(gain).connect(audio.destination); oscillator.onended = () => { void audio.close().catch(() => {}); }; oscillator.start(); oscillator.stop(audio.currentTime + 0.08);
   } catch { /* Haptics and earcons are optional. */ }
@@ -112,6 +114,7 @@ async function connect() {
     }
     const ws = socket = new WebSocket((location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws/session/' + credentials!.id + '?token=' + encodeURIComponent(credentials!.resume_token));
     ws.onopen = () => {
+      micDebug('session.open');
       if (ws !== socket) return;
       current.clear();
       connection(true);
@@ -120,7 +123,7 @@ async function connect() {
       sessionStorage.save(credentials!, helloSent);
       if (queuedTranscript) { const text = queuedTranscript; queuedTranscript = undefined; sendTranscript(text); }
       if (pendingStop) { send({ type: 'stop' }); pendingStop = false; recordingLabel(); }
-      if (pendingStart) { clearPendingStart(); start(); }
+      if (pendingStart) start('connection-open');
     };
     ws.onmessage = (message) => {
       if (ws !== socket) return;
@@ -145,13 +148,14 @@ async function connect() {
       } catch { announce(t().error, true); }
     };
     ws.onclose = (event) => {
+      micDebug('session.close', { code: event.code, current: ws === socket });
       if (ws !== socket) return;
       current.clear();
-      recorder?.cancel(); connectionFailure();
+      recorder?.cancel('session-close'); connectionFailure();
       if (requiresFreshSession(event.code)) { credentials = undefined; helloSent = false; sessionStorage.clear(); queuedTranscript = undefined; pendingStop = false; state = initialState(); render(); }
       clearTimeout(retry); retry = setTimeout(() => void connect(), 1500);
     };
-    ws.onerror = () => { if (ws === socket) connectionFailure(); };
+    ws.onerror = () => { micDebug('session.error'); if (ws === socket) connectionFailure(); };
   } catch { if (attempt === current) { current.clear(); connectionFailure(); clearTimeout(retry); retry = setTimeout(() => void connect(), 3000); } }
   finally { if (attempt === current) connecting = false; }
 }
@@ -161,12 +165,20 @@ function resumeConnection() {
   if (replaceOnForeground(socket?.readyState)) { const stale = socket; socket = undefined; stale?.close(); }
   void connect();
 }
+let hiddenTimer: ReturnType<typeof setTimeout> | undefined;
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') resumeConnection();
-  else { clearPendingStart(); recordingLabel(); if (credentials) sessionStorage.save(credentials, helloSent); recorder?.cancel(); }
+  micDebug('visibility', { state: document.visibilityState }); clearTimeout(hiddenTimer);
+  if (document.visibilityState === 'visible') { if (!recorder && !pendingStart) resumeConnection(); }
+  else {
+    if (credentials) sessionStorage.save(credentials, helloSent);
+    hiddenTimer = setTimeout(() => {
+      if (document.visibilityState === 'visible') return;
+      micDebug('cancel', { reason: 'hidden-timeout' }); clearPendingStart(); recordingLabel(); recorder?.cancel('hidden-timeout');
+    }, 1000);
+  }
 });
 window.addEventListener('pageshow', (event) => { if (event.persisted) resumeConnection(); });
-window.addEventListener('pagehide', () => { clearPendingStart(); recordingLabel(); if (credentials) sessionStorage.save(credentials, helloSent); });
+window.addEventListener('pagehide', () => { micDebug('cancel', { reason: 'pagehide' }); clearTimeout(hiddenTimer); clearPendingStart(); recorder?.cancel('pagehide'); recordingLabel(); if (credentials) sessionStorage.save(credentials, helloSent); });
 setInterval(() => { if (connected && credentials) sessionStorage.save(credentials, helloSent); }, 60_000);
 setInterval(() => {
   if (!recorder && state.cancellable && voice.idle && Date.now() - lastNarrated >= 30_000) {
@@ -184,33 +196,38 @@ function recordingLabel() {
   talk.disabled = control.disabled;
   $('stop').hidden = !!recorder || !canStop(state);
 }
-function start() {
+function start(reason = 'activation') {
+  micDebug('start', { reason, speaking: globalThis.speechSynthesis?.speaking, paused: globalThis.speechSynthesis?.paused, pending: globalThis.speechSynthesis?.pending });
   if (recorder) return;
+  if ((!connected || !credentials || socket?.readyState !== WebSocket.OPEN) && connectionFailed) { retryConnection(); return; }
+  if (!pendingStart) {
+    voice.bargeIn(); voice.hold();
+    if (speechNeedsGesture) voice.enqueue(lastSay || t().welcome);
+    unlock(); cue();
+  }
   if (!connected || !credentials || socket?.readyState !== WebSocket.OPEN) {
-    if (connectionFailed) { retryConnection(); return; }
-    voice.bargeIn(); voice.resume(); unlock(); cue();
     pendingStart = true; recordingLabel();
     void connect(); return;
   }
-  voice.bargeIn(); voice.resume();
-  if (speechNeedsGesture) voice.enqueue(lastSay || t().welcome);
-  unlock(); voice.hold(); cue(); releasing = false;
+  pendingStart = false; releasing = false;
   $('errors').replaceChildren();
-  const current = new Recorder(sendTranscript, (failure) => { console.warn('Speech recording failed', recordingDiagnostic(failure)); announce(t()[recordingErrorKeys[failure.kind]], true); }, () => { if (recorder === current) { recorder = undefined; releasing = false; $('elapsed').hidden = true; recordingLabel(); } }, () => {
+  const current = new Recorder(sendTranscript, (failure) => { micDebug('recorder.failure', { ...recordingDiagnostic(failure) }); console.warn('Speech recording failed', recordingDiagnostic(failure)); announce(t()[recordingErrorKeys[failure.kind]], true); }, () => { if (recorder === current) { recorder = undefined; releasing = false; $('elapsed').hidden = true; recordingLabel(); } }, () => {
     releasing = true; cue(true); recordingLabel();
     const text = language === 'fr' ? 'Trois minutes atteintes. Je termine la transcription.' : 'Three-minute limit reached. Finishing the transcript.';
     announce(text);
   }, (seconds) => { $('elapsed').hidden = false; $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }, () => { if (!recorder || recorder === current) voice.resume(); });
   recorder = current; recordingLabel(); void current.start(credentials);
 }
-function clearPendingStart() { pendingStart = false; }
-function release() {
+function clearPendingStart() { if (pendingStart) { pendingStart = false; voice.bargeIn(); voice.resume(); micDebug('pending.cancel'); } }
+function release(reason = 'activation') {
+  micDebug('release', { reason });
   if (pendingStart) { clearPendingStart(); voice.bargeIn(); voice.resume(); cue(true); recordingLabel(); return; }
   if (!recorder || releasing) return; releasing = true; unlock(); cue(true); recordingLabel(); recorder.stop();
 }
 const talk = $<HTMLButtonElement>('talk');
+traceMicEvents(talk);
 bindMicControls(talk, $('dock'), { active: () => pendingStart || !!recorder, start, release });
-$('stop').onclick = () => { clearPendingStart(); voice.bargeIn(); voice.resume(); unlock(); recorder?.cancel(); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); };
+$('stop').onclick = () => { clearPendingStart(); voice.bargeIn(); voice.resume(); unlock(); recorder?.cancel('stop-button'); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); };
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) { const node = document.createElement(tag); if (text) node.textContent = text; return node; }
 function button(text: string, action: () => void) { const node = element('button', text); node.type = 'button'; node.onclick = () => { if (!node.isConnected || node.disabled) return; unlock(); action(); }; return node; }
@@ -245,7 +262,7 @@ function render() {
     const decisions = element('div'); decisions.className = 'decision';
     const decision = decisionLabels(language, state.stage);
     decisions.setAttribute('role', 'group'); decisions.setAttribute('aria-label', `${decision.yes} / ${decision.no}`);
-    const answer = (text: string) => { recorder?.cancel(); voice.bargeIn(); voice.resume(); sendTranscript(text); };
+    const answer = (text: string) => { recorder?.cancel('decision-button'); voice.bargeIn(); voice.resume(); sendTranscript(text); };
     const yes = button(decision.yes, () => answer(language === 'fr' ? 'oui' : 'yes')); yes.id = 'confirm-yes'; yes.setAttribute('aria-label', decision.yes);
     const no = button(decision.no, () => answer(language === 'fr' ? 'non' : 'no')); no.id = 'confirm-no'; no.className = 'secondary'; no.setAttribute('aria-label', decision.no);
     decisions.append(yes, no); actions.append(primary(decisions));

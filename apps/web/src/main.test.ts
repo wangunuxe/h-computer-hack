@@ -232,4 +232,18 @@ describe('phone client lifecycle and controls', () => {
     socket.message({ type: 'stage', stage: 'EXECUTE' }); yes.click();
     expect(socket.send).not.toHaveBeenCalled();
   });
+  it.each(['HANDOFF', 'AWAIT_PAYMENT'])('opens the payment page from a spoken command in %s without sending it to the server', async (stage) => {
+    const assign = vi.fn(); vi.stubGlobal('location', { ...window.location, href: window.location.href, protocol: 'http:', host: 'localhost', search: '', assign });
+    const socket = await boot(); socket.message({ type: 'stage', stage });
+    socket.message({ type: 'payment_handoff', url: 'https://checkout.stripe.com/c/pay/test', amount: 44, merchant: 'Taxi', summary: 'Taxi' });
+    const talk = document.getElementById('talk')!; talk.click(); mocks.recorders.at(-1)!.callbacks[0]!('Payer.');
+    expect(mocks.enqueue).toHaveBeenCalledWith(labels.en.openingPayment);
+    vi.advanceTimersByTime(1500); expect(assign).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/test');
+    expect(socket.send).not.toHaveBeenCalledWith(expect.stringContaining('Payer'));
+  });
+  it('forwards a payment command to the server when no payment page is available', async () => {
+    const socket = await boot(); socket.message({ type: 'stage', stage: 'EXECUTE' });
+    const talk = document.getElementById('talk')!; talk.click(); mocks.recorders.at(-1)!.callbacks[0]!('Payer');
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'user_reply', text: 'Payer' }));
+  });
 });

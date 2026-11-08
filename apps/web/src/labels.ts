@@ -4,13 +4,13 @@ export const labels = {
     connectionRetry: 'Connexion impossible, touchez pour réessayer.',
     microphonePermission: 'L’accès au micro est refusé. Autorisez le micro dans les réglages du navigateur.', microphoneMissing: 'Aucun micro détecté. Connectez un micro, puis réessayez.', microphoneCapture: 'La capture audio a été interrompue. Réessayez de parler.', speechUnavailable: 'La connexion au service de transcription a échoué. Réessayez dans un instant.', nothingHeard: 'Je n’ai rien entendu. Appuyez sur le micro, parlez, puis appuyez à nouveau pour terminer.', speechProvider: 'Le service de transcription a rencontré une erreur. Veuillez réessayer.',
     title: 'Voilà — votre trajet, votre voix', welcome: 'Où souhaitez-vous aller ?', tap: 'Appuyez pour parler', listening: 'J’écoute…', stopListening: 'Terminer le message', processing: 'Transcription…', stop: 'Arrêter', yes: 'Confirmer', no: 'Annuler', ready: 'Connecté', connecting: 'Connexion…', disconnected: 'Reconnexion…', error: 'Une erreur est survenue. Veuillez réessayer.',
-    options: 'Votre trajet', confirm: 'Confirmer la réservation', payment: 'Payer', booking: 'Trajet réservé', ref: 'Réf.', arrival: 'Arrivée', source: 'Source',
+    options: 'Votre trajet', confirm: 'Confirmer la réservation', payment: 'Payer', openingPayment: 'J’ouvre la page de paiement.', booking: 'Trajet réservé', ref: 'Réf.', arrival: 'Arrivée', source: 'Source',
   },
   en: {
     connectionRetry: 'Cannot connect. Tap to retry.',
     microphonePermission: 'Microphone access was denied. Allow microphone access in your browser settings.', microphoneMissing: 'No microphone was found. Connect a microphone and try again.', microphoneCapture: 'Audio capture was interrupted. Please try speaking again.', speechUnavailable: 'Could not connect to the speech service. Please try again shortly.', nothingHeard: 'I didn’t hear anything. Tap the microphone, speak, then tap again to finish.', speechProvider: 'The speech service encountered an error. Please try again.',
     title: 'Voilà — your journey, your voice', welcome: 'Where would you like to go?', tap: 'Tap to speak', listening: 'Listening…', stopListening: 'Finish message', processing: 'Transcribing…', stop: 'Stop', yes: 'Confirm', no: 'Cancel', ready: 'Connected', connecting: 'Connecting…', disconnected: 'Reconnecting…', error: 'Something went wrong. Please try again.',
-    options: 'Your route', confirm: 'Confirm booking', payment: 'Pay', booking: 'Journey booked', ref: 'Ref.', arrival: 'Arrival', source: 'Source',
+    options: 'Your route', confirm: 'Confirm booking', payment: 'Pay', openingPayment: 'Opening the payment page.', booking: 'Journey booked', ref: 'Ref.', arrival: 'Arrival', source: 'Source',
   },
 };
 export const stages: Record<'fr' | 'en', Record<Stage, string>> = {

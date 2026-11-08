@@ -1,7 +1,7 @@
 import { understand } from './understand.js';
 import { searchDisruptionAndAlternatives } from './adapters/linkup.js';
 
-const profile = { name: 'Karim Demo', email: 'karim@example.com', phone: '+33612345678', guide_dog: true, language: 'fr' };
+const profile = { name: 'Nicolas Demo', email: 'karim@example.com', phone: '+33612345678', guide_dog: true, language: 'fr' };
 const now = new Date();
 if (process.argv.includes('gemini')) {
   for (const transcript of [

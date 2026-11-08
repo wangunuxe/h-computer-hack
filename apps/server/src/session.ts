@@ -535,7 +535,7 @@ export class VoilaSession {
       const startUrl = base.pathname === '/' ? new URL('/fr/reservation/', base) : base;
       if (base.searchParams.get('difficulty') === 'easy') startUrl.searchParams.set('difficulty', 'easy');
       this.agentPaymentPage = false;
-      const profile = ProfileSchema.parse({ phone: process.env.VOILA_DEFAULT_PHONE || '+33612345678', ...this.profile, name: ProfileSchema.shape.name.trim().parse(this.profile?.name || process.env.VOILA_DEFAULT_NAME || 'Karim Demo'), email: this.profile?.email || process.env.VOILA_DEFAULT_EMAIL || 'karim@example.com', guide_dog: trip.guide_dog });
+      const profile = ProfileSchema.parse({ phone: process.env.VOILA_DEFAULT_PHONE || '+33612345678', ...this.profile, name: ProfileSchema.shape.name.trim().parse(this.profile?.name || process.env.VOILA_DEFAULT_NAME || 'Nicolas Demo'), email: this.profile?.email || process.env.VOILA_DEFAULT_EMAIL || 'karim@example.com', guide_dog: trip.guide_dog });
       this.bookingName = profile.name;
       const result = await this.ports.runBooking({
         trip, pickupGps: this.pickupGps, fareQuote: this.taxiQuote, journeyMinutes: option.journey_minutes, profile, startUrl: startUrl.href, signal: controller.signal,

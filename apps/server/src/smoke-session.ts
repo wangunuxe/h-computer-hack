@@ -61,7 +61,7 @@ export async function smokeSession() {
       const finish = finishOnce((reason) => { outcome = reason; totalMs = Math.round(performance.now() - started); clearTimeout(timer); resolve(); });
       const timer = setTimeout(() => finish('timeout'), 6 * 60_000);
       socket.on('open', () => {
-        socket.send(JSON.stringify({ type: 'hello', profile: { name: 'Karim Demo', language: 'fr', guide_dog: true, phone: '+33612345678', email: 'karim@example.com' }, gps: null }));
+        socket.send(JSON.stringify({ type: 'hello', profile: { name: 'Nicolas Demo', language: 'fr', guide_dog: true, phone: '+33612345678', email: 'karim@example.com' }, gps: null }));
         const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
         const transcript = `Je suis à Gare du Nord, mon vol part de CDG terminal 2E ${hour >= 20 ? 'demain' : 'ce soir'} à 23h, j'ai un chien guide et une valise`;
         log({ transcript });

@@ -129,10 +129,44 @@ describe('VoilaSession', () => {
     s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
     expect(s.ports.runBooking.mock.calls[0]![0].profile.phone).toBe('0712345678');
   });
+  it.each(['fr', 'en'])('skips email questions and readbacks in %s and supplies a booking-only default', async (language) => {
+    vi.stubEnv('VOILA_DEFAULT_EMAIL', '');
+    const s = setup(); s.session.handle({ type: 'hello', profile: { language, name: 'Marie', guide_dog: false }, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
+    expect(s.ports.runBooking).toHaveBeenCalledOnce();
+    expect(s.ports.runBooking.mock.calls[0]![0].profile.email).toBe('karim@example.com');
+    expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
+    expect(JSON.stringify(s.events)).not.toMatch(/karim@example\.com|adresse e-mail|email address|arobase/);
+    expect(s.session.watchEvent({ type: 'say', text: 'Entering karim@example.com' })).toEqual({ type: 'say', text: 'Entering [email]' });
+    expect(s.session.watchEvent({ type: 'agent_step', action: 'Entering karim@example.com' })).toBeUndefined();
+  });
+  it.each(['fr', 'en'])('uses a configured booking email without storing it in the %s profile', async (language) => {
+    vi.stubEnv('VOILA_DEFAULT_EMAIL', 'booking@example.com');
+    const s = setup(); s.session.handle({ type: 'hello', profile: { language, name: 'Marie', guide_dog: false }, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
+    expect(s.ports.runBooking.mock.calls[0]![0].profile.email).toBe('booking@example.com');
+    const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
+    expect(JSON.stringify([...s.events, ...replay].filter((event) => event.type === 'profile'))).not.toContain('booking@example.com');
+    expect(s.session.watchEvent({ type: 'say', text: 'Entering booking@example.com' })).toEqual({ type: 'say', text: 'Entering [email]' });
+    expect(s.session.watchEvent({ type: 'agent_step', action: 'Entering booking@example.com' })).toBeUndefined();
+  });
+  it('keeps a known email instead of the configured booking default', async () => {
+    vi.stubEnv('VOILA_DEFAULT_EMAIL', 'booking@example.com');
+    const s = setup(); await s.start(); await s.choose();
+    expect(s.ports.runBooking.mock.calls[0]![0].profile.email).toBe(profile.email);
+    expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
+  });
+  it('fails closed on an invalid configured email without asking the traveler to dictate one', async () => {
+    vi.stubEnv('VOILA_DEFAULT_EMAIL', 'invalid');
+    const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'fr', name: 'Marie', guide_dog: false }, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
+    expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.session.stage).toBe('CHOOSE');
+    expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
+  });
   it("keeps c'est Marie local after asking for a name and passes the confirmed name only to booking", async () => {
     const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'fr', guide_dog: false }, gps: null, scenario: 'live' });
     s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
-    for (const text of ["c'est Marie", 'oui', 'marie at example dot com', 'oui']) await s.choose(text);
+    for (const text of ["c'est Marie", 'oui']) await s.choose(text);
     expect(s.ports.runBooking).toHaveBeenCalledOnce(); expect(s.ports.runBooking.mock.calls[0]![0].profile.name).toBe('Marie');
     expect(s.ports.understand).toHaveBeenCalledOnce(); expect(s.ports.linkup).toHaveBeenCalledOnce(); expect(s.ports.converse).not.toHaveBeenCalled();
     const external = JSON.stringify([s.ports.understand.mock.calls[0]![0].transcript, s.ports.linkup.mock.calls]); expect(external).not.toContain('Marie');
@@ -141,7 +175,7 @@ describe('VoilaSession', () => {
     const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { ...trip, guide_dog: tripDog }, missing: [] }) });
     s.session.handle({ type: 'hello', profile: { language: 'en', guide_dog: savedDog }, gps: null, scenario: 'live' });
     s.session.handle({ type: 'final_transcript', text: `Gare du Nord to CDG ${tripDog ? 'with' : 'without'} a guide dog` }); await flush(); await s.choose();
-    for (const value of ['Marie', 'yes', 'marie at example dot com', 'yes']) await s.choose(value);
+    for (const value of ['Marie', 'yes']) await s.choose(value);
     expect(s.ports.runBooking).toHaveBeenCalledOnce();
     expect(s.ports.runBooking.mock.calls[0]![0].trip.guide_dog).toBe(tripDog);
     expect(s.ports.runBooking.mock.calls[0]![0].profile.guide_dog).toBe(tripDog);
@@ -172,15 +206,14 @@ describe('VoilaSession', () => {
     const reply = async (text: string) => { s.session.handle({ type: 'user_reply', text }); await flush(); };
     expect(s.events.at(-1)).toEqual({ type: 'say', text: expect.stringContaining('nom') });
     await reply('Marie Test'); await reply('oui');
-    await reply('marie point test arobase example point com'); await reply('oui');
     await reply('non'); expect(s.ports.runBooking).not.toHaveBeenCalled(); await reply('oui');
     expect(s.ports.runBooking).toHaveBeenCalledOnce();
-    expect(s.ports.runBooking.mock.calls[0]![0].profile).toEqual({ language: 'fr', name: 'Marie Test', phone: '+33612345678', email: 'marie.test@example.com', guide_dog: false });
+    expect(s.ports.runBooking.mock.calls[0]![0].profile).toEqual({ language: 'fr', name: 'Marie Test', phone: '+33612345678', email: 'karim@example.com', guide_dog: false });
     expect(s.ports.converse).not.toHaveBeenCalled();
     await reply('Où en est-on ?');
     const context = JSON.stringify(s.ports.converse.mock.calls);
     for (const secret of ['Marie Test', '0712345678', 'marie.test', 'zero, six', 'zero, sept']) expect(context).not.toContain(secret);
-    expect(s.events.filter((event) => event.type === 'profile')).toHaveLength(3);
+    expect(s.events.filter((event) => event.type === 'profile')).toHaveLength(2);
     expect(s.events).toContainEqual({ type: 'say', text: expect.stringContaining('efface mes informations') });
   });
   it('asks only for guide-dog information for a manual option and skips stored fields', async () => {

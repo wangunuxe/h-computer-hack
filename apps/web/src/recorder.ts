@@ -29,7 +29,15 @@ export class Recorder {
   private async capture(resumed: Promise<void>) {
     const stream = this.stream = await navigator.mediaDevices.getUserMedia({ audio: { noiseSuppression: true, echoCancellation: true, channelCount: 1 } });
     if (this.controller.signal.aborted || this.stopping) { stream.getTracks().forEach((track) => track.stop()); return; }
-    await resumed;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let abort!: () => void;
+    const interrupted = new Promise<never>((_, reject) => {
+      abort = () => reject(this.controller.signal.reason);
+      this.controller.signal.addEventListener('abort', abort, { once: true });
+      timer = setTimeout(() => reject(new Error('Audio context did not resume.')), 10_000);
+    });
+    try { await Promise.race([resumed, interrupted]); }
+    finally { clearTimeout(timer); this.controller.signal.removeEventListener('abort', abort); }
     if (this.controller.signal.aborted || this.stopping) return;
     await this.context!.audioWorklet.addModule(workletUrl);
     if (this.controller.signal.aborted || this.stopping) return;

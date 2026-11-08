@@ -188,7 +188,7 @@ bindMicControls(talk, $('dock'), { active: () => !!recorder, start, release });
 $('stop').onclick = () => { voice.bargeIn(); voice.resume(); unlock(); recorder?.cancel(); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); };
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) { const node = document.createElement(tag); if (text) node.textContent = text; return node; }
-function button(text: string, action: () => void) { const node = element('button', text); node.type = 'button'; node.onclick = () => { unlock(); action(); }; return node; }
+function button(text: string, action: () => void) { const node = element('button', text); node.type = 'button'; node.onclick = () => { if (!node.isConnected || node.disabled) return; unlock(); action(); }; return node; }
 function safeLink(url: string, text: string) { try { if (!['https:', 'http:'].includes(new URL(url).protocol)) return undefined; const link = element('a', text); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; return link; } catch { return undefined; } }
 function primary<T extends HTMLElement>(node: T) { node.id = 'primary-content'; if (!['A', 'BUTTON'].includes(node.tagName)) node.tabIndex = -1; return node; }
 const money = (amount: number) => new Intl.NumberFormat(language === 'fr' ? 'fr-FR' : 'en-GB', { style: 'currency', currency: 'EUR' }).format(amount);

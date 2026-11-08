@@ -14,7 +14,8 @@ describe('shared regulated taxi estimates', () => {
     expect(taxiPlacesEquivalent('12 Rue de la Paix, Paris', '12 Rue de la Paix, 75002 Paris')).toBe(false);
     expect(taxiPlacesEquivalent('12 Rue de la Paix, 75002 Paris', '12 Rue de la Paix, 75008 Paris')).toBe(false);
     expect(taxiPlacesEquivalent('Gare du Nord', 'Gare du Nord, Saint-Denis')).toBe(false);
-    expect(taxiPlacesEquivalent('Tour Eiffel', 'Tour Eiffel, 5 Avenue Anatole France, Paris')).toBe(false);
+    expect(taxiPlacesEquivalent('Tour Eiffel', 'Tour Eiffel, 5 Avenue Anatole France, Paris')).toBe(true);
+    expect(taxiPlacesEquivalent('Tour Eiffel', 'Tour Eiffel, 5 Avenue Anatole France, 75007 Paris')).toBe(false);
     expect(taxiPlacesEquivalent('Tour Eiffel', 'Tour Eiffel Restaurant, Nice')).toBe(false);
     expect(taxiPlacesEquivalent('Tour Eiffel', 'Unknown')).toBe(false);
   });

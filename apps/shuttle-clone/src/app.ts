@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { TaxiQuoteSchema, resolveTaxiQuote, taxiPlacesEquivalent, parisPickupTime } from '@voila/shared';
+import { TaxiQuoteSchema, resolveTaxiQuote, taxiPlacesEquivalent, taxiPoint, parisPickupTime } from '@voila/shared';
 import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -90,7 +90,9 @@ export function createApp({
     const sameStops = draft.fare && taxiPlacesEquivalent(draft.fare.origin, r.pickup) && taxiPlacesEquivalent(draft.fare.destination, r.dropoff);
     if (sameStops) draft.fare = { ...draft.fare!, at: pickup.toISOString() };
     else {
-      draft.fare = await resolveTaxiQuote({ origin: r.pickup, destination: r.dropoff, passengers: draft.fare?.passengers ?? Number(draft.info?.passengers ?? 1) }, { now: pickup, fetch: geocodeFetch });
+      const resolved = await resolveTaxiQuote({ origin: r.pickup, destination: r.dropoff, passengers: draft.fare?.passengers ?? Number(draft.info?.passengers ?? 1) }, { now: pickup, fetch: geocodeFetch });
+      if (draft.fare && (((draft.fare.from ?? taxiPoint(draft.fare.origin)) && !resolved.from) || ((draft.fare.to ?? taxiPoint(draft.fare.destination)) && !resolved.to))) return c.html(routePage(draft, 'Could not verify the changed addresses. Keep the original stop or ask Voilà for new options.', values), 400);
+      draft.fare = resolved;
     }
     draft.route = r; draft.vehicle = undefined; draft.info = undefined;
     return c.redirect(`/fr/reservation/${draft.id}/vehicle`, 303);

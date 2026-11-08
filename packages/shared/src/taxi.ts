@@ -20,6 +20,13 @@ function taxiStation(place: string) {
   return station && [station.name, ...station.aliases].some((name) => text === normalizePlace(name) || text.startsWith(normalizePlace(name) + ' ')) ? station : undefined;
 }
 export function taxiPlaceKey(place: string): string {
+  const landmarks = [
+    ['Tour Eiffel', 'Tour Eiffel, 5 Avenue Anatole France, Paris'],
+    ['Louvre Museum', 'Louvre Museum, Rue de Rivoli, Paris'],
+    ['Hôtel de Ville', 'Hôtel de Ville, Place de l’Hôtel de Ville, Paris'],
+  ];
+  const landmark = landmarks.find((aliases) => aliases.some((alias) => normalizePlace(alias) === normalizePlace(place)));
+  if (landmark) return normalizePlace(landmark[0]!);
   const station = taxiStation(place);
   return station?.name ?? normalizePlace(place.replace(/^près (?:du|de)\s+/iu, '').replace(/,\s*à\s+/giu, ', '));
 }

@@ -37,6 +37,18 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it('keeps origin clarification available after a reply interrupts GPS resolution', async () => {
+    const lookup = deferred<string | undefined>();
+    const s = setup({ understand: async () => ({ trip: { destination: 'CDG' }, missing: ['origin'] }), resolveOrigin: () => lookup.promise,
+      converse: async () => ({ intent: 'provide_info', confidence: 1, reply: 'Where should I pick you up?', trip_patch: { destination: 'Bercy' } }) });
+    s.hello('en', { latitude: 48.86, longitude: 2.35 });
+    s.session.handle({ type: 'final_transcript', text: 'Take me to CDG' }); await flush();
+    const before = s.events.length;
+    await s.choose('Actually, Bercy');
+    lookup.resolve('Châtelet'); await flush();
+    expect(s.session.stage).toBe('CLARIFY');
+    expect(s.events.slice(before)).toContainEqual({ type: 'clarify', question: 'Where should I pick you up?' });
+  });
   it('speaks a next step when fare resolution fails mid-plan', async () => {
     const s = setup({ resolveFare: async () => { throw new Error('unavailable'); } });
     await s.start();

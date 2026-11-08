@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
-import { estimateTaxi, geocodeTaxiPlace, resolveTaxiQuote, parisPickupTime } from './taxi.js';
+import { estimateTaxi, geocodeTaxiPlace, resolveTaxiQuote, parisPickupTime, taxiPlacesEquivalent } from './taxi.js';
 const at = '2026-11-09T11:00:00Z';
 describe('shared regulated taxi estimates', () => {
+  it('matches address aliases, postal variants and nearby coordinates without merging distant or unknown stops', () => {
+    const point = { latitude: 48.8584, longitude: 2.2945 };
+    expect(taxiPlacesEquivalent('Gare du Nord', 'Gare du Nord, 18 Rue de Dunkerque, Paris')).toBe(true);
+    expect(taxiPlacesEquivalent('12 Rue de la Paix, Paris', '12 Rue de la Paix, 75002 Paris')).toBe(true);
+    expect(taxiPlacesEquivalent('Tour Eiffel', 'Tour Eiffel, 5 Avenue Anatole France, Paris', point, { ...point, latitude: 48.8585 })).toBe(true);
+    expect(taxiPlacesEquivalent('Tour Eiffel', 'Tour Eiffel Restaurant, Nice', point, { latitude: 43.7, longitude: 7.26 })).toBe(false);
+    expect(taxiPlacesEquivalent('Tour Eiffel', 'Unknown')).toBe(false);
+    expect(taxiPlacesEquivalent('Tour Eiffel', 'Unknown', point, { latitude: NaN, longitude: 2 })).toBe(false);
+  });
   it('resolves summer/winter pickup clocks and rejects missing, invalid or ambiguous times', () => {
     expect(parisPickupTime('2026-11-09', '18:00')?.toISOString()).toBe('2026-11-09T17:00:00.000Z');
     expect(parisPickupTime('2027-07-01', '18:00')?.toISOString()).toBe('2027-07-01T16:00:00.000Z');

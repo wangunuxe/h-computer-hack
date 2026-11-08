@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { TaxiQuoteSchema, resolveTaxiQuote, taxiPlaceKey, parisPickupTime } from '@voila/shared';
+import { TaxiQuoteSchema, resolveTaxiQuote, taxiPlacesEquivalent, parisPickupTime, type TaxiPoint } from '@voila/shared';
 import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -87,9 +87,13 @@ export function createApp({
     if (draft.orderId) return c.text('An order already exists for this draft', 409);
     const pickup = parisPickupTime(r.date, r.time);
     if (!pickup) return c.html(routePage(draft, 'Invalid or ambiguous Paris pickup time.', values), 400);
-    const quoted = draft.fare && taxiPlaceKey(draft.fare.origin) === taxiPlaceKey(r.pickup) && taxiPlaceKey(draft.fare.destination) === taxiPlaceKey(r.dropoff);
-    if (quoted) draft.fare = { ...draft.fare!, at: pickup.toISOString() };
-    else draft.fare = await resolveTaxiQuote({ origin: r.pickup, destination: r.dropoff, passengers: draft.fare?.passengers ?? Number(draft.info?.passengers ?? 1) }, { now: pickup, fetch: geocodeFetch });
+    const point = (lat: string, lng: string): TaxiPoint | undefined => validCoordinate(lat, 90) && validCoordinate(lng, 180) ? { latitude: Number(lat), longitude: Number(lng) } : undefined;
+    const sameStops = (from?: TaxiPoint, to?: TaxiPoint) => draft.fare && taxiPlacesEquivalent(draft.fare.origin, r.pickup, draft.fare.from, from) && taxiPlacesEquivalent(draft.fare.destination, r.dropoff, draft.fare.to, to);
+    if (sameStops(point(r.pickup_lat, r.pickup_lng), point(r.dropoff_lat, r.dropoff_lng))) draft.fare = { ...draft.fare!, at: pickup.toISOString() };
+    else {
+      const resolved = await resolveTaxiQuote({ origin: r.pickup, destination: r.dropoff, passengers: draft.fare?.passengers ?? Number(draft.info?.passengers ?? 1) }, { now: pickup, fetch: geocodeFetch });
+      draft.fare = sameStops(resolved.from, resolved.to) ? { ...draft.fare!, at: pickup.toISOString() } : resolved;
+    }
     draft.route = r; draft.vehicle = undefined; draft.info = undefined;
     return c.redirect(`/fr/reservation/${draft.id}/vehicle`, 303);
   });

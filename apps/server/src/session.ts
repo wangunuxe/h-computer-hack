@@ -231,9 +231,13 @@ export class VoilaSession {
       const safe = JSON.stringify(event, (_key, value: unknown) => {
         if (typeof value !== 'string') return value;
         let text = redactGpsCoordinates(value);
+        const unit = String.raw`(?:[€$£¥%°]|EUR|USD|GBP|CHF|CAD|euros?|dollars?|pounds?|km|cm|mm|m|mètres?|metres?|meters?|kilomètres?|kilometres?|kilometers?|kg|g|ml|l|h|min|minutes?|s|sec|secondes?|seconds?)(?!\p{L})`;
         for (const gps of [this.pendingGps, this.pickupGps]) if (gps) for (const coordinate of [gps.latitude, gps.longitude]) {
-          const forms = [String(coordinate), ...[2, 3, 4, 5, 6, 7, 8].map((digits) => coordinate.toFixed(digits))].filter((form) => form.includes('.')).flatMap((form) => [form, form.replace('.', ',')]);
-          for (const form of [...new Set(forms)].sort((a, b) => b.length - a.length)) text = text.replace(new RegExp(`(?<![\\d.,])${form.replace(/[.,]/g, '\\$&')}(?!\\d|[.,]\\d)`, 'g'), '[position]');
+          const forms = [String(coordinate), ...[4, 5, 6, 7, 8].map((digits) => coordinate.toFixed(digits))].filter((form) => /\.\d{4,}$/.test(form)).flatMap((form) => [form, form.replace('.', ',')]);
+          for (const form of [...new Set(forms)].sort((a, b) => b.length - a.length)) text = text.replace(new RegExp(`(?<![\\d.,])${form.replace(/[.,]/g, '\\$&')}(?!\\d|[.,]\\d)`, 'g'), (match, offset: number, source: string) => {
+            const before = source.slice(0, offset), after = source.slice(offset + match.length);
+            return new RegExp(`(?<!\\p{L})${unit}\\s*$`, 'iu').test(before) || new RegExp(`^\\s*${unit}`, 'iu').test(after) ? match : '[position]';
+          });
         }
         return text;
       });

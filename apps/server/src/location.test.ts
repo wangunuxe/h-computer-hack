@@ -122,6 +122,18 @@ describe('consented phone origins', () => {
     expect(s.events).toContainEqual({ type: 'feed', kind: 'agent', text: 'Pickup latitude [position] and longitude [position]. Latitude [position].' });
     expect(JSON.stringify(s.events)).not.toMatch(/48[.,]91|2[.,]20/);
   });
+  it('preserves fares, short single decimals and unit-bearing values while hiding coordinate pairs', async () => {
+    const fare = 'Tarif 48,91 € / €48.91 / EUR 48.9100 / 48,9100 euros. Distance 48.9100 km / km 48,9100. Valeurs 48.91 et 48,910.';
+    const pairs = 'GPS 48.91, 2.20; GPS 48,9100 2,2000; latitude 48 point 9100 longitude 2 point 2000';
+    const runBooking = vi.fn<SessionPorts['runBooking']>(async (input) => {
+      input.onProgress(fare); input.onProgress(pairs); return new Promise<never>(() => {});
+    });
+    const s = setup(null, { runBooking }); await flush(); await s.result(far); await s.reply('oui'); await s.reply('taxi');
+    expect(s.events).toContainEqual({ type: 'feed', kind: 'agent', text: fare });
+    const progress = s.events.filter((event) => event.type === 'feed' && event.kind === 'agent').at(-1)!;
+    expect(JSON.stringify(progress)).not.toMatch(/48[.,]91|2[.,]20|point 9100|point 2000/);
+    expect(JSON.stringify(progress)).toContain('[position GPS]');
+  });
   it('removes coordinates from the actual Gemini and Linkup payloads, including bare decimal pairs', async () => {
     const origin = 'Position GPS (48.91000, 2.20000)', generateContent = vi.fn(async () => ({ text: JSON.stringify({ trip: {}, intent: 'question', confidence: .9, reply: 'Quel est votre départ ?' }) }));
     await understand({ transcript: `Je pars de ${origin}`, previous: { origin }, profile, now: new Date() }, { models: { generateContent } });

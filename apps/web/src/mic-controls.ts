@@ -5,43 +5,8 @@ export function micControlState(state: { connected: boolean; failed: boolean; ac
   return { caption, label: !state.connected && state.failed ? labels.connectionRetry : state.active ? labels.stopListening : labels.tap, disabled: state.connected && state.releasing, pressed: state.active };
 }
 export function bindMicControls(button: HTMLButtonElement, dock: HTMLElement, controls: {
-  active: () => boolean; start: (reason: string) => void; release: (reason: string) => void;
+  active: () => boolean; start: () => void; release: () => void;
 }) {
-  let pointer: { id: number; x: number; y: number; moved: boolean } | undefined;
-  let suppressClickUntil = 0;
-  let suppressNextClick = false;
-  let toggleBlockedUntil = 0;
-  let stopBlockedUntil = 0;
-  const toggle = (fromPointer = false) => {
-    if (button.disabled || Date.now() < toggleBlockedUntil) { micDebug('activation.ignored', { reason: 'disabled-or-pointer-guard' }); return; }
-    if (controls.active() && Date.now() < stopBlockedUntil) { micDebug('activation.ignored', { reason: 'start-guard' }); return; }
-    if (fromPointer) toggleBlockedUntil = Date.now() + 700;
-    const reason = fromPointer ? 'pointerup' : 'click';
-    if (controls.active()) controls.release(reason);
-    else { stopBlockedUntil = Date.now() + 600; controls.start(reason); }
-  };
   dock.oncontextmenu = (event) => event.preventDefault();
-  button.onpointerdown = (event) => {
-    if (button.disabled || !event.isPrimary || event.button !== 0 || !['touch', 'pen'].includes(event.pointerType)) return;
-    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
-  };
-  button.onpointermove = (event) => {
-    if (pointer?.id === event.pointerId && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 12) pointer.moved = true;
-  };
-  button.onpointercancel = button.onlostpointercapture = (event) => {
-    if (pointer && pointer.id === event.pointerId) { pointer = undefined; suppressClickUntil = Date.now() + 700; suppressNextClick = true; }
-  };
-  button.onpointerup = (event) => {
-    const down = pointer;
-    if (!down || down.id !== event.pointerId) return;
-    pointer = undefined; suppressClickUntil = Date.now() + 700; suppressNextClick = true;
-    if (down.moved || Math.hypot(event.clientX - down.x, event.clientY - down.y) > 12) return;
-    const bounds = button.getBoundingClientRect();
-    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) return;
-    event.preventDefault(); toggle(true);
-  };
-  button.onclick = () => {
-    if (suppressNextClick) { suppressNextClick = false; if (Date.now() < suppressClickUntil) return; }
-    toggle();
-  };
+  button.onclick = () => { micDebug('activation', { reason: 'click' }); if (controls.active()) controls.release(); else controls.start(); };
 }

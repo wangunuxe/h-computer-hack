@@ -44,60 +44,36 @@ afterEach(() => {
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 describe('phone client lifecycle and controls', () => {
-  it('keeps a slow queued start armed without misleading retry advice or errors', async () => {
-    const vibrate = vi.fn(); vi.stubGlobal('navigator', { language: 'en', vibrate });
-    const socket = await boot(false), talk = document.getElementById('talk')!;
+  it.each(['fr', 'en'] as const)('retries an early activation without queuing capture in %s', async (language) => {
+    const vibrate = vi.fn(); vi.stubGlobal('navigator', { language, vibrate });
+    const stale = await boot(false), talk = document.getElementById('talk')!;
     mocks.enqueue.mockClear(); talk.click();
-    expect(vibrate).toHaveBeenCalledWith(35);
-    expect(Socket.instances).toHaveLength(1);
+    expect(vibrate).not.toHaveBeenCalled();
+    expect(stale.readyState).toBe(3); expect(Socket.instances).toHaveLength(2);
     expect(mocks.recorders).toHaveLength(0);
-    expect(talk.getAttribute('aria-pressed')).toBe('true');
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(mocks.enqueue.mock.calls.map(([text]) => text)).toEqual([labels.en.welcome]);
-    expect(document.getElementById('errors')!.textContent).toBe('');
-    expect(talk.getAttribute('aria-pressed')).toBe('true');
-    socket.open();
-    expect(mocks.recorders).toHaveLength(1);
-    expect(document.getElementById('errors')!.textContent).toBe('');
-    expect(talk.getAttribute('aria-label')).toBe(labels.en.stopListening);
-    expect(mocks.enqueue.mock.calls.some(([text]) => [labels.en.connecting, labels.en.ready, labels.en.listening].includes(text))).toBe(false);
-  });
-  it.each(['fr', 'en'] as const)('leaves no stale connection error after cancelling a slow queued start in %s', async (language) => {
-    vi.spyOn(navigator, 'language', 'get').mockReturnValue(language);
-    const socket = await boot(false), talk = document.getElementById('talk')!;
-    talk.click(); mocks.enqueue.mockClear();
-    await vi.advanceTimersByTimeAsync(2000);
-    talk.click();
     expect(talk.getAttribute('aria-pressed')).toBe('false');
-    expect(document.getElementById('errors')!.textContent).toBe('');
+    await vi.advanceTimersByTimeAsync(2000);
     expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(document.getElementById('errors')!.textContent).toBe('');
+    const socket = Socket.instances[1]!;
     socket.open();
     expect(mocks.recorders).toHaveLength(0);
-    expect(document.body.dataset.connected).toBe('true');
     expect(document.getElementById('errors')!.textContent).toBe('');
+    talk.click(); expect(mocks.recorders).toHaveLength(1);
+    expect(talk.getAttribute('aria-label')).toBe(labels[language].stopListening);
+    expect(vibrate).toHaveBeenCalledWith(35);
   });
-  it('queues a start before credentials exist and starts after session creation and connection', async () => {
+  it('retries before credentials exist without starting when the replacement session connects', async () => {
     let resolve!: (response: Response) => void;
-    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((done) => { resolve = done; })));
+    vi.stubGlobal('fetch', vi.fn().mockReturnValueOnce(new Promise<Response>((done) => { resolve = done; })).mockImplementation(async () => new Response(JSON.stringify({ id: 'replacement', resume_token: 'token' }))));
     await import('./main.js'); await flush();
     document.getElementById('talk')!.click();
-    expect(fetch).toHaveBeenCalledTimes(1); expect(mocks.recorders).toHaveLength(0);
+    expect(fetch).toHaveBeenCalledTimes(2); expect(mocks.recorders).toHaveLength(0);
     resolve(new Response(JSON.stringify({ id: 'issued', resume_token: 'token' }))); await flush();
-    Socket.instances[0]!.open(); expect(mocks.recorders).toHaveLength(1);
-    mocks.enqueue.mockClear(); await vi.advanceTimersByTimeAsync(1000);
-    expect(mocks.enqueue).not.toHaveBeenCalledWith(labels.en.connectionRetry);
-  });
-  it.each(['tap', 'background', 'pagehide', 'failure'])('cancels a queued microphone start on %s', async (kind) => {
-    const socket = await boot(false), talk = document.getElementById('talk')!;
-    talk.click(); mocks.enqueue.mockClear();
-    if (kind === 'tap') { await vi.advanceTimersByTimeAsync(600); talk.click(); }
-    if (kind === 'background') { vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(1000); }
-    if (kind === 'pagehide') window.dispatchEvent(new Event('pagehide'));
-    if (kind === 'failure') socket.close();
-    expect(talk.getAttribute('aria-pressed')).toBe('false');
-    socket.open(); await vi.advanceTimersByTimeAsync(1000);
+    expect(Socket.instances).toHaveLength(1); expect(Socket.instances[0]!.url).toContain('/replacement?');
+    Socket.instances[0]!.open(); await vi.advanceTimersByTimeAsync(2000);
     expect(mocks.recorders).toHaveLength(0);
-    expect(mocks.enqueue.mock.calls.filter(([text]) => text === labels.en.connectionRetry)).toHaveLength(kind === 'failure' ? 1 : 0);
+    document.getElementById('talk')!.click(); expect(mocks.recorders).toHaveLength(1);
   });
   it('preserves explicit connection retry after failure rather than arming a stale start', async () => {
     const socket = await boot(false); socket.close();
@@ -107,18 +83,20 @@ describe('phone client lifecycle and controls', () => {
     Socket.instances[1]!.open(); expect(mocks.recorders).toHaveLength(0);
     expect(document.getElementById('errors')!.textContent).toBe('');
   });
-  it.each([0, 1])('handles touch pointer activation plus click detail %s without toggling twice', async (detail) => {
+  it('ignores touch/pen pointer sequences and toggles only on click', async () => {
     await boot(); const talk = document.getElementById('talk')!;
-    vi.spyOn(talk, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
-    const tap = () => {
-      for (const type of ['pointerdown', 'pointerup']) talk.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: 'touch', pointerId: 1, isPrimary: true, button: 0, clientX: 40, clientY: 40 }));
+    for (const pointerType of ['touch', 'pen']) {
+      for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'lostpointercapture']) talk.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType, pointerId: 1, isPrimary: true, button: 0, clientX: 40, clientY: 40 }));
+      expect(mocks.recorders).toHaveLength(0);
+    }
+    for (const detail of [0, 1]) {
       talk.dispatchEvent(new MouseEvent('click', { bubbles: true, detail }));
-    };
-    tap(); expect(mocks.recorders).toHaveLength(1);
-    expect(mocks.recorders[0]!.stop).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(700);
-    tap(); expect(mocks.recorders[0]!.stop).toHaveBeenCalledOnce();
-    expect(mocks.recorders).toHaveLength(1);
+      expect(mocks.recorders).toHaveLength(detail + 1);
+      const recorder = mocks.recorders[detail]!;
+      expect(recorder.stop).not.toHaveBeenCalled();
+      talk.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+      expect(recorder.stop).toHaveBeenCalledOnce(); recorder.cancel();
+    }
   });
   it.each(['background', 'socket close', 'pagehide'])('ignores focus/blur but still cancels recording on %s', async (kind) => {
     const socket = await boot(), talk = document.getElementById('talk')!;
@@ -132,8 +110,8 @@ describe('phone client lifecycle and controls', () => {
     expect(cancel).toHaveBeenCalledOnce(); expect(recorder.stop).not.toHaveBeenCalled();
     expect(talk.getAttribute('aria-pressed')).toBe('false');
   });
-  it.each([true, false])('preserves active or queued capture across a transient hidden event, connected=%s', async (connected) => {
-    const socket = await boot(connected), talk = document.getElementById('talk')!;
+  it('preserves active capture across a transient hidden event', async () => {
+    await boot(); const talk = document.getElementById('talk')!;
     talk.click();
     const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(999);
@@ -141,7 +119,6 @@ describe('phone client lifecycle and controls', () => {
     visibility.mockReturnValue('visible'); document.dispatchEvent(new Event('visibilitychange'));
     await vi.advanceTimersByTimeAsync(1001);
     expect(talk.getAttribute('aria-pressed')).toBe('true'); expect(Socket.instances).toHaveLength(1);
-    if (!connected) socket.open();
     expect(mocks.recorders).toHaveLength(1); expect(mocks.recorders[0]!.stop).not.toHaveBeenCalled();
   });
   it('cancels and holds speech before unlocking a first recording, without resuming the queue', async () => {
@@ -168,7 +145,6 @@ describe('phone client lifecycle and controls', () => {
     for (const type of ['pointerup', 'touchend', 'pointercancel', 'touchcancel']) talk.dispatchEvent(new Event(type, { bubbles: true }));
     expect(recorder.stop).not.toHaveBeenCalled();
     expect(mocks.recorders).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(600);
     talk.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
     expect(recorder.stop).toHaveBeenCalledOnce();
     expect(talk.disabled).toBe(true);

@@ -22,12 +22,10 @@ Three-minute transcripts fit the existing shared text schema and 64 KiB WebSocke
 limit; trip extraction allows 20 seconds for Gemini.
 The circular microphone defaults to tap-to-toggle: activate once to start and
 again to finish, including with VoiceOver/TalkBack or keyboard activation.
-Each touch/pen tap activates on pointer release, with the following generated
-click suppressed; mouse, keyboard and screen-reader clicks remain supported.
-The next click within 700 ms of touch/pen release or cancellation is consumed,
-regardless of `detail`; pointer activation also guards all toggles for 700 ms.
-All activation paths ignore a stop within 600 ms of starting, including click-only
-keyboard/screen-reader bursts. Speech is cancelled and held before gesture unlock;
+The button toggles only on click/activation, including keyboard and screen-reader
+activation. Pointer/touch press, release and cancellation do not toggle it.
+Dock touch actions, selection and callouts remain suppressed.
+Speech is cancelled and held before gesture unlock;
 a silent synthesis primer unlocks playback, with the question deferred until capture ends.
 Transient backgrounding shorter than one second preserves capture; sustained hiding
 or page navigation cancels it. Start/stop earcons still use a separate AudioContext.
@@ -37,8 +35,8 @@ audio, socket and synthesis lifecycle metadata, never transcripts, URLs or crede
 The setting and last 80 lines persist in this tab's session storage; `?debug=0` disables it.
 The first tap starts recording and the next tap finishes; holding is unnecessary.
 There is no hold-to-talk mode. Enter and Space use the native button activation.
-An early tap during connection gives a cue and queues recording until connected;
-tap again to cancel. Only a failed connection reads the existing retry guidance.
+An early tap while disconnected retries the connection without queuing a recording.
+Once connected, tap again to start capture synchronously in that gesture.
 Client-only `tts_enabled` preferences persist beside the profile;
 they are stripped from the wire profile. Choose “Screen reader only” to disable
 all Voilà speech synthesis and use the live caption card instead. Screen-reader

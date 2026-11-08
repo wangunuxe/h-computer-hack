@@ -1,4 +1,4 @@
-# Paris Airport Shuttle — mock site manual
+# Taxi Paris Réservation — mock taxi site manual
 
 Simulation only. Start at `/fr/reservation/` (default real mode).
 For easy mode start a new draft at `/fr/reservation/?difficulty=easy`.
@@ -7,22 +7,23 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
 
 ## Field order
 
-1. **Step 1 — Route**: Pickup address; Dropoff address; Pickup date; Pickup time;
-   **Continue to vehicles**. URL: `/fr/reservation/<draft-id>/route`.
-2. **Step 2 — Vehicle**: Vehicle class; **Continue to passenger information**.
+1. **Step 1 — Taxi route**: Pickup address; Dropoff address; Pickup date; Pickup time;
+   **Choose your taxi**. Any address, station or landmark is supported in either field.
+   URL: `/fr/reservation/<draft-id>/route`.
+2. **Step 2 — Taxi class**: Taxi class; **Continue to taxi passengers**.
    URL: `/fr/reservation/<draft-id>/vehicle`.
-3. **Step 3 — Passenger information**: Full name; Email; Telephone; Passengers;
-   Luggage; collapsed **Additional information / Notes**; inside it the
-   **Notes for the driver** textarea; **Create booking and continue to payment**.
+3. **Step 3 — Taxi passengers**: Full name; Email; Telephone; Passengers;
+   Luggage; collapsed **Guide dog / assistance animal and driver notes**; inside it the
+   **Notes for the taxi driver** textarea; **Book taxi and continue to payment**.
    URL: `/fr/reservation/<draft-id>/info`. Obtain user confirmation of route,
    date, time, price and dog note BEFORE clicking the final button.
    Call `confirm_with_user` with `summary` and the observed `pickup_date`
    (YYYY-MM-DD), `pickup_time` (HH:MM), `total_price` (number), and `currency`
-   (`EUR`). Use the transfer pickup date/time in Europe/Paris and the transfer
+   (`EUR`). Use the taxi pickup date/time in Europe/Paris and the taxi
    total, never flight details or airfare. Omit any field you cannot read reliably.
-4. **Step 4 — Payment**: summary (reference, pickup, dropoff, pickup date/time,
+4. **Step 4 — Taxi payment**: merchant Taxi Paris Réservation; summary (reference, pickup, dropoff, pickup date/time,
    vehicle, price, passenger contacts, passenger/luggage counts, operator phone,
-   status, notes), countdown, **Pay via Credit Card**, **View booking confirmation**.
+   status, notes), countdown, **Pay for taxi by card**, **View taxi booking confirmation**.
    No further booking inputs.
 
 ## Control quirks
@@ -69,10 +70,10 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
   Select a later time (the default 00:00 is usually already past) or a future date.
 - Time, vehicle, passengers and luggage are native selects. Use full option text
   below. Time defaults to 00:00; set it explicitly. Times are Paris local time.
-- Passenger count must fit the selected vehicle: Sedan 3, Estate 4, Minivan 8.
+- Passenger count must fit the selected taxi: Berline taxi 3, Taxi break confort 4, Taxi van 8.
   Otherwise step 3 stays open with “Selected vehicle allows at most N passengers.”
   Reduce the count or return to the vehicle step and choose a larger vehicle.
-- Luggage must also fit: Sedan 2 suitcases, Estate 4, Minivan 8. An excess
+- Luggage must also fit: Berline taxi 2 suitcases, Taxi break confort 4, Taxi van 8. An excess
   re-renders step 3 with “Selected vehicle allows at most N suitcases.” Reduce
   luggage or return to the vehicle step to choose a larger vehicle.
 - Notes are collapsed on page load; click the summary to reveal the textarea.
@@ -178,10 +179,10 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
 - 23:30
 - 23:45
 
-### Vehicle class
-- Private Sedan — up to 3 passengers, 2 suitcases
-- Comfort Estate — up to 4 passengers, 4 suitcases
-- Private Minivan — up to 8 passengers, 8 suitcases
+### Taxi class
+- Berline taxi — up to 3 passengers, 2 suitcases
+- Taxi break confort — up to 4 passengers, 4 suitcases
+- Taxi van — up to 8 passengers, 8 suitcases
 
 Prices are route-based estimates displayed beside each class, not fixed class prices. Preserve the starting URL's quote parameter: it holds Voilà's route and coordinates on the server. Pickup date/time or passenger changes can update the fare. Read the displayed amount before requesting approval; stop if the quote expires.
 
@@ -206,21 +207,21 @@ Prices are route-based estimates displayed beside each class, not fixed class pr
 - 7 suitcases — standard checked luggage (max 23 kg each)
 - 8 suitcases — standard checked luggage (max 23 kg each)
 
-These are the only selects; no separate transfer-type select exists.
+These are the only selects; no separate trip-type select exists.
 
-## Guide-dog note field
+## Guide-dog / assistance-animal note field
 
-On step 3 CLICK **Additional information / Notes**, then enter the guide-dog
-request in **Notes for the driver** (textarea). Suggested French:
+On step 3 CLICK **Guide dog / assistance animal and driver notes**, then enter the guide-dog
+or assistance-animal request in **Notes for the taxi driver** (textarea). Suggested French:
 “Je voyage avec un chien guide. Merci de confirmer son acceptation.”
 There is no dedicated dog/accessibility field. The note does NOT establish
 merchant acceptance; report unknown until explicitly confirmed.
 
 ## Payment-page signature
 
-Heading **Step 4 — Payment**, reference **PAS-...**, status **UNPAID**,
+Heading **Step 4 — Taxi payment**, merchant **Taxi Paris Réservation**, reference **PAS-...**, status **UNPAID**,
 “Your order has already been created”, countdown starting at **2** seconds,
-and **Pay via Credit Card**. URL: `/fr/reservation/payment/<order-id>`.
+and **Pay for taxi by card**. URL: `/fr/reservation/payment/<order-id>`.
 An unpaid order already exists. Copy the reference/order id for handoff.
 
 After two seconds the form automatically POSTs `/checkout/<order-id>`; the
@@ -230,7 +231,7 @@ The stub says **FAKE PAYMENT — LOCAL STUB** and cannot take payment.
 
 Cancelling Stripe returns to the payment URL with `?cancelled=1`. It shows
 **Payment cancelled. Your order remains unpaid.** There is NO countdown or
-automatic redirect on this return; **Pay via Credit Card** remains a manual retry.
+automatic redirect on this return; **Pay for taxi by card** remains a manual retry.
 
 An already-paid order shows **Payment already received. No further payment is
 required.** instead of the form/countdown. A completed Stripe session returns to

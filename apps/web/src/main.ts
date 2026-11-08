@@ -1,6 +1,6 @@
 import { ServerEventSchema, type WebEvent } from '@voila/shared';
 import { phoneHello } from './pairing.js';
-import { canStop, initialState, optionEvent, reduce, transcriptEvent, type Stage } from './state.js';
+import { canStop, initialState, optionEvent, paymentCommand, reduce, transcriptEvent, type Stage } from './state.js';
 import { BrowserSpeech, SpeechQueue } from './speech.js';
 import { Recorder, type Credentials } from './recorder.js';
 import { clientProfile, deviceLanguage } from './preferences.js';
@@ -60,7 +60,13 @@ function send(event: WebEvent) {
   if (socket?.readyState !== WebSocket.OPEN) { announce(t().connectionRetry, true); return false; }
   socket.send(JSON.stringify(event)); return true;
 }
+function openPayment(url: string) {
+  try { if (!['https:', 'http:'].includes(new URL(url).protocol)) return false; } catch { return false; }
+  if (credentials) sessionStorage.save(credentials, helloSent);
+  announce(t().openingPayment); setTimeout(() => location.assign(url), 1500); return true;
+}
 function sendTranscript(text: string) {
+  if (['HANDOFF', 'AWAIT_PAYMENT'].includes(state.stage) && state.payment && paymentCommand(text) && openPayment(state.payment.url)) return;
   const event = transcriptEvent(state.stage, text);
   if (event?.type === 'final_transcript' && state.stage === 'DONE') {
     sessionStorage.clear(); queuedTranscript = text;

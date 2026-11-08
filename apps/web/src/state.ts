@@ -27,6 +27,10 @@ export function transcriptEvent(stage: Stage, text: string): WebEvent | undefine
   const trimmed = text.trim();
   return trimmed ? { type: ['LISTEN', 'DONE'].includes(stage) ? 'final_transcript' : 'user_reply', text: trimmed } : undefined;
 }
+export function paymentCommand(text: string): boolean {
+  const value = text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
+  return /^(?:(?:oui|yes|ok|okay|d accord) )?(?:(?:je veux |je voudrais |i want to |i d like to |let me |go to )?(?:payer|paye|paie|paiement|pay|payment)|(?:ouvre|ouvrir|ouvrez|open) (?:le |la page de |the )?(?:paiement|payment)(?: page)?)(?: (?:maintenant|now|s il vous plait|please|merci|thanks))*$/.test(value);
+}
 export function optionEvent(options: State['options'], id: string): WebEvent | undefined {
   const index = options.findIndex((option) => option.id === id);
   return index < 0 ? undefined : { type: 'user_reply', text: String(index + 1) };

@@ -106,7 +106,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
       if (trip.guide_dog) parts.push(fr ? 'avec votre chien guide' : 'with your guide dog');
       return `${parts.join(', ')}. ${fr ? 'Je confirme ?' : 'Shall I confirm?'}`;
     },
-    'payment-handoff': ({ merchant, amount }) => fr ? `${money(amount)} chez ${merchant}. Ouvrez le paiement sur votre téléphone.` : `${money(amount)} with ${merchant}. Open payment on your phone.`,
+    'payment-handoff': ({ merchant, amount }) => fr ? `${money(amount)} chez ${merchant}. Dites « payer » pour ouvrir la page de paiement, ou touchez le bouton Payer.` : `${money(amount)} with ${merchant}. Say “pay” to open the payment page, or tap the Pay button.`,
     'booking-done': ({ ref }) => fr ? `Réservation ${ref}. Voici votre fiche.` : `Booking ${ref}. Here are your details.`,
     stopped: () => fr ? 'J’arrête. Aucune autre action.' : 'Stopped. No further actions.',
     'booking-failed': ({ reason }) => `${fr ? 'Cette tentative de réservation a échoué. Voulez-vous réessayer le taxi ?' : 'This booking attempt failed. Would you like to retry the taxi?'}${reason ? ` ${reason}` : ''}`,

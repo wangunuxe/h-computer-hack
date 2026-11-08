@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initialState, optionEvent, reduce, transcriptEvent, type Stage } from './state.js';
+import { initialState, optionEvent, paymentCommand, reduce, transcriptEvent, type Stage } from './state.js';
 describe('event state and routing', () => {
   it('exposes yes/no alternatives for GPS, profile and booking confirmations only while pending', () => {
     let state = reduce(initialState(), { type: 'clarify', question: 'Est-ce votre départ ?', yes_no: true });
@@ -50,4 +50,6 @@ describe('event state and routing', () => {
     state = reduce(state, { type: 'stage', stage: 'UNDERSTAND' });
     expect(state).toEqual({ ...initialState(), stage: 'UNDERSTAND' });
   });
+  it.each(['Payer.', 'Pay', 'Pay now, please.', 'Oui, payer.', 'Je veux payer', 'Ouvre le paiement', 'Open the payment page', 'Paiement'])('recognizes the spoken payment command %s', (text) => expect(paymentCommand(text)).toBe(true));
+  it.each(['', 'Combien je dois payer ?', 'Who do I pay?', 'non', 'Où est mon taxi ?', 'I paid'])('does not treat %s as a payment command', (text) => expect(paymentCommand(text)).toBe(false));
 });

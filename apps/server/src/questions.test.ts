@@ -3,6 +3,13 @@ import { fallbackQuestion } from './questions.js';
 import { presetOptions } from './options.js';
 
 describe('bilingual fallback questions', () => {
+  it.each(['fr', 'en'])('names the final booking approval buttons correctly in %s', (language) => {
+    for (const variant of [0, 1, 2]) {
+      const text = fallbackQuestion({ stage: 'CONFIRM', language, missing: [], options: [], now: new Date(), attempt: 2, variant });
+      expect(text).toContain(language === 'fr' ? 'Confirmer' : 'Confirm');
+      expect(text).toContain(language === 'fr' ? 'Annuler' : 'Cancel');
+    }
+  });
   it.each(['fr', 'en'])('does not offer nonexistent choices in %s', (language) => {
     const text = fallbackQuestion({ stage: 'CHOOSE', language, missing: [], options: [], now: new Date(), attempt: 2 });
     expect(text).toMatch(/modifier|change/); expect(text).not.toContain('1.');

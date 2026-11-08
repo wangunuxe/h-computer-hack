@@ -514,6 +514,7 @@ export class VoilaSession {
       this.ports.logger.error('Trip understanding failed.');
       this.error('Could not understand the trip. Please try again.');
       this.cancel(); this.transition('LISTEN');
+      this.answer(this.language.startsWith('fr') ? 'Je n’ai pas pu préparer le trajet. Veuillez réessayer.' : 'I could not prepare the journey. Please try again.');
     }
   }
   private async execute(id: string, generation: number) {

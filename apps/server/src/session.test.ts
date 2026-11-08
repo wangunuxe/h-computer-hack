@@ -37,6 +37,13 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it('speaks a next step when fare resolution fails mid-plan', async () => {
+    const s = setup({ resolveFare: async () => { throw new Error('unavailable'); } });
+    await s.start();
+    expect(s.session.stage).toBe('LISTEN');
+    const errorIndex = s.events.findIndex((event) => event.type === 'error');
+    expect(s.events.slice(errorIndex + 1)).toContainEqual({ type: 'say', text: expect.stringMatching(/try again|réessayer/i) });
+  });
   it.each(['', 'not json'])('recovers a taxi trip through clarification after malformed Gemini output: %j', async (text) => {
     const client = { models: { generateContent: vi.fn(async () => ({ text })) } };
     const s = setup({ understand: (input) => understand(input, client), converse: async () => ({ intent: 'provide_info', confidence: 1, reply: 'Merci.', trip_patch: { origin: 'La Défense', destination: 'Bercy' } }) });

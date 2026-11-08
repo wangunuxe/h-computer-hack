@@ -589,6 +589,25 @@ dlg.addEventListener('close',()=>{fitS.appendChild(bw.el);fitK(fitS);$('bwBox').
 const demoNames=STAGES.map(s=>s.name);
 const liveNames=['Listen','Understand','Research','Present','Confirm','Execute','Payment','Done'];
 const liveStage={LISTEN:0,UNDERSTAND:1,CLARIFY:1,RESEARCH:2,PRESENT:3,CHOOSE:3,CONFIRM:4,EXECUTE:5,HANDOFF:6,AWAIT_PAYMENT:6,DONE:7};
+const liveCaptions={LISTEN:'Listening to the traveler.',UNDERSTAND:'Gemini is understanding the trip.',CLARIFY:'Asking the traveler for a missing detail.',RESEARCH:'Checking live RATP traffic for the route.',PRESENT:'Reading the route options aloud.',CHOOSE:"Options read aloud — waiting for the traveler's choice.",CONFIRM:'Waiting for the traveler to confirm.',EXECUTE:'H agent is booking on the taxi site.',HANDOFF:"Payment handed to the traveler's phone.",AWAIT_PAYMENT:"Payment handed to the traveler's phone.",DONE:'Booking confirmed.'};
+let liveStarted=0,currentLiveStage='LISTEN';const researchLines=new Set();
+function liveEntry(event){
+  const short=text=>String(text??'').replace(/\s+/g,' ').trim().slice(0,220);
+  switch(event.type){
+    case 'activity':return;
+    case 'feed':return ['feed',short(event.text)];
+    case 'final_transcript':case 'user_reply':return ['transcript','"'+short(event.text)+'"'];
+    case 'options':return ['options',event.items.length?event.items.map(o=>`${o.name} · ${o.price} € · ${o.journey_minutes} min`).join(' / '):'No options available.'];
+    case 'agent_step':return ['agent',short(event.action)];
+    case 'payment_handoff':return ['payment',`handed to phone · ${event.amount} €`];
+    case 'confirm':return ['confirm',short(event.summary)];
+    case 'booking_card':return ['booking',short([event.booking.ref,event.booking.pickup_point].filter(Boolean).join(' · '))];
+    case 'say':return ['say',short(event.text)];
+    case 'clarify':case 'profile_request':return ['question',short(event.question)];
+    case 'error':return ['error',short(event.message)];
+    case 'location_request':return ['location','Asked the phone for its location.'];
+  }
+}
 const demoNote=document.querySelector('.note').textContent;
 const livePage=document.createElement('div');livePage.id='pvLive';livePage.className='pv';livePage.style.cssText='padding:24px;overflow:auto;white-space:pre-wrap;font:30px/1.5 system-ui';bw.page.append(livePage);
 function liveBrowser(text,url='about:blank'){
@@ -597,11 +616,12 @@ function liveBrowser(text,url='about:blank'){
   bw.cur.style.display='none';bw.ring.style.display='none';bw.ban.style.display='none';bw.typ=null;
   $('bwStat').textContent=url==='about:blank'?'Live backend events · private details hidden':url;$('bwStatBig').textContent=$('bwStat').textContent;
 }
-function setLiveStage(stage){si=liveStage[stage]??0;liveSeen.add(si);paintChips();[...chips.children].forEach((chip,i)=>chip.dataset.state=i===si?'active':liveSeen.has(i)?'done':'');capEl.textContent='Live · '+stage;}
+function setLiveStage(stage){currentLiveStage=stage;si=liveStage[stage]??0;liveSeen.add(si);paintChips();[...chips.children].forEach((chip,i)=>chip.dataset.state=i===si?'active':liveSeen.has(i)?'done':'');capEl.textContent=stage==='RESEARCH'&&researchLines.size?'Reading RATP: '+[...researchLines].join(', '):liveCaptions[stage]??'Following the traveler’s trip.';}
 addEventListener('showcase-mode',e=>{
   const paired=e.detail.paired;
   if(paired===liveMode)return;
   liveMode=paired;playing=false;started=false;mazeA=0;focusExec=false;camT={x:0,y:0,z:1};liveSeen.clear();logEl.innerHTML='';
+  liveStarted=Date.now();researchLines.clear();
   bw.el.setAttribute('aria-hidden',String(!paired));
   document.querySelector('.note').textContent=paired?'Live phone session. Contact details and GPS coordinates are hidden. The browser card shows redacted H actions and safe page URLs; sensitive screenshots are not shared. Payment stays on the phone.':demoNote;
   document.querySelector('.hud').hidden=paired;document.querySelector('.controls').hidden=paired;$('legend').hidden=true;
@@ -612,11 +632,12 @@ addEventListener('showcase-mode',e=>{
 addEventListener('showcase-event',e=>{
   if(!liveMode)return;const event=e.detail;
   if(event.type==='stage'){setLiveStage(event.stage);return;}
-  const row=document.createElement('li');row.textContent=new Date().toLocaleTimeString()+' · '+JSON.stringify(event);logEl.append(row);while(logEl.children.length>100)logEl.firstChild.remove();logEl.scrollTop=logEl.scrollHeight;
+  const entry=liveEntry(event);if(entry){const row=document.createElement('li'),stamp=document.createElement('b');const elapsed=Math.floor(Math.max(0,Date.now()-liveStarted)/1000);stamp.textContent=String(Math.floor(elapsed/60)).padStart(2,'0')+':'+String(elapsed%60).padStart(2,'0');row.append(stamp,document.createTextNode('  '+entry[0]+'  '+entry[1]));logEl.append(row);while(logEl.children.length>100)logEl.firstChild.remove();logEl.scrollTop=logEl.scrollHeight;}
+  if(event.type==='feed'&&event.kind==='traffic'){for(const match of event.text.matchAll(/\b(?:RER\s+[A-E]|M\s*\d{1,2}(?:bis)?|(?:ligne|line)\s+\d{1,2}(?:bis)?)\b/gi)){researchLines.add(match[0].replace(/^(?:ligne|line)\s+/i,'M').replace(/^M\s+/i,'M').toUpperCase());}if(currentLiveStage==='RESEARCH'&&researchLines.size)setLiveStage('RESEARCH');}
   if(event.type==='say')say('Voilà',event.text);
   if(event.type==='clarify'||event.type==='profile_request')say('Voilà',event.question);
   if(event.type==='confirm'){say('Voilà',event.summary);liveBrowser('Awaiting traveler approval\n\n'+event.summary);}
-  if(event.type==='options'){capEl.textContent=event.items.length?'Options ready · waiting for the traveler':'No options available';liveBrowser(event.items.length?event.items.map(o=>o.name+'\nEstimated €'+o.price+' · pickup ~'+o.pickup_wait_minutes+' min · journey ~'+o.journey_minutes+' min').join('\n\n'):'No options available.');}
+  if(event.type==='options'){capEl.textContent=event.items.length?liveCaptions.CHOOSE:'No options available';liveBrowser(event.items.length?event.items.map(o=>o.name+'\nEstimated €'+o.price+' · pickup ~'+o.pickup_wait_minutes+' min · journey ~'+o.journey_minutes+' min').join('\n\n'):'No options available.');}
   if(event.type==='agent_step')liveBrowser(event.action,event.url);
   if(event.type==='payment_handoff')liveBrowser(event.merchant+'\n€'+event.amount);
   if(event.type==='booking_card')liveBrowser('Booking\n'+JSON.stringify(event.booking,null,2));

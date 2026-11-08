@@ -209,7 +209,7 @@ function render() {
   actions.replaceChildren();
   if (!collectingProfile && ['PRESENT', 'CHOOSE'].includes(state.stage)) {
     for (const [index, option] of state.options.entries()) {
-      const choice = button('', () => { const event = optionEvent(state.options, option.id); if (event && send(event)) for (const button of actions.querySelectorAll<HTMLButtonElement>('.option-card')) button.disabled = true; });
+      const choice = button('', () => { const event = optionEvent(state.options, option.id); if (event && send(event)) actions.querySelectorAll<HTMLButtonElement>('.option-card').forEach((button) => { button.disabled = true; }); });
       choice.id = 'option-' + option.id; choice.className = 'option-card';
       const name = `${index + 1}. ${optionLabel(option, language)}`;
       const arrival = new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }).format(new Date(Date.now() + (option.pickup_wait_minutes + option.journey_minutes) * 60_000));

@@ -26,7 +26,16 @@ export function relevantLines(origin: string, destination: string): string[] {
   const shared = from.filter((line) => to.includes(line));
   if (shared.length) return shared.slice(0, 3);
   const priority = (line: string) => line.startsWith('RER ') ? 0 : line === 'M1' ? 1 : line === 'M14' ? 2 : line.startsWith('M') ? 3 : 4;
-  return [...new Set([...from, ...to])].sort((a, b) => priority(a) - priority(b)).slice(0, 3);
+  const queue = [...from].sort((a, b) => priority(a) - priority(b)).map((line) => [line]);
+  const visited = new Set(from);
+  while (queue.length) {
+    const path = queue.shift()!, last = path.at(-1)!;
+    if (to.includes(last)) return path;
+    if (path.length >= 3) continue;
+    const connections = [...new Set(stations.filter((station) => station.lines.includes(last)).flatMap((station) => station.lines))].sort((a, b) => priority(a) - priority(b));
+    for (const line of connections) if (!visited.has(line)) { visited.add(line); queue.push([...path, line]); }
+  }
+  return [];
 }
 export function distanceMeters(a: Pick<Station, 'latitude' | 'longitude'>, b: Pick<Station, 'latitude' | 'longitude'>): number {
   const radians = (n: number) => n * Math.PI / 180;

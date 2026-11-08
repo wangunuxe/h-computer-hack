@@ -30,7 +30,7 @@ describe('any-destination ASAP trips', () => {
     expect(assessOptions(options, { ...trip, deadline: now.toISOString() }, now).feasible).toEqual([]);
   });
   it('ranks relevant shared lines first, excludes unrelated RER B, and handles unknown places', () => {
-    expect(relevantLines('La Défense', 'Bercy')).toEqual(['RER A', 'M1', 'M14']);
+    expect(relevantLines('La Défense', 'Bercy')).toEqual(['RER A', 'M14']);
     expect(relevantLines('Gare du Nord', 'CDG')).toEqual(['RER B']);
     expect(relevantLines('Châtelet', 'Gare de Lyon')).toEqual(['RER A', 'RER D', 'M1']);
     expect(relevantLines('Unknown street', 'Unknown destination')).toEqual([]);
@@ -57,14 +57,14 @@ describe('any-destination ASAP trips', () => {
     await vi.waitFor(() => expect(runBooking).toHaveBeenCalledOnce());
     expect(runBooking.mock.calls[0]![0]).toMatchObject({ trip });
   });
-  it('reads the three route lines in parallel and reports one failure as unknown without losing the taxi', async () => {
+  it('reads connected route lines in parallel and reports one failure as unknown without losing the taxi', async () => {
     vi.useFakeTimers(); vi.setSystemTime(now);
     const events: ServerEvent[] = [];
     const resolve: (() => void)[] = [];
     const trafficH = vi.fn(async ({ line }: { line?: string }) => { await new Promise<void>((done) => resolve.push(done)); if (line === 'RER A') throw new Error('unavailable'); return { status: 'normal' as const, mode: 'live' as const, summary: `${line} : trafic normal.`, cause: '', source: trafficPage(line!), recorded: false }; });
     const session = new VoilaSession((event) => events.push(event), { understand: async () => ({ trip, missing: [] }), trafficH, linkup: async () => ({ corroboration: [], extraOptions: [] }) }); sessions.push(session);
     session.handle({ type: 'hello', profile, gps: null, scenario: 'live' }); session.handle({ type: 'final_transcript', text: 'La Défense vers Bercy' });
-    await vi.waitFor(() => expect(trafficH).toHaveBeenCalledTimes(3)); expect(session.stage).toBe('RESEARCH'); resolve.forEach((done) => done());
+    await vi.waitFor(() => expect(trafficH).toHaveBeenCalledTimes(2)); expect(session.stage).toBe('RESEARCH'); resolve.forEach((done) => done());
     await vi.waitFor(() => expect(session.stage).toBe('CHOOSE'));
     expect(events).toContainEqual({ type: 'say', text: 'RER A : Je n’ai pas pu lire le trafic actuel. Son état est inconnu.' });
     expect(JSON.stringify(events.filter((event) => event.type === 'say' || event.type === 'options'))).not.toMatch(/RER B|Gare du Nord|CDG/);

@@ -159,7 +159,7 @@ dialog#bwDlg::backdrop{background:rgba(60,56,100,.28);-webkit-backdrop-filter:bl
     <div>
       <h1>Voilà <span>agent map</span></h1>
       <p class="sub" id="showcase-status" role="status">Scan with the phone · connecting…</p>
-      <div id="pairing"><canvas id="pairing-qr" aria-label="Scan to pair your phone"></canvas><p>Scan with the phone<br><strong id="pairing-code"></strong></p></div>
+      <div id="pairing"><canvas id="pairing-qr" aria-label="Scan to pair your phone"></canvas><div><p>Scan with the phone<br><strong id="pairing-code"></strong></p><p id="pairing-demo-note">Demo: the phone is the traveler’s frontend; this screen shows the backend agent live.<br>Real use needs only a phone, no computer. The demonstrator scans the QR.</p></div></div>
       <p class="sub" style="font-size:12px;margin-top:8px"><a id="phone-client-link" href="/?client=phone" style="color:inherit">Open phone client</a> · On your phone: <span id="phone-client-url"></span></p>
     </div>
     <nav class="chips" id="chips" aria-label="Stages"></nav>
@@ -654,7 +654,7 @@ togglePlay(true);
 })();
 </script>
 <style>
-#pairing{display:flex;align-items:center;gap:16px;margin-top:12px}#pairing[hidden]{display:none}#pairing-qr{width:116px!important;height:116px!important;border:8px solid white;border-radius:12px}#pairing-code{font:700 24px var(--mono);letter-spacing:.2em}[hidden]{display:none!important}#pvLive{background:#fafafd;color:#30354f}.bwstat{white-space:normal;overflow-wrap:anywhere}
+#pairing{display:flex;align-items:center;gap:16px;margin-top:12px}#pairing[hidden]{display:none}#pairing-qr{width:116px!important;height:116px!important;border:8px solid white;border-radius:12px}#pairing-code{font:700 24px var(--mono);letter-spacing:.2em}#pairing-demo-note{font-size:13px;color:var(--muted);margin:0}[hidden]{display:none!important}#pvLive{background:#fafafd;color:#30354f}.bwstat{white-space:normal;overflow-wrap:anywhere}
 </style>
 <script type="module">
 import { startWatchPage } from '/src/showcase-live.ts';

@@ -7,7 +7,13 @@ export function bindMicControls(button: HTMLButtonElement, dock: HTMLElement, co
 }) {
   let pointer: { id: number; x: number; y: number; moved: boolean } | undefined;
   let suppressClickUntil = 0;
-  const toggle = () => { if (!button.disabled) { if (controls.active()) controls.release(); else controls.start(); } };
+  let suppressNextClick = false;
+  let toggleBlockedUntil = 0;
+  const toggle = (fromPointer = false) => {
+    if (button.disabled || Date.now() < toggleBlockedUntil) return;
+    if (fromPointer) toggleBlockedUntil = Date.now() + 700;
+    if (controls.active()) controls.release(); else controls.start();
+  };
   dock.oncontextmenu = (event) => event.preventDefault();
   button.onpointerdown = (event) => {
     if (button.disabled || !event.isPrimary || event.button !== 0 || !['touch', 'pen'].includes(event.pointerType)) return;
@@ -17,19 +23,19 @@ export function bindMicControls(button: HTMLButtonElement, dock: HTMLElement, co
     if (pointer?.id === event.pointerId && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 12) pointer.moved = true;
   };
   button.onpointercancel = button.onlostpointercapture = (event) => {
-    if (pointer?.id === event.pointerId) { pointer = undefined; suppressClickUntil = Date.now() + 700; }
+    if (pointer && pointer.id === event.pointerId) { pointer = undefined; suppressClickUntil = Date.now() + 700; suppressNextClick = true; }
   };
   button.onpointerup = (event) => {
     const down = pointer;
     if (!down || down.id !== event.pointerId) return;
-    pointer = undefined; suppressClickUntil = Date.now() + 700;
+    pointer = undefined; suppressClickUntil = Date.now() + 700; suppressNextClick = true;
     if (down.moved || Math.hypot(event.clientX - down.x, event.clientY - down.y) > 12) return;
     const bounds = button.getBoundingClientRect();
     if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) return;
-    event.preventDefault(); toggle();
+    event.preventDefault(); toggle(true);
   };
-  button.onclick = (event) => {
-    if (event.detail !== 0 && Date.now() < suppressClickUntil) return;
+  button.onclick = () => {
+    if (suppressNextClick) { suppressNextClick = false; if (Date.now() < suppressClickUntil) return; }
     toggle();
   };
 }

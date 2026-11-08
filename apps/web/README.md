@@ -24,6 +24,8 @@ The circular microphone defaults to tap-to-toggle: activate once to start and
 again to finish, including with VoiceOver/TalkBack or keyboard activation.
 Each touch/pen tap activates on pointer release, with the following generated
 click suppressed; mouse, keyboard and screen-reader clicks remain supported.
+The next click within 700 ms of touch/pen release or cancellation is consumed,
+regardless of `detail`; pointer activation also guards all toggles for 700 ms.
 The first tap starts recording and the next tap finishes; holding is unnecessary.
 There is no hold-to-talk mode. Enter and Space use the native button activation.
 An early tap during connection gives a cue and queues recording until connected;

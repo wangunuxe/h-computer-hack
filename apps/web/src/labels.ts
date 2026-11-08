@@ -21,6 +21,10 @@ export const optionNames: Record<string, { fr: string; en: string }> = {
   'paris-airport-shuttle': { fr: 'Taxi vers l’aéroport', en: 'Airport taxi' },
   'rer-b-replacement-bus': { fr: 'Bus de remplacement du RER B', en: 'RER B replacement bus' },
 };
+export function decisionLabels(language: 'fr' | 'en', stage: Stage): { yes: string; no: string } {
+  if (stage === 'CONFIRM') return { yes: labels[language].yes, no: labels[language].no };
+  return language === 'fr' ? { yes: 'Oui', no: 'Non' } : { yes: 'Yes', no: 'No' };
+}
 export function optionLabel(option: { id: string; name: string }, language: 'fr' | 'en'): string {
   const separator = option.name.indexOf(' — ');
   const base = separator < 0 ? option.name : option.name.slice(0, separator);

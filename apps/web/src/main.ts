@@ -10,10 +10,12 @@ import { phoneLocation } from './location.js';
 import { recordingDiagnostic, recordingErrorKeys } from './recording-error.js';
 import { ConnectionAttempt, replaceOnForeground, requiresFreshSession } from './connection.js';
 import { SessionStorage } from './session-storage.js';
+import { DecisionSpeech } from './decision-speech.js';
 import './style.css';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const language = deviceLanguage(navigator.language);
+const decisionSpeech = new DecisionSpeech(language);
 let profile = clientProfile(undefined, language);
 try { profile = clientProfile(JSON.parse(localStorage.getItem('voila.profile') ?? 'null'), language); } catch { /* Storage may be unavailable. */ }
 let collectingProfile = false;
@@ -125,10 +127,9 @@ async function connect() {
         if ((event.type === 'clarify' || event.type === 'profile_request') && event.yes_no) pendingFocus = state.stage;
         if (event.type === 'stage' && state.stage !== previous) collectingProfile = false;
         if (event.type === 'stage' && state.stage !== previous) pendingFocus = ['UNDERSTAND', 'RESEARCH', 'EXECUTE'].includes(state.stage) ? undefined : state.stage;
-        if (event.type === 'say') announce(event.text);
-        if (event.type === 'confirm') announce(event.summary);
+        const utterance = decisionSpeech.utterance(event, state.stage);
+        if (utterance) announce(utterance);
         if (event.type === 'error') announce(event.message, true);
-        if (event.type === 'clarify') announce(event.question);
         if (event.type === 'location_request') requestPhoneLocation(event.request_id);
         if (!['say', 'error', 'feed'].includes(event.type)) render();
         if (event.type === 'feed') renderFeed();

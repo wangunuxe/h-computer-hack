@@ -39,6 +39,61 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it.each([29.6, 29.60000001])('compares handoff amount %s in cents, rejecting one cent of difference', async (amount) => {
+    const mock = setup(async function* (tools) {
+      await call(tools, 'confirm_with_user', { summary: 'Taxi', ...confirmationFields, total_price: 29.6 });
+      yield observation(stub);
+      expect(await call(tools, 'handoff_payment', { amount: 29.61, merchant: 'Shuttle', summary: 'Taxi' })).toContain('ERROR');
+      expect(mock.input.onPaymentHandoff).not.toHaveBeenCalled();
+      expect(await call(tools, 'handoff_payment', { amount, merchant: 'Shuttle', summary: 'Taxi' })).toContain('Payment handed off');
+    });
+    await runBooking(mock.input, mock.client);
+    expect(mock.input.onPaymentHandoff).toHaveBeenCalledOnce();
+  });
+  it('rejects a payment handoff amount that differs from the approved fare', async () => {
+    const mock = setup(async function* (tools) {
+      await confirm(tools); yield observation(stub);
+      expect(await call(tools, 'handoff_payment', { amount: 1, merchant: 'Paris Airport Shuttle', summary: 'PAS-123' })).toContain('ERROR');
+      expect(mock.input.onPaymentHandoff).not.toHaveBeenCalled();
+      await handoff(tools);
+    });
+    await runBooking(mock.input, mock.client);
+    expect(mock.input.onPaymentHandoff).toHaveBeenCalledOnce();
+    expect(mock.input.onPaymentHandoff).toHaveBeenCalledWith(expect.objectContaining({ amount: 65 }));
+  });
+  it('stops promptly while the H quota request is pending', async () => {
+    const mock = setup();
+    let resolve!: (value: { available: number }) => void;
+    mock.getSessionQuota.mockImplementation(() => new Promise((done) => { resolve = done; }));
+    const controller = new AbortController(); mock.input.signal = controller.signal;
+    let settled = false;
+    const result = runBooking(mock.input, mock.client).catch((error: unknown) => { settled = true; return error; });
+    await vi.waitFor(() => expect(mock.getSessionQuota).toHaveBeenCalledOnce());
+    controller.abort(new Error('stop'));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    const stoppedPromptly = settled;
+    resolve({ available: 3 });
+    expect(await result).toEqual(new Error('stop'));
+    expect(mock.startSession).not.toHaveBeenCalled();
+    expect(stoppedPromptly).toBe(true);
+  });
+  it('stops promptly during H creation and cancels a late-created session', async () => {
+    const mock = setup();
+    let created!: (value: typeof mock.handle) => void;
+    mock.startSession.mockImplementation(() => new Promise((resolve) => { created = resolve; }));
+    const controller = new AbortController(); mock.input.signal = controller.signal;
+    let settled = false;
+    const result = runBooking(mock.input, mock.client).catch((error: unknown) => { settled = true; return error; });
+    await vi.waitFor(() => expect(mock.startSession).toHaveBeenCalledOnce());
+    controller.abort(new Error('stop'));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    const stoppedPromptly = settled;
+    created(mock.handle);
+    expect(await result).toEqual(new Error('stop'));
+    expect(mock.cancel).toHaveBeenCalledOnce();
+    expect(mock.handle.stream).not.toHaveBeenCalled();
+    expect(stoppedPromptly).toBe(true);
+  });
   it('exposes observation URLs and action descriptions, but not screenshot payloads or typed values', async () => {
     const mock = setup(async function* (tools) {
       yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', metadata: { url: 'https://shuttle.example/fr/reservation/draft/route' }, image: { type: 'url', source: 'https://images.example/private-screenshot' } } };

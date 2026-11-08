@@ -27,6 +27,7 @@ if (savedSession) { credentials = { id: savedSession.id, resume_token: savedSess
 let attempt: ConnectionAttempt | undefined;
 let recorder: Recorder | undefined; let releasing = false;
 let lastSay = ''; let pendingFocus: Stage | undefined;
+let optionPending = false;
 let lastCards = ''; let lastNarrated = Date.now(); let speechNeedsGesture = true; let progressCue = 0;
 const t = () => labels[language];
 
@@ -47,9 +48,9 @@ function unlock() {
 function cue(stopping = false) {
   navigator.vibrate?.(stopping ? [20, 30, 20] : 35);
   try {
-    const audio = new AudioContext(); void audio.resume();
+    const audio = new AudioContext(); void audio.resume().catch(() => {});
     const oscillator = audio.createOscillator(); const gain = audio.createGain(); gain.gain.value = 0.08;
-    oscillator.frequency.value = stopping ? 440 : 660; oscillator.connect(gain).connect(audio.destination); oscillator.onended = () => { void audio.close(); }; oscillator.start(); oscillator.stop(audio.currentTime + 0.08);
+    oscillator.frequency.value = stopping ? 440 : 660; oscillator.connect(gain).connect(audio.destination); oscillator.onended = () => { void audio.close().catch(() => {}); }; oscillator.start(); oscillator.stop(audio.currentTime + 0.08);
   } catch { /* Haptics and earcons are optional. */ }
 }
 function send(event: WebEvent) {
@@ -115,11 +116,13 @@ async function connect() {
       try {
         const event = ServerEventSchema.parse(JSON.parse(String(message.data)));
         const previous = state.stage; state = reduce(state, event);
+        if (['stage', 'options', 'clarify', 'profile_request', 'say', 'error'].includes(event.type)) optionPending = false;
         if (event.type === 'profile') {
           profile = clientProfile(event.profile, language);
           try { if (Object.keys(profile).length === 1) localStorage.removeItem('voila.profile'); else localStorage.setItem('voila.profile', JSON.stringify(profile)); } catch { /* Storage may be unavailable. */ }
         }
         if (event.type === 'profile_request') collectingProfile = true;
+        if ((event.type === 'clarify' || event.type === 'profile_request') && event.yes_no) pendingFocus = state.stage;
         if (event.type === 'stage' && state.stage !== previous) collectingProfile = false;
         if (event.type === 'stage' && state.stage !== previous) pendingFocus = ['UNDERSTAND', 'RESEARCH', 'EXECUTE'].includes(state.stage) ? undefined : state.stage;
         if (event.type === 'say') announce(event.text);
@@ -142,14 +145,17 @@ async function connect() {
   } catch { if (attempt === current) { current.clear(); connectionFailure(); clearTimeout(retry); retry = setTimeout(() => void connect(), 3000); } }
   finally { if (attempt === current) connecting = false; }
 }
+function resumeConnection() {
+  clearTimeout(retry);
+  attempt?.cancel(); attempt = undefined; connecting = false;
+  if (replaceOnForeground(socket?.readyState)) { const stale = socket; socket = undefined; stale?.close(); }
+  void connect();
+}
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    clearTimeout(retry);
-    attempt?.cancel(); attempt = undefined; connecting = false;
-    if (replaceOnForeground(socket?.readyState)) { const stale = socket; socket = undefined; stale?.close(); }
-    void connect();
-  } else { if (credentials) sessionStorage.save(credentials, helloSent); recorder?.cancel(); }
+  if (document.visibilityState === 'visible') resumeConnection();
+  else { if (credentials) sessionStorage.save(credentials, helloSent); recorder?.cancel(); }
 });
+window.addEventListener('pageshow', (event) => { if (event.persisted) resumeConnection(); });
 window.addEventListener('pagehide', () => { if (credentials) sessionStorage.save(credentials, helloSent); });
 setInterval(() => { if (connected && credentials) sessionStorage.save(credentials, helloSent); }, 60_000);
 setInterval(() => {
@@ -179,7 +185,7 @@ function start() {
     releasing = true; cue(true); recordingLabel();
     const text = language === 'fr' ? 'Trois minutes atteintes. Je termine la transcription.' : 'Three-minute limit reached. Finishing the transcript.';
     announce(text);
-  }, (seconds) => { $('elapsed').hidden = false; $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }, () => voice.resume());
+  }, (seconds) => { $('elapsed').hidden = false; $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }, () => { if (!recorder || recorder === current) voice.resume(); });
   recorder = current; recordingLabel(); void current.start(credentials);
 }
 function release() { if (!recorder || releasing) return; releasing = true; unlock(); cue(true); recordingLabel(); recorder.stop(); }
@@ -188,7 +194,7 @@ bindMicControls(talk, $('dock'), { active: () => !!recorder, start, release });
 $('stop').onclick = () => { voice.bargeIn(); voice.resume(); unlock(); recorder?.cancel(); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); };
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) { const node = document.createElement(tag); if (text) node.textContent = text; return node; }
-function button(text: string, action: () => void) { const node = element('button', text); node.type = 'button'; node.onclick = () => { unlock(); action(); }; return node; }
+function button(text: string, action: () => void) { const node = element('button', text); node.type = 'button'; node.onclick = () => { if (!node.isConnected || node.disabled) return; unlock(); action(); }; return node; }
 function safeLink(url: string, text: string) { try { if (!['https:', 'http:'].includes(new URL(url).protocol)) return undefined; const link = element('a', text); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; return link; } catch { return undefined; } }
 function primary<T extends HTMLElement>(node: T) { node.id = 'primary-content'; if (!['A', 'BUTTON'].includes(node.tagName)) node.tabIndex = -1; return node; }
 const money = (amount: number) => new Intl.NumberFormat(language === 'fr' ? 'fr-FR' : 'en-GB', { style: 'currency', currency: 'EUR' }).format(amount);
@@ -205,7 +211,8 @@ function render() {
   actions.replaceChildren();
   if (!collectingProfile && ['PRESENT', 'CHOOSE'].includes(state.stage)) {
     for (const [index, option] of state.options.entries()) {
-      const choice = button('', () => { const event = optionEvent(state.options, option.id); if (event) send(event); });
+      const choice = button('', () => { const event = optionEvent(state.options, option.id); if (event && send(event)) { optionPending = true; actions.querySelectorAll<HTMLButtonElement>('.option-card').forEach((button) => { button.disabled = true; }); } });
+      choice.disabled = optionPending;
       choice.id = 'option-' + option.id; choice.className = 'option-card';
       const name = `${index + 1}. ${optionLabel(option, language)}`;
       const arrival = new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }).format(new Date(Date.now() + (option.pickup_wait_minutes + option.journey_minutes) * 60_000));
@@ -217,8 +224,8 @@ function render() {
   }
   if (state.yesNo) {
     const decisions = element('div'); decisions.className = 'decision';
-    decisions.setAttribute('aria-label', t().confirm);
     const decision = decisionLabels(language, state.stage);
+    decisions.setAttribute('role', 'group'); decisions.setAttribute('aria-label', `${decision.yes} / ${decision.no}`);
     const answer = (text: string) => { recorder?.cancel(); voice.bargeIn(); voice.resume(); sendTranscript(text); };
     const yes = button(decision.yes, () => answer(language === 'fr' ? 'oui' : 'yes')); yes.id = 'confirm-yes'; yes.setAttribute('aria-label', decision.yes);
     const no = button(decision.no, () => answer(language === 'fr' ? 'non' : 'no')); no.id = 'confirm-no'; no.className = 'secondary'; no.setAttribute('aria-label', decision.no);

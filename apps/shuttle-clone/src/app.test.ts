@@ -41,6 +41,30 @@ async function complete(app: App, easy = false) {
 }
 
 describe('four-step booking', () => {
+  it('asks Stripe to retry a failed callback and tolerates duplicate and stale unpaid events', async () => {
+    const { app, store, fetcher } = setup({ STRIPE_WEBHOOK_SECRET: 'whsec_demo', SERVER_PUBLIC_URL: 'https://server.example' });
+    await complete(app); const order = [...store.orders.values()][0]!;
+    const deliver = (paid: boolean) => {
+      const payload = JSON.stringify({ type: 'checkout.session.completed', data: { object: { metadata: { orderId: order.id }, payment_status: paid ? 'paid' : 'unpaid' } } });
+      const signature = new Stripe('sk_test_signature_only').webhooks.generateTestHeaderString({ payload, secret: 'whsec_demo' });
+      return app.request('/stripe/webhook', { method: 'POST', headers: { 'stripe-signature': signature }, body: payload });
+    };
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      fetcher.mockRejectedValueOnce(new Error('offline'));
+      expect((await deliver(true)).status).toBe(503); expect(order.paid).toBe(true);
+      expect((await deliver(true)).status).toBe(200);
+      expect((await deliver(false)).status).toBe(200); expect(order.paid).toBe(true);
+      expect((await deliver(true)).status).toBe(200); expect(store.orders.size).toBe(1);
+    } finally { log.mockRestore(); }
+  });
+  it('creates only one order for concurrent passenger form submissions', async () => {
+    const { app, store } = setup(); const base = await start(app);
+    await post(app, base + '/route', route); await post(app, base + '/vehicle', { vehicle: 'sedan' });
+    const results = await Promise.all([post(app, base + '/info', info), post(app, base + '/info', info)]);
+    expect(store.orders.size).toBe(1);
+    expect(results[0]!.headers.get('location')).toBe(results[1]!.headers.get('location'));
+  });
   it('requires an explicit simulated payment and sends the same authenticated callback as Stripe', async () => {
     const { app, store, fetcher } = setup({ SERVER_PUBLIC_URL: 'https://server.example/', INTERNAL_CALLBACK_TOKEN: 'demo-token' }); await complete(app);
     const order = [...store.orders.values()][0]!;
@@ -359,7 +383,7 @@ describe('payments', () => {
     }));
     expect(await (await app.request('/fr/reservation/confirmation/' + order.id)).text()).toContain('<dd>PAID</dd>');
   });
-  it('acknowledges callback failure without losing paid status', async () => {
+  it('returns a retryable callback failure without losing paid status', async () => {
     const { app, store, fetcher } = setup({ STRIPE_WEBHOOK_SECRET: 'whsec_demo', SERVER_PUBLIC_URL: 'https://server.example' });
     await complete(app);
     const order = [...store.orders.values()][0]!;
@@ -367,7 +391,7 @@ describe('payments', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const payload = JSON.stringify({ type: 'checkout.session.completed', data: { object: { metadata: { orderId: order.id }, payment_status: 'paid' } } });
     const signature = new Stripe('sk_test_signature_only').webhooks.generateTestHeaderString({ payload, secret: 'whsec_demo' });
-    expect((await app.request('/stripe/webhook', { method: 'POST', headers: { 'stripe-signature': signature }, body: payload })).status).toBe(200);
+    expect((await app.request('/stripe/webhook', { method: 'POST', headers: { 'stripe-signature': signature }, body: payload })).status).toBe(503);
     expect(order.paid).toBe(true);
     expect(log).toHaveBeenCalledWith('Payment callback failed', 'offline');
     log.mockRestore();

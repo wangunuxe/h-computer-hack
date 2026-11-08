@@ -445,10 +445,10 @@ export class VoilaSession {
     if (['CLARIFY', 'CHOOSE', 'UNDERSTAND', 'RESEARCH', 'PRESENT'].includes(stage) && ['provide_info', 'correct'].includes(result.intent) && result.confidence >= .65 && result.trip_patch && Object.keys(result.trip_patch).length) {
       const before = this.trip;
       if (result.trip_patch.origin && result.trip_patch.origin !== before.origin) this.pickupGps = undefined;
-      this.trip = TripSchema.partial().parse({ ...this.trip, ...result.trip_patch }); this.attempt = 0;
+      this.trip = TripSchema.partial().parse({ passengers: 1, luggage: 0, guide_dog: this.profile?.guide_dog ?? false, ...this.trip, ...result.trip_patch }); this.attempt = 0;
       const changedRoute = ['origin', 'destination', 'deadline'].some((key) => before[key as keyof Trip] !== undefined && before[key as keyof Trip] !== this.trip[key as keyof Trip]);
       const next = ++this.generation;
-      if (changedRoute || !this.research) { this.flow.abort(); this.flow = new AbortController(); this.research = undefined; }
+      if (changedRoute || !this.research) { this.flow.abort(); this.flow = new AbortController(); this.research = undefined; this.locationResolving = false; }
       this.options = [];
       if (!this.missing().length) this.answer(result.reply);
       await this.plan(transcript, next, result.reply);
@@ -514,6 +514,7 @@ export class VoilaSession {
       this.ports.logger.error('Trip understanding failed.');
       this.error('Could not understand the trip. Please try again.');
       this.cancel(); this.transition('LISTEN');
+      this.answer(this.language.startsWith('fr') ? 'Je n’ai pas pu préparer le trajet. Veuillez réessayer.' : 'I could not prepare the journey. Please try again.');
     }
   }
   private async execute(id: string, generation: number) {
@@ -569,6 +570,11 @@ export class VoilaSession {
       if (!current()) return;
       this.confirmation?.resolve({ approved: false, reply: 'Booking failed' }); this.confirmation = undefined;
       this.ports.logger.error('Booking execution failed.');
+      if (this.payment) {
+        this.transition('HANDOFF');
+        this.answer(this.language.startsWith('fr') ? 'Le paiement reste disponible sur votre téléphone, mais je n’ai pas pu récupérer la référence. Vérifiez la réservation sur le site avant de recommencer une réservation.' : 'Payment remains available on your phone, but I could not retrieve the reference. Check the booking on the site before starting another booking.');
+        return;
+      }
       this.error(say('booking-failed', {}, this.language));
       this.speak('booking-failed', {});
       this.retryOption = id === 'paris-airport-shuttle' ? id : undefined;

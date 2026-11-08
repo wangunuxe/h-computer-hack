@@ -37,6 +37,48 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it('keeps an existing payment handoff instead of offering another booking after an H result error', async () => {
+    const s = setup({ runBooking: vi.fn<SessionPorts['runBooking']>(async (input) => {
+      await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: 'Taxi' });
+      throw new Error('Malformed final booking answer');
+    }) });
+    await s.start(); await s.choose();
+    expect(s.session.stage).toBe('HANDOFF');
+    const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toContainEqual({ type: 'payment_handoff', url: booking.payment_url, amount: 65, merchant: 'Shuttle' });
+    expect(s.events).toContainEqual({ type: 'say', text: expect.stringMatching(/before starting another booking/) });
+    await s.choose('yes');
+    expect(s.ports.runBooking).toHaveBeenCalledOnce();
+    expect(s.events.some((event) => event.type === 'booking_card')).toBe(false);
+  });
+  it('keeps origin clarification available after a reply interrupts GPS resolution', async () => {
+    const lookup = deferred<string | undefined>();
+    const s = setup({ understand: async () => ({ trip: { destination: 'CDG' }, missing: ['origin'] }), resolveOrigin: () => lookup.promise,
+      converse: async () => ({ intent: 'provide_info', confidence: 1, reply: 'Where should I pick you up?', trip_patch: { destination: 'Bercy' } }) });
+    s.hello('en', { latitude: 48.86, longitude: 2.35 });
+    s.session.handle({ type: 'final_transcript', text: 'Take me to CDG' }); await flush();
+    const before = s.events.length;
+    await s.choose('Actually, Bercy');
+    lookup.resolve('Châtelet'); await flush();
+    expect(s.session.stage).toBe('CLARIFY');
+    expect(s.events.slice(before)).toContainEqual({ type: 'clarify', question: 'Where should I pick you up?' });
+  });
+  it('speaks a next step when fare resolution fails mid-plan', async () => {
+    const s = setup({ resolveFare: async () => { throw new Error('unavailable'); } });
+    await s.start();
+    expect(s.session.stage).toBe('LISTEN');
+    const errorIndex = s.events.findIndex((event) => event.type === 'error');
+    expect(s.events.slice(errorIndex + 1)).toContainEqual({ type: 'say', text: expect.stringMatching(/try again|réessayer/i) });
+  });
+  it.each(['', 'not json'])('recovers a taxi trip through clarification after malformed Gemini output: %j', async (text) => {
+    const client = { models: { generateContent: vi.fn(async () => ({ text })) } };
+    const s = setup({ understand: (input) => understand(input, client), converse: async () => ({ intent: 'provide_info', confidence: 1, reply: 'Merci.', trip_patch: { origin: 'La Défense', destination: 'Bercy' } }) });
+    s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'Je veux un taxi' }); await flush();
+    expect(s.session.stage).toBe('CLARIFY');
+    await s.choose('La Défense vers Bercy');
+    expect(s.session.stage).toBe('CHOOSE');
+    expect(s.events).toContainEqual(expect.objectContaining({ type: 'options', items: expect.arrayContaining([expect.objectContaining({ id: 'paris-airport-shuttle' })]) }));
+  });
   it.each(['je veux un taxi', 'taxi', 'un taxi', 'call me a taxi', 'la navette'])('books the airport taxi from Étoile in the demo for "%s", with confirmation and user payment', async (choice) => {
     const client = { models: { generateContent: vi.fn(async () => ({ text: JSON.stringify({ trip: { origin: 'Étoile', destination: 'CDG' } }) })) } };
     const runBooking = vi.fn<SessionPorts['runBooking']>().mockImplementation(async (input) => {

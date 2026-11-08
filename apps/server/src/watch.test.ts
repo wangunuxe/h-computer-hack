@@ -7,6 +7,14 @@ import { createSessionServer } from './index.js';
 
 afterEach(() => vi.useRealTimers());
 describe('read-only desktop watches', () => {
+  it.each(['Karim', '0612345678'])('omits URL origins containing known contact values: %s', (contact) => {
+    const profile = { language: 'fr', name: 'Karim', phone: '0612345678' };
+    const url = `https://${contact}.example.com/private`;
+    const step = sanitizeWatchEvent({ type: 'agent_step', action: 'Checking booking', url }, profile);
+    expect(step).toEqual({ type: 'agent_step', action: 'Checking booking' });
+    const feed = sanitizeWatchEvent({ type: 'feed', kind: 'research', text: 'Checking source', source: url }, profile);
+    expect(feed).toEqual({ type: 'feed', kind: 'research', text: 'Checking source' });
+  });
   it('replaces close grace with normal unpaired expiry on every offline attach', () => {
     vi.useFakeTimers(); const registry = new WatchRegistry();
     try {

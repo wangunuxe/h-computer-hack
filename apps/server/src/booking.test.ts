@@ -39,6 +39,17 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it('exposes observation URLs and action descriptions, but not screenshot payloads or typed values', async () => {
+    const mock = setup(async function* (tools) {
+      yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'observation_event', metadata: { url: 'https://shuttle.example/fr/reservation/draft/route' }, image: { type: 'url', source: 'https://images.example/private-screenshot' } } };
+      yield { type: 'AgentEvent', timestamp: new Date(), data: { kind: 'policy_event', content: 'Selecting vehicle', toolReqs: [{ toolName: 'write', args: { element: 'Name', text: 'private typed value' } }] } };
+      await confirm(tools); yield observation(stub); await handoff(tools);
+    });
+    mock.input.onStep = vi.fn(); await runBooking(mock.input, mock.client);
+    expect(mock.input.onStep).toHaveBeenCalledWith({ type: 'agent_step', action: 'Observed booking page', url: 'https://shuttle.example/fr/reservation/draft/route' });
+    expect(mock.input.onStep).toHaveBeenCalledWith({ type: 'agent_step', action: 'Selecting vehicle', url: 'https://shuttle.example/fr/reservation/draft/route' });
+    expect(JSON.stringify(vi.mocked(mock.input.onStep).mock.calls)).not.toMatch(/private-screenshot|private typed value/);
+  });
   it('checks the observed pickup tariff, rejects the stale fare, and reads the updated amount for approval', async () => {
     const quote = { origin: 'Châtelet', destination: 'Montparnasse', at: '2027-01-15T05:00:00Z', passengers: 1 };
     const stale = estimateTaxi(quote).price, actual = estimateTaxi({ ...quote, at: '2027-01-15T11:15:00Z' }).price;

@@ -81,6 +81,7 @@ export const WebEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('hello'), profile: TravelerProfileSchema,
     scenario: ScenarioSchema.optional(),
+    watch: z.string().optional(),
     gps: GpsSchema.nullable(),
   }),
   z.object({ type: z.literal('final_transcript'), text }),
@@ -90,3 +91,20 @@ export const WebEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('paid') }),
 ]);
 export type WebEvent = z.infer<typeof WebEventSchema>;
+
+export const AgentStepSchema = z.object({ type: z.literal('agent_step'), action: text, url: z.url().optional() });
+export type AgentStep = z.infer<typeof AgentStepSchema>;
+export const WatchPayloadSchema = z.union([
+  z.union(ServerEventSchema.options.filter((schema) => !['profile', 'payment_handoff', 'booking_card'].includes(schema.shape.type.value))),
+  z.object({ type: z.literal('payment_handoff'), amount, merchant: text }),
+  z.object({ type: z.literal('booking_card'), booking: BookingSchema.omit({ operator_phone: true, payment_url: true }) }),
+  z.object({ type: z.enum(['final_transcript', 'user_reply']), text }),
+  AgentStepSchema,
+]);
+export type WatchPayload = z.infer<typeof WatchPayloadSchema>;
+export const WatchEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('paired'), stage: StageSchema }),
+  z.object({ type: z.literal('unpaired'), expired: z.boolean().optional() }),
+  z.object({ type: z.literal('watch'), event: WatchPayloadSchema }),
+]);
+export type WatchEvent = z.infer<typeof WatchEventSchema>;

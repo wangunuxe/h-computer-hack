@@ -94,4 +94,23 @@ describe('mobile browser speech', () => {
     s.port.cancel(); utterance.onerror!({ error: 'interrupted' } as SpeechSynthesisErrorEvent);
     expect(s.done).toHaveBeenCalledOnce();
   });
+  it.each(['not-allowed', 'network', 'timeout'])('does not re-prime over a queued reply after %s and keeps later replies flowing', (error) => {
+    const s = setup(), queue = new SpeechQueue(s.port, 'fr-FR');
+    queue.enqueue('First'); queue.enqueue('Second'); queue.enqueue('Third'); queue.unlock();
+    const first = s.synthesis.speak.mock.calls[1]![0];
+    if (error === 'timeout') vi.advanceTimersByTime(10_000);
+    else first.onerror!({ error } as SpeechSynthesisErrorEvent);
+    expect(s.failed).toHaveBeenCalledOnce();
+    expect(s.synthesis.speak).toHaveBeenCalledTimes(3);
+    const second = s.synthesis.speak.mock.calls[2]![0];
+    expect(second.text).toBe('Second');
+    const cancellations = s.synthesis.cancel.mock.calls.length;
+    queue.unlock();
+    expect(s.synthesis.cancel).toHaveBeenCalledTimes(cancellations);
+    expect(s.synthesis.speak).toHaveBeenCalledTimes(3);
+    second.onend!({} as SpeechSynthesisEvent);
+    expect(s.synthesis.speak.mock.calls[3]![0].text).toBe('Third');
+    s.synthesis.speak.mock.calls[3]![0].onend!({} as SpeechSynthesisEvent);
+    expect(queue.idle).toBe(true);
+  });
 });

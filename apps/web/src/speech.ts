@@ -37,7 +37,7 @@ export class BrowserSpeech implements SpeechPort {
     private utterance = (text: string) => new SpeechSynthesisUtterance(text)) {}
   resume() { playbackSession('playback'); this.synthesis?.resume(); }
   prime(language: string) {
-    if (this.primed || !this.synthesis) return;
+    if (this.primed || this.current || !this.synthesis) return;
     this.cancel();
     this.primed = true;
     const primer = this.primer = this.utterance(' '); primer.volume = 0; primer.lang = language;

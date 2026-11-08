@@ -391,7 +391,7 @@ export class VoilaSession {
   private select(id: string) {
     const method = bookingMethods[id];
     if (!method || !this.options.some((option) => option.id === id)) { this.error('No supported booking method for this option.'); return; }
-    const collector = new VoiceProfile(this.profile!, method.kind === 'h_agent' ? ['name', 'email', 'guide_dog'] : ['guide_dog']);
+    const collector = new VoiceProfile(this.profile!, method.kind === 'h_agent' ? ['name', 'guide_dog'] : ['guide_dog']);
     if (collector.field) { this.profileCollector = collector; this.pendingProfileOption = id; this.profilePrompt(collector.question); return; }
     const option = this.options.find((item) => item.id === id)!;
     if (this.trip.guide_dog && option.guide_dog_status === 'refused') { this.speak('choose-again', {}); return; }
@@ -534,7 +534,7 @@ export class VoilaSession {
       if (base.searchParams.get('difficulty') === 'easy') startUrl.searchParams.set('difficulty', 'easy');
       this.agentPaymentPage = false;
       const result = await this.ports.runBooking({
-        trip, pickupGps: this.pickupGps, fareQuote: this.taxiQuote, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ phone: process.env.VOILA_DEFAULT_PHONE || '+33612345678', ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
+        trip, pickupGps: this.pickupGps, fareQuote: this.taxiQuote, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ phone: process.env.VOILA_DEFAULT_PHONE || '+33612345678', ...this.profile, email: this.profile?.email || process.env.VOILA_DEFAULT_EMAIL || 'karim@example.com', guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
         onRetry: () => { if (current()) { this.pendingBookingAction = undefined; this.speak('booking-retry', {}); } },
         onAction: (action) => { if (current() && this.stage === 'EXECUTE') this.pendingBookingAction = action; },
         onProgress: (text) => {

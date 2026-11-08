@@ -1,5 +1,12 @@
 # Conversation turns
 
+Taxi booking asks only for a missing name and guide-dog information, never a phone
+number or email address. A saved email is used when available; otherwise booking
+uses `VOILA_DEFAULT_EMAIL` or the demo fallback `karim@example.com`. As with
+`VOILA_DEFAULT_PHONE`, the fallback is booking-only, not saved to the traveler's
+profile or narrated. Configure a monitored address for real receipt delivery.
+Watcher contact redaction remains in effect.
+
 Pending questions track unsuccessful attempts separately from status questions.
 After two failures, clarification includes an example, selection re-reads
 numbered options and confirmation points to the real Yes/No buttons. French and

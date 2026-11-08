@@ -44,12 +44,42 @@ beforeEach(() => { vi.useFakeTimers(); Socket.instances = []; Worklet.instances 
 afterEach(() => { for (const recorder of active.splice(0)) recorder.cancel(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('recorder audio startup and finalization', () => {
+  it('retains trailing PCM after a short stop tap and waits for a late final', async () => {
+    const s = setup(); await s.recorder.start(credentials); const socket = Socket.instances[0]!; socket.open();
+    Worklet.instances[0]!.emit(new ArrayBuffer(16000)); vi.advanceTimersByTime(500); s.recorder.stop();
+    const tail = new ArrayBuffer(4000); Worklet.instances[0]!.emit(tail);
+    expect(socket.send).toHaveBeenLastCalledWith(tail); expect(s.track.stop).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(250); expect(socket.send).toHaveBeenLastCalledWith(stopRecording);
+    vi.advanceTimersByTime(1500); expect(s.done).not.toHaveBeenCalled(); socket.finish('Oui.');
+    expect(s.transcript).toHaveBeenCalledExactlyOnceWith('Oui.'); expect(s.error).not.toHaveBeenCalled();
+  });
+  it.each(['empty-final', 'missing-final', 'timeout'])('recovers the last partial oui after %s', async (kind) => {
+    const s = setup(); await s.recorder.start(credentials); const socket = Socket.instances[0]!; socket.open();
+    Worklet.instances[0]!.emit(new ArrayBuffer(16000)); s.recorder.stop();
+    const utterance = (text: string, is_final: boolean) => socket.onmessage?.({ data: JSON.stringify({ type: 'transcript', data: { id: 'one', is_final, utterance: { text } } }) });
+    utterance('ou', false); utterance('oui', false);
+    if (kind === 'empty-final') utterance('', true);
+    if (kind === 'timeout') vi.advanceTimersByTime(10_000);
+    else { socket.finish(); expect(s.transcript).not.toHaveBeenCalled(); vi.advanceTimersByTime(300); }
+    expect(s.transcript).toHaveBeenCalledExactlyOnceWith('oui'); expect(s.error).not.toHaveBeenCalled();
+  });
+  it('prefers a final correction over its partial, including a late final during grace', async () => {
+    const s = setup(); await s.recorder.start(credentials); const socket = Socket.instances[0]!; socket.open();
+    socket.onmessage?.({ data: JSON.stringify({ type: 'transcript', data: { id: '1', is_final: false, utterance: { text: 'oui' } } }) });
+    socket.finish(); vi.advanceTimersByTime(100); socket.finish('non'); vi.advanceTimersByTime(200);
+    expect(s.transcript).toHaveBeenCalledExactlyOnceWith('non');
+  });
+  it('cancels a pending audio tail without sending stop or a stale transcript', async () => {
+    const s = setup(); await s.recorder.start(credentials); const socket = Socket.instances[0]!; socket.open();
+    Worklet.instances[0]!.emit(new ArrayBuffer(16000)); s.recorder.stop(); s.recorder.cancel(); vi.advanceTimersByTime(20_000);
+    expect(socket.send).not.toHaveBeenCalledWith(stopRecording); expect(s.transcript).not.toHaveBeenCalled(); expect(s.done).toHaveBeenCalledOnce();
+  });
   it('closes the microphone context and restores playback before notifying speech to resume', async () => {
     const s = setup(), playback = vi.fn(), audioSession = { type: 'playback' };
     Object.assign(navigator, { audioSession });
     const recorder = new Recorder(s.transcript, s.error, s.done, undefined, undefined, playback); active.push(recorder);
     await recorder.start(credentials); expect(audioSession.type).toBe('play-and-record'); Socket.instances[0]!.open(); Worklet.instances[0]!.emit(new ArrayBuffer(2));
-    recorder.stop(); expect(s.track.stop).toHaveBeenCalled(); expect(playback).not.toHaveBeenCalled();
+    recorder.stop(); expect(s.track.stop).not.toHaveBeenCalled(); vi.advanceTimersByTime(250); expect(s.track.stop).toHaveBeenCalled(); expect(playback).not.toHaveBeenCalled();
     await flush(); expect(audioSession.type).toBe('playback'); expect(playback).toHaveBeenCalledOnce();
   });
   it('finishes normally at 180 seconds and delivers all final utterances', async () => {
@@ -58,7 +88,7 @@ describe('recorder audio startup and finalization', () => {
     await recorder.start(credentials); const socket = Socket.instances[0]!; socket.open();
     Worklet.instances[0]!.emit(new ArrayBuffer(2)); socket.send.mockClear();
     vi.advanceTimersByTime(179_000); expect(socket.send).not.toHaveBeenCalled(); expect(elapsed).toHaveBeenLastCalledWith(179);
-    vi.advanceTimersByTime(1000); expect(socket.send).toHaveBeenCalledExactlyOnceWith(stopRecording);
+    vi.advanceTimersByTime(1000); vi.advanceTimersByTime(250); expect(socket.send).toHaveBeenCalledExactlyOnceWith(stopRecording);
     expect(limit).toHaveBeenCalledOnce(); expect(s.done).not.toHaveBeenCalled(); expect(s.error).not.toHaveBeenCalled();
     socket.finish('Bonjour '.repeat(430).trim());
     expect(s.transcript).toHaveBeenCalledExactlyOnceWith('Bonjour '.repeat(430).trim()); expect(s.error).not.toHaveBeenCalled();
@@ -72,6 +102,7 @@ describe('recorder audio startup and finalization', () => {
     request.resolve(response()); await starting;
     const socket = Socket.instances[0]!; Worklet.instances[0]!.emit(second);
     s.recorder.stop(); s.recorder.stop();
+    vi.advanceTimersByTime(250);
     expect(s.track.stop).toHaveBeenCalled(); expect(s.done).not.toHaveBeenCalled(); expect(socket.send).not.toHaveBeenCalled();
     socket.open(); expect(socket.send.mock.calls).toEqual([[first], [second], [stopRecording]]);
     socket.finish('Bonjour Paris'); expect(s.transcript).toHaveBeenCalledExactlyOnceWith('Bonjour Paris'); expect(s.error).not.toHaveBeenCalled(); expect(s.done).toHaveBeenCalledOnce();
@@ -80,7 +111,7 @@ describe('recorder audio startup and finalization', () => {
     const s = setup(); await s.recorder.start(credentials);
     const socket = Socket.instances[0]!; const first = new ArrayBuffer(2), second = new ArrayBuffer(4);
     Worklet.instances[0]!.emit(first); socket.open(); Worklet.instances[0]!.emit(second);
-    s.recorder.stop(); socket.finish('Merci');
+    s.recorder.stop(); vi.advanceTimersByTime(250); socket.finish('Merci');
     expect(socket.send.mock.calls).toEqual([[first], [second], [stopRecording]]); expect(s.transcript).toHaveBeenCalledWith('Merci');
   });
   it('cleans up a release during permission prompts without creating a speech session', async () => {
@@ -116,7 +147,7 @@ describe('recorder audio startup and finalization', () => {
   it('distinguishes empty speech, provider errors and connection failures', async () => {
     for (const kind of ['empty', 'provider', 'service']) {
       const s = setup(); await s.recorder.start(credentials); const socket = Socket.instances.at(-1)!; socket.open();
-      if (kind === 'empty') socket.finish();
+      if (kind === 'empty') { socket.finish(); vi.advanceTimersByTime(300); }
       if (kind === 'provider') socket.onmessage?.({ data: JSON.stringify({ type: 'error', error: 'secret upstream details' }) });
       if (kind === 'service') socket.onerror?.();
       expect(s.error).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind })); expect(s.done).toHaveBeenCalledOnce();

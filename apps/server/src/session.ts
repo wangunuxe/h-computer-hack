@@ -16,7 +16,8 @@ import { fallbackQuestion } from './questions.js';
 import { VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 import { mentionsTaxiRequest, requestsTaxi, taxiTurn } from './taxi.js';
 import { relevantLines, trafficPage } from './stations.js';
-import { originFromGps, redactGpsCoordinates } from './location.js';
+import { resolveGpsOrigin, redactGpsCoordinates } from './location.js';
+import { confirmationAnswer } from './confirmation-answer.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 type Research = { traffic: Disruption[]; extraOptions: Option[] };
@@ -31,6 +32,7 @@ export interface SessionPorts {
   timers: Pick<typeof globalThis, 'setTimeout' | 'clearTimeout' | 'setInterval' | 'clearInterval'>;
   logger: Pick<Console, 'error'>;
   shuttlePublicUrl: () => string | undefined;
+  resolveOrigin: typeof resolveGpsOrigin;
 }
 
 export class VoilaSession {
@@ -47,6 +49,9 @@ export class VoilaSession {
   private locationTimer?: ReturnType<typeof setTimeout>;
   private locationTranscript = '';
   private pendingOrigin?: string;
+  private pendingGps?: Gps;
+  private pickupGps?: Gps;
+  private locationResolving = false;
   private trip: Partial<Trip> = {};
   private options: Option[] = [];
   private booking?: Booking;
@@ -75,7 +80,7 @@ export class VoilaSession {
 
   constructor(private emit: (event: ServerEvent) => void, ports: Partial<SessionPorts> = {}) {
     this.ports = { understand, converse, trafficH: readRerBTraffic, linkup: searchDisruptionAndAlternatives, runBooking,
-      clock: () => new Date(), timers: globalThis, logger: console, shuttlePublicUrl: () => process.env.SHUTTLE_PUBLIC_URL, ...ports };
+      clock: () => new Date(), timers: globalThis, logger: console, shuttlePublicUrl: () => process.env.SHUTTLE_PUBLIC_URL, resolveOrigin: resolveGpsOrigin, ...ports };
     this.lastSay = this.ports.clock().getTime();
     this.heartbeat = this.ports.timers.setInterval(() => {
       const now = this.ports.clock().getTime();
@@ -134,19 +139,20 @@ export class VoilaSession {
     if ((event.type === 'final_transcript' || event.type === 'user_reply') && /^(stop|arrete|arretez|annule|cancel)[.!? ]*$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim())) { this.stop(); return; }
     if (event.type === 'user_reply' && this.pendingOrigin) {
       const reply = event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
-      if (/^(oui|oui c est ca|oui c est correct|yes|yes please|yes that s right|that s right|correct)$/.test(reply)) {
+      if (confirmationAnswer(event.text) === 'yes') {
         this.remember('user', event.text);
         this.trip.origin = this.pendingOrigin; this.pendingOrigin = undefined;
+        this.pickupGps = this.pendingGps; this.pendingGps = undefined;
         this.speak('origin-confirmed', { origin: this.trip.origin });
         void this.plan('', ++this.generation);
         return;
-      } else if (/^(non|non merci|no|no thanks)$/.test(reply)) {
+      } else if (confirmationAnswer(event.text) === 'no') {
         this.remember('user', event.text);
-        this.pendingOrigin = undefined; this.gps = undefined;
-        this.ask(this.fallback());
+        this.pendingOrigin = undefined; this.pendingGps = undefined; this.pickupGps = undefined; this.gps = undefined;
+        this.ask(say('clarify-origin', {}, this.language));
         return;
-      } else if (/^(non|no)\b/.test(reply)) {
-        this.pendingOrigin = undefined; this.gps = undefined;
+      } else if (/^(non|nan|no)\b/.test(reply)) {
+        this.pendingOrigin = undefined; this.pendingGps = undefined; this.pickupGps = undefined; this.gps = undefined;
       } else { this.remember('user', event.text); this.confirmOrigin(); return; }
     }
     if (event.type === 'user_reply' && ['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) && this.payment && /^\/stub-payment\/[^/]+$/.test(new URL(this.payment.url).pathname) && /^(j ai paye|jai paye|i ve paid|i have paid|i paid)$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim())) { this.handle({ type: 'paid' }); return; }
@@ -220,7 +226,24 @@ export class VoilaSession {
   }
 
   dispose() { this.cancel(); this.ports.timers.clearInterval(this.heartbeat); this.emit = () => {}; }
-  private send(event: ServerEvent) { try { this.emit(event); } catch { this.ports.logger.error('Session event delivery failed.'); } }
+  private send(event: ServerEvent) {
+    try {
+      const safe = JSON.stringify(event, (_key, value: unknown) => {
+        if (typeof value !== 'string') return value;
+        let text = redactGpsCoordinates(value);
+        const unit = String.raw`(?:[€$£¥%°]|EUR|USD|GBP|CHF|CAD|euros?|dollars?|pounds?|km|cm|mm|m|mètres?|metres?|meters?|kilomètres?|kilometres?|kilometers?|kg|g|ml|l|h|min|minutes?|s|sec|secondes?|seconds?)(?!\p{L})`;
+        for (const gps of [this.pendingGps, this.pickupGps]) if (gps) for (const coordinate of [gps.latitude, gps.longitude]) {
+          const forms = [String(coordinate), ...[4, 5, 6, 7, 8].map((digits) => coordinate.toFixed(digits))].filter((form) => /\.\d{4,}$/.test(form)).flatMap((form) => [form, form.replace('.', ',')]);
+          for (const form of [...new Set(forms)].sort((a, b) => b.length - a.length)) text = text.replace(new RegExp(`(?<![\\d.,])${form.replace(/[.,]/g, '\\$&')}(?!\\d|[.,]\\d)`, 'g'), (match, offset: number, source: string) => {
+            const before = source.slice(0, offset), after = source.slice(offset + match.length);
+            return new RegExp(`(?<!\\p{L})${unit}\\s*$`, 'iu').test(before) || new RegExp(`^\\s*${unit}`, 'iu').test(after) ? match : '[position]';
+          });
+        }
+        return text;
+      });
+      this.emit(JSON.parse(safe));
+    } catch { this.ports.logger.error('Session event delivery failed.'); }
+  }
   private error(message: string) { this.send({ type: 'error', message }); }
   private transition(stage: Stage) {
     if (this.stage === 'EXECUTE' && stage !== 'EXECUTE') this.pendingBookingAction = undefined;
@@ -246,6 +269,7 @@ export class VoilaSession {
   private cancel() {
     this.ports.timers.clearTimeout(this.locationTimer); this.locationTimer = undefined;
     this.locationRequest = undefined; this.pendingOrigin = undefined;
+    this.pendingGps = undefined; this.pickupGps = undefined; this.locationResolving = false;
     this.pendingBookingAction = undefined;
     this.profileCollector = undefined; this.pendingProfileOption = undefined;
     this.operations.clear();
@@ -333,17 +357,28 @@ export class VoilaSession {
   private confirmOrigin() {
     const question = say('confirm-origin', { origin: this.pendingOrigin! }, this.language);
     this.lastSay = this.ports.clock().getTime();
-    this.send({ type: 'clarify', question }); this.send({ type: 'say', text: question });
+    this.send({ type: 'clarify', question, yes_no: true }); this.send({ type: 'say', text: question });
+  }
+  private async locate(gps: Gps, generation: number) {
+    const version = this.turnVersion, finish = this.beginOperation();
+    this.locationResolving = true;
+    try {
+      const label = await this.ports.resolveOrigin(gps, { signal: this.flow.signal });
+      if (!this.active(generation) || this.turnVersion !== version || this.trip.origin || this.stage !== 'CLARIFY') return;
+      if (label) { this.pendingOrigin = label; this.pendingGps = gps; this.confirmOrigin(); }
+      else this.ask(say('clarify-origin', {}, this.language));
+    } catch { if (this.active(generation) && this.turnVersion === version && !this.trip.origin) this.ask(say('clarify-origin', {}, this.language)); }
+    finally { if (this.active(generation)) this.locationResolving = false; finish(); }
   }
   private locationResult(requestId: string, gps: Gps | null) {
     if (requestId !== this.locationRequest || this.stage !== 'CLARIFY' || this.trip.origin) return;
     this.ports.timers.clearTimeout(this.locationTimer); this.locationTimer = undefined; this.locationRequest = undefined;
-    if (gps) { this.pendingOrigin = originFromGps(gps); this.confirmOrigin(); }
+    if (gps) void this.locate(gps, this.generation);
     else void this.plan(this.locationTranscript, this.generation);
   }
   private profilePrompt(question: string) {
     this.lastSay = this.ports.clock().getTime();
-    this.send({ type: 'profile_request', question }); this.send({ type: 'say', text: question });
+    this.send({ type: 'profile_request', question, yes_no: this.profileCollector?.yesNo ?? false }); this.send({ type: 'say', text: question });
   }
   private select(id: string) {
     const method = bookingMethods[id];
@@ -401,6 +436,7 @@ export class VoilaSession {
     }
     if (['CLARIFY', 'CHOOSE', 'UNDERSTAND', 'RESEARCH', 'PRESENT'].includes(stage) && ['provide_info', 'correct'].includes(result.intent) && result.confidence >= .65 && result.trip_patch && Object.keys(result.trip_patch).length) {
       const before = this.trip;
+      if (result.trip_patch.origin && result.trip_patch.origin !== before.origin) this.pickupGps = undefined;
       this.trip = TripSchema.partial().parse({ ...this.trip, ...result.trip_patch }); this.attempt = 0;
       const changedRoute = ['origin', 'destination', 'deadline'].some((key) => before[key as keyof Trip] !== undefined && before[key as keyof Trip] !== this.trip[key as keyof Trip]);
       const next = ++this.generation;
@@ -425,7 +461,7 @@ export class VoilaSession {
         this.transition('CLARIFY');
         if (!this.trip.origin && !this.locationAttempted) {
           this.locationAttempted = true; this.locationTranscript = transcript;
-          if (this.gps) { this.pendingOrigin = originFromGps(this.gps); this.gps = undefined; this.confirmOrigin(); }
+          if (this.gps) { const gps = this.gps; this.gps = undefined; await this.locate(gps, generation); }
           else {
             const request_id = randomUUID(); this.locationRequest = request_id;
             this.speak('location-request', {}); this.send({ type: 'location_request', request_id });
@@ -433,7 +469,7 @@ export class VoilaSession {
           }
           return;
         }
-        if (this.locationRequest || this.pendingOrigin) return;
+        if (this.locationRequest || this.pendingOrigin || this.locationResolving) return;
         if (question) this.ask(question); else await this.interpretTurn(transcript);
         return;
       }
@@ -485,7 +521,7 @@ export class VoilaSession {
       const startUrl = base.pathname === '/' ? new URL('/fr/reservation/', base) : base;
       if (base.searchParams.get('difficulty') === 'easy') startUrl.searchParams.set('difficulty', 'easy');
       const result = await this.ports.runBooking({
-        trip, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
+        trip, pickupGps: this.pickupGps, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
         onRetry: () => { if (current()) { this.pendingBookingAction = undefined; this.speak('booking-retry', {}); } },
         onAction: (action) => { if (current() && this.stage === 'EXECUTE') this.pendingBookingAction = action; },
         onProgress: (text) => {

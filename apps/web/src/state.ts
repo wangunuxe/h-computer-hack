@@ -1,19 +1,21 @@
 import type { ServerEvent, WebEvent } from '@voila/shared';
 export type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 export interface State {
+  yesNo: boolean;
   cancellable: boolean;
   stage: Stage; options: Extract<ServerEvent, { type: 'options' }>['items']; summary?: string;
   payment?: Extract<ServerEvent, { type: 'payment_handoff' }>; booking?: Extract<ServerEvent, { type: 'booking_card' }>['booking'];
   feed: Extract<ServerEvent, { type: 'feed' }>[]; error?: string;
 }
-export const initialState = (): State => ({ stage: 'LISTEN', options: [], feed: [], cancellable: false });
+export const initialState = (): State => ({ stage: 'LISTEN', options: [], feed: [], cancellable: false, yesNo: false });
 export const canStop = (state: State) => state.cancellable;
 export function reduce(state: State, event: ServerEvent): State {
   switch (event.type) {
     case 'activity': return { ...state, cancellable: event.cancellable };
-    case 'stage': return event.stage === 'LISTEN' ? { ...initialState(), feed: state.feed } : { ...state, stage: event.stage };
+    case 'stage': return event.stage === 'LISTEN' ? { ...initialState(), feed: state.feed } : { ...state, stage: event.stage, yesNo: false };
     case 'options': return { ...state, options: event.items };
-    case 'confirm': return { ...state, summary: event.summary };
+    case 'confirm': return { ...state, summary: event.summary, yesNo: true };
+    case 'clarify': case 'profile_request': return { ...state, yesNo: event.yes_no === true };
     case 'payment_handoff': return { ...state, payment: event };
     case 'booking_card': return { ...state, booking: event.booking };
     case 'feed': return { ...state, feed: [...state.feed, event].slice(-100) };

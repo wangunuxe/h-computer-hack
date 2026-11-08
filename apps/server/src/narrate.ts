@@ -52,7 +52,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
     'clarify-deadline': () => fr ? 'À quelle heure ferme l’enregistrement ?' : 'What time does check-in close?',
     'research-started': () => fr ? 'Je vérifie le trafic et les alternatives.' : 'I’m checking traffic and alternatives.',
     'location-request': () => fr ? 'Pour trouver votre point de départ, j’utilise la position de votre téléphone.' : 'To find your starting point, I am using your phone’s location.',
-    'confirm-origin': ({ origin }) => fr ? `Je vous situe à ${origin}. Est-ce votre point de départ ? Dites oui ou non.` : `Your location suggests ${origin}. Is this your starting point? Say yes or no.`,
+    'confirm-origin': ({ origin }) => fr ? `Je vous situe ${origin.startsWith('près ') ? '' : 'à '}${origin}. Est-ce votre point de départ ? Dites oui ou non.` : `Your location suggests ${origin}. Is this your starting point? Say yes or no.`,
     'origin-confirmed': ({ origin }) => fr ? `Votre point de départ est ${origin}.` : `Your starting point is ${origin}.`,
     'traffic-line': ({ line, mode, status, summary }) => {
       const label = line ? `${line} : ` : '';
@@ -110,7 +110,7 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
     'booking-done': ({ ref }) => fr ? `Réservation ${ref}. Voici votre fiche.` : `Booking ${ref}. Here are your details.`,
     stopped: () => fr ? 'J’arrête. Aucune autre action.' : 'Stopped. No further actions.',
     'booking-failed': ({ reason }) => `${fr ? 'Cette tentative de réservation a échoué. Voulez-vous réessayer le taxi ?' : 'This booking attempt failed. Would you like to retry the taxi?'}${reason ? ` ${reason}` : ''}`,
-    'clarify-origin': () => fr ? 'Où êtes-vous actuellement ?' : 'Where are you now?',
+    'clarify-origin': () => fr ? 'Où êtes-vous ?' : 'Where are you?',
     'clarify-destination': () => fr ? 'Quel aéroport et quel terminal ?' : 'Which airport and terminal?',
     'choose-again': () => fr ? 'Quelle option choisissez-vous ? Dites son numéro ou son nom.' : 'Which option? Say its number or name.',
     'confirm-again': () => fr ? 'Confirmez par oui, ou refusez par non.' : 'Please say yes to approve, or no to decline.',

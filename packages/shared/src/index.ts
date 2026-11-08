@@ -57,12 +57,12 @@ export type Gps = z.infer<typeof GpsSchema>;
 export const ServerEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('location_request'), request_id: text }),
   z.object({ type: z.literal('profile'), profile: TravelerProfileSchema }),
-  z.object({ type: z.literal('profile_request'), question: text }),
+  z.object({ type: z.literal('profile_request'), question: text, yes_no: z.boolean().optional() }),
   z.object({ type: z.literal('activity'), cancellable: z.boolean() }),
   z.object({ type: z.literal('stage'), stage: StageSchema }),
   z.object({ type: z.literal('say'), text }),
   z.object({ type: z.literal('feed'), kind: text, text, source: z.url().optional(), mode: z.enum(['demo', 'live']).optional(), status: z.enum(['normal', 'disrupted', 'unknown']).optional() }),
-  z.object({ type: z.literal('clarify'), question: text }),
+  z.object({ type: z.literal('clarify'), question: text, yes_no: z.boolean().optional() }),
   z.object({ type: z.literal('options'), items: z.array(OptionSchema) }),
   z.object({ type: z.literal('confirm'), summary: text }),
   z.object({

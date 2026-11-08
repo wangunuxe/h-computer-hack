@@ -30,7 +30,7 @@ body[data-cards=true] #caption { max-height: 3.5rem; }
 .option-card span { display: block; }
 .option-card .detail { font-size: 1.2rem; font-weight: 500; }
 .decision { display: grid; gap: 1rem; }
-.decision button { min-height: 6rem; }
+.decision button { min-height: 6rem; width: 100%; }
 .payment { text-align: center; min-height: 6rem; display: grid; place-items: center; }
 .booking-card { padding: 1.25rem; border: 2px solid var(--accent); border-radius: 1.25rem; font-size: 1.2rem; line-height: 1.5; }
 .booking-card h2 { font-size: 1.4rem; margin: 0 0 .5rem; }

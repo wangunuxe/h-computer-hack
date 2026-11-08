@@ -39,6 +39,12 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it.each(['Taxi class', 'Choose your taxi', 'Berline taxi', 'Taxi break confort', 'Taxi van', 'Choose your shuttle', 'Vehicle class', 'Private Sedan', 'Comfort Estate', 'Private Minivan', 'Continue to vehicles'])('recognizes vehicle-selection wording: %s', (element) => {
+    expect(bookingAction(element)).toBe('vehicle');
+  });
+  it('recognizes an assistance animal request as driver notes', () => {
+    expect(bookingAction('assistance animal request')).toBe('notes');
+  });
   it.each([29.6, 29.60000001])('compares handoff amount %s in cents, rejecting one cent of difference', async (amount) => {
     const mock = setup(async function* (tools) {
       await call(tools, 'confirm_with_user', { summary: 'Taxi', ...confirmationFields, total_price: 29.6 });

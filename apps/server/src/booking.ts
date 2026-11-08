@@ -17,12 +17,12 @@ export type BookingPage = 'route' | 'vehicle' | 'info' | 'payment';
 export type BookingAction = 'pickup' | 'dropoff' | 'date' | 'time' | 'vehicle' | 'passenger' | 'notes';
 export function bookingAction(element: string): BookingAction | undefined {
   const text = element.toLowerCase();
-  if (/note|guide.dog/.test(text)) return 'notes';
+  if (/note|guide.dog|assistance.animal/.test(text)) return 'notes';
   if (/date|calendar/.test(text)) return 'date';
   if (/time/.test(text)) return 'time';
   if (/pickup|departure address/.test(text)) return 'pickup';
   if (/dropoff|destination address/.test(text)) return 'dropoff';
-  if (/vehicle|sedan|estate|minivan/.test(text)) return 'vehicle';
+  if (/vehicle|sedan|estate|minivan|taxi class|choose your (?:taxi|shuttle)|berline taxi|taxi break confort|taxi van/.test(text)) return 'vehicle';
   if (/name|email|telephone|passenger|luggage/.test(text)) return 'passenger';
   return undefined;
 }

@@ -39,6 +39,17 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it('compares handoff amounts in cents, accepting float noise but rejecting one cent', async () => {
+    const mock = setup(async function* (tools) {
+      await call(tools, 'confirm_with_user', { summary: 'Taxi', ...confirmationFields, total_price: 29.6 });
+      yield observation(stub);
+      expect(await call(tools, 'handoff_payment', { amount: 29.61, merchant: 'Shuttle', summary: 'Taxi' })).toContain('ERROR');
+      expect(mock.input.onPaymentHandoff).not.toHaveBeenCalled();
+      expect(await call(tools, 'handoff_payment', { amount: 29.60000001, merchant: 'Shuttle', summary: 'Taxi' })).toContain('Payment handed off');
+    });
+    await runBooking(mock.input, mock.client);
+    expect(mock.input.onPaymentHandoff).toHaveBeenCalledOnce();
+  });
   it('rejects a payment handoff amount that differs from the approved fare', async () => {
     const mock = setup(async function* (tools) {
       await confirm(tools); yield observation(stub);

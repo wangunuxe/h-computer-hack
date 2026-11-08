@@ -20,6 +20,26 @@ beforeEach(() => {
 });
 afterEach(() => { stop?.(); vi.useRealTimers(); vi.clearAllMocks(); });
 describe('live showcase pairing DOM', () => {
+  it('resumes after repeated bfcache restores and refreshes an invalidated ticket', async () => {
+    const transition = (type: string) => window.dispatchEvent(Object.assign(new Event(type), { persisted: true }));
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ code: 'ABC234', watch_id: 'old', watch_token: 'old-token' }))).mockResolvedValueOnce(new Response(JSON.stringify({ code: 'NEW234', watch_id: 'new', watch_token: 'new-token' })));
+    stop = startWatchPage({ fetcher, Socket: Socket as unknown as typeof WebSocket }); await vi.advanceTimersByTimeAsync(0);
+    transition('pagehide'); await vi.advanceTimersByTimeAsync(60_000); expect(Socket.instances).toHaveLength(1);
+    transition('pageshow'); await vi.advanceTimersByTimeAsync(0); expect(Socket.instances).toHaveLength(2); expect(Socket.instances[1]!.url).toContain('/ws/watch/old');
+    Socket.instances[1]!.close(4401); await vi.advanceTimersByTimeAsync(1000);
+    expect(document.getElementById('pairing-code')!.textContent).toBe('NEW234'); expect(Socket.instances[2]!.url).toContain('/ws/watch/new');
+    transition('pagehide'); transition('pageshow'); await vi.advanceTimersByTimeAsync(0); expect(Socket.instances).toHaveLength(4);
+    Socket.instances[0]!.message({ type: 'paired', stage: 'LISTEN' }); expect(document.getElementById('pairing')!.hidden).toBe(false);
+    stop(); transition('pageshow'); await vi.advanceTimersByTimeAsync(60_000); expect(Socket.instances).toHaveLength(4);
+  });
+  it('ignores an in-flight ticket response from before the page was cached', async () => {
+    let resolve!: (value: Response) => void;
+    const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>((done) => { resolve = done; })).mockResolvedValueOnce(new Response(JSON.stringify({ code: 'NEW234', watch_id: 'new', watch_token: 'new-token' })));
+    stop = startWatchPage({ fetcher, Socket: Socket as unknown as typeof WebSocket });
+    window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true })); await vi.advanceTimersByTimeAsync(0);
+    resolve(new Response(JSON.stringify({ code: 'OLD234', watch_id: 'old', watch_token: 'old-token' }))); await vi.advanceTimersByTimeAsync(0);
+    expect(Socket.instances).toHaveLength(1); expect(Socket.instances[0]!.url).toContain('/ws/watch/new'); expect(document.getElementById('pairing-code')!.textContent).toBe('NEW234');
+  });
   it('shows a local QR alongside mock mode, switches on pair, returns to mock on disconnect, and reconnects read-only', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ code: 'ABC234', watch_id: 'id', watch_token: 'private-token' }), { status: 201 }));
     const modes = vi.fn(), events = vi.fn(); window.addEventListener('showcase-mode', modes); window.addEventListener('showcase-event', events);

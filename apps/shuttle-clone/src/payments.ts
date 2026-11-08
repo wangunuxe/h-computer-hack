@@ -28,7 +28,7 @@ export function createPayments(env: NodeJS.ProcessEnv = process.env, client?: St
         line_items: [{
           price_data: {
             currency: 'eur', unit_amount: order.vehicle.price * 100,
-            product_data: { name: `Paris Airport Shuttle — ${order.vehicle.text}` },
+            product_data: { name: `Taxi Paris Réservation — ${order.vehicle.text}` },
           },
           quantity: 1,
         }],

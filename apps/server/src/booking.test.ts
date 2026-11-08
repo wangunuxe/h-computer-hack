@@ -12,7 +12,7 @@ const observation = (url?: string): HaiAgents.SessionEvent => ({ type: 'AgentEve
 const call = async (tools: readonly Tool[], name: string, args: Record<string, unknown>) => tools.find((item) => item.name === name)!.fn(args);
 const confirmationFields = { pickup_date: '2027-01-15', pickup_time: '12:15', total_price: 65, currency: 'EUR' };
 const confirm = (tools: readonly Tool[]) => call(tools, 'confirm_with_user', { summary: 'Karim to CDG, EUR 65, guide dog', ...confirmationFields });
-const handoff = (tools: readonly Tool[]) => call(tools, 'handoff_payment', { amount: 65, merchant: 'Paris Airport Shuttle', summary: 'PAS-123' });
+const handoff = (tools: readonly Tool[]) => call(tools, 'handoff_payment', { amount: 65, merchant: 'Taxi Paris Réservation', summary: 'PAS-123' });
 
 function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.SessionEvent> = async function* (tools) {
   await confirm(tools);
@@ -39,6 +39,12 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it.each(['Taxi class', 'Choose your taxi', 'Berline taxi', 'Taxi break confort', 'Taxi van', 'Choose your shuttle', 'Vehicle class', 'Private Sedan', 'Comfort Estate', 'Private Minivan', 'Continue to vehicles'])('recognizes vehicle-selection wording: %s', (element) => {
+    expect(bookingAction(element)).toBe('vehicle');
+  });
+  it('recognizes an assistance animal request as driver notes', () => {
+    expect(bookingAction('assistance animal request')).toBe('notes');
+  });
   it.each([29.6, 29.60000001])('compares handoff amount %s in cents, rejecting one cent of difference', async (amount) => {
     const mock = setup(async function* (tools) {
       await call(tools, 'confirm_with_user', { summary: 'Taxi', ...confirmationFields, total_price: 29.6 });
@@ -53,7 +59,7 @@ describe('H booking runner', () => {
   it('rejects a payment handoff amount that differs from the approved fare', async () => {
     const mock = setup(async function* (tools) {
       await confirm(tools); yield observation(stub);
-      expect(await call(tools, 'handoff_payment', { amount: 1, merchant: 'Paris Airport Shuttle', summary: 'PAS-123' })).toContain('ERROR');
+      expect(await call(tools, 'handoff_payment', { amount: 1, merchant: 'Taxi Paris Réservation', summary: 'PAS-123' })).toContain('ERROR');
       expect(mock.input.onPaymentHandoff).not.toHaveBeenCalled();
       await handoff(tools);
     });
@@ -315,6 +321,11 @@ describe('H booking runner', () => {
     const params = mock.startSession.mock.calls[0] as unknown as [{ agent: { instructions: string } }];
     const playbook = await readFile(new URL('../../../playbooks/paris-airport-shuttle.md', import.meta.url), 'utf8');
     expect(params[0].agent.instructions).toContain(playbook);
+    expect(params[0].agent.instructions).toContain('The merchant is Taxi Paris Réservation');
+    expect(playbook).toContain('Step 4 — Taxi payment');
+    expect(playbook).toContain('Berline taxi — up to 3 passengers, 2 suitcases');
+    expect(playbook).toContain('Guide dog / assistance animal and driver notes');
+    expect(params[0].agent.instructions).not.toContain('Paris Airport Shuttle');
     expect(params[0].agent.instructions).toContain('Never enter payment details or pay');
     expect(params[0].agent.instructions).toContain(JSON.stringify(mock.input.trip));
     expect(params[0].agent.instructions).toContain(JSON.stringify(mock.input.profile));

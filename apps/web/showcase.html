@@ -683,7 +683,7 @@ addEventListener('showcase-mode',e=>{
 addEventListener('showcase-event',e=>{
   if(!liveMode)return;const event=e.detail;
   if(event.type==='stage'){setLiveStage(event.stage);return;}
-  const tool={final_transcript:'gladia',user_reply:'gladia',agent_step:'h',confirm:'h',payment_handoff:'stripe'}[event.type]??(event.type==='feed'?{traffic:'h',research:'linkup'}[event.kind]:undefined);if(tool)pingTool(tool);
+  const tool={final_transcript:'gladia',agent_step:'h',confirm:'h',payment_handoff:'stripe'}[event.type]??(event.type==='feed'?{traffic:'h',research:'linkup'}[event.kind]:undefined);if(tool)pingTool(tool);
   const entry=liveEntry(event);if(entry){const row=document.createElement('li'),stamp=document.createElement('b');const elapsed=Math.floor(Math.max(0,Date.now()-liveStarted)/1000);stamp.textContent=String(Math.floor(elapsed/60)).padStart(2,'0')+':'+String(elapsed%60).padStart(2,'0');row.append(stamp,document.createTextNode('  '+entry[0]+'  '+entry[1]));logEl.append(row);while(logEl.children.length>100)logEl.firstChild.remove();logEl.scrollTop=logEl.scrollHeight;}
   if(event.type==='feed'&&event.kind==='traffic'){for(const match of event.text.matchAll(/\b(?:RER\s+[A-E]|M\s*\d{1,2}(?:bis)?|(?:ligne|line)\s+\d{1,2}(?:bis)?)\b/gi)){researchLines.add(match[0].replace(/^(?:ligne|line)\s+/i,'M').replace(/^M\s+/i,'M').toUpperCase());}if(currentLiveStage==='RESEARCH'&&researchLines.size)setLiveStage('RESEARCH');}
   if(event.type==='say')say('Voilà',event.text);

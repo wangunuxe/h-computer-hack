@@ -29,7 +29,6 @@ const savedSession = sessionStorage.load();
 if (savedSession) { credentials = { id: savedSession.id, resume_token: savedSession.resume_token }; helloSent = savedSession.helloSent; }
 let attempt: ConnectionAttempt | undefined;
 let recorder: Recorder | undefined; let releasing = false;
-let pendingStart = false;
 let lastSay = ''; let pendingFocus: Stage | undefined;
 let optionPending = false;
 let lastCards = ''; let lastNarrated = Date.now(); let speechNeedsGesture = true; let progressCue = 0;
@@ -87,7 +86,6 @@ function connection(ready: boolean) {
   recordingLabel();
 }
 function connectionFailure() {
-  clearPendingStart();
   const first = !connectionFailed; connectionFailed = true; connection(false);
   if (first) announce(t().connectionRetry, true);
 }
@@ -123,7 +121,6 @@ async function connect() {
       sessionStorage.save(credentials!, helloSent);
       if (queuedTranscript) { const text = queuedTranscript; queuedTranscript = undefined; sendTranscript(text); }
       if (pendingStop) { send({ type: 'stop' }); pendingStop = false; recordingLabel(); }
-      if (pendingStart) start('connection-open');
     };
     ws.onmessage = (message) => {
       if (ws !== socket) return;
@@ -168,17 +165,17 @@ function resumeConnection() {
 let hiddenTimer: ReturnType<typeof setTimeout> | undefined;
 document.addEventListener('visibilitychange', () => {
   micDebug('visibility', { state: document.visibilityState }); clearTimeout(hiddenTimer);
-  if (document.visibilityState === 'visible') { if (!recorder && !pendingStart) resumeConnection(); }
+  if (document.visibilityState === 'visible') { if (!recorder) resumeConnection(); }
   else {
     if (credentials) sessionStorage.save(credentials, helloSent);
     hiddenTimer = setTimeout(() => {
       if (document.visibilityState === 'visible') return;
-      micDebug('cancel', { reason: 'hidden-timeout' }); clearPendingStart(); recordingLabel(); recorder?.cancel('hidden-timeout');
+      micDebug('cancel', { reason: 'hidden-timeout' }); recordingLabel(); recorder?.cancel('hidden-timeout');
     }, 1000);
   }
 });
 window.addEventListener('pageshow', (event) => { if (event.persisted) resumeConnection(); });
-window.addEventListener('pagehide', () => { micDebug('cancel', { reason: 'pagehide' }); clearTimeout(hiddenTimer); clearPendingStart(); recorder?.cancel('pagehide'); recordingLabel(); if (credentials) sessionStorage.save(credentials, helloSent); });
+window.addEventListener('pagehide', () => { micDebug('cancel', { reason: 'pagehide' }); clearTimeout(hiddenTimer); recorder?.cancel('pagehide'); recordingLabel(); if (credentials) sessionStorage.save(credentials, helloSent); });
 setInterval(() => { if (connected && credentials) sessionStorage.save(credentials, helloSent); }, 60_000);
 setInterval(() => {
   if (!recorder && state.cancellable && voice.idle && Date.now() - lastNarrated >= 30_000) {
@@ -187,7 +184,7 @@ setInterval(() => {
   }
 }, 5000);
 function recordingLabel() {
-  const active = pendingStart || (!!recorder && !releasing);
+  const active = !!recorder && !releasing;
   const control = micControlState({ connected, failed: connectionFailed, active, releasing }, t());
   $('mic-label').textContent = control.caption;
   const talk = $<HTMLButtonElement>('talk');
@@ -198,18 +195,11 @@ function recordingLabel() {
 }
 function start(reason = 'activation') {
   micDebug('start', { reason, speaking: globalThis.speechSynthesis?.speaking, paused: globalThis.speechSynthesis?.paused, pending: globalThis.speechSynthesis?.pending });
-  if (recorder) return;
-  if ((!connected || !credentials || socket?.readyState !== WebSocket.OPEN) && connectionFailed) { retryConnection(); return; }
-  if (!pendingStart) {
-    voice.bargeIn(); voice.hold();
-    if (speechNeedsGesture) voice.enqueue(lastSay || t().welcome);
-    unlock(); cue();
-  }
-  if (!connected || !credentials || socket?.readyState !== WebSocket.OPEN) {
-    pendingStart = true; recordingLabel();
-    void connect(); return;
-  }
-  pendingStart = false; releasing = false;
+  if (!connected) { retryConnection(); return; }
+  if (recorder || !credentials || socket?.readyState !== WebSocket.OPEN) return;
+  voice.bargeIn(); voice.hold();
+  if (speechNeedsGesture) voice.enqueue(lastSay || t().welcome);
+  unlock(); cue(); releasing = false;
   $('errors').replaceChildren();
   const current = new Recorder(sendTranscript, (failure) => { micDebug('recorder.failure', { ...recordingDiagnostic(failure) }); console.warn('Speech recording failed', recordingDiagnostic(failure)); announce(t()[recordingErrorKeys[failure.kind]], true); }, () => { if (recorder === current) { recorder = undefined; releasing = false; $('elapsed').hidden = true; recordingLabel(); } }, () => {
     releasing = true; cue(true); recordingLabel();
@@ -218,16 +208,14 @@ function start(reason = 'activation') {
   }, (seconds) => { $('elapsed').hidden = false; $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }, () => { if (!recorder || recorder === current) voice.resume(); });
   recorder = current; recordingLabel(); void current.start(credentials);
 }
-function clearPendingStart() { if (pendingStart) { pendingStart = false; voice.bargeIn(); voice.resume(); micDebug('pending.cancel'); } }
 function release(reason = 'activation') {
   micDebug('release', { reason });
-  if (pendingStart) { clearPendingStart(); voice.bargeIn(); voice.resume(); cue(true); recordingLabel(); return; }
   if (!recorder || releasing) return; releasing = true; unlock(); cue(true); recordingLabel(); recorder.stop();
 }
 const talk = $<HTMLButtonElement>('talk');
 traceMicEvents(talk);
-bindMicControls(talk, $('dock'), { active: () => pendingStart || !!recorder, start, release });
-$('stop').onclick = () => { clearPendingStart(); voice.bargeIn(); voice.resume(); unlock(); recorder?.cancel('stop-button'); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); };
+bindMicControls(talk, $('dock'), { active: () => !!recorder, start, release });
+$('stop').onclick = () => { voice.bargeIn(); voice.resume(); unlock(); recorder?.cancel('stop-button'); pendingStop = !send({ type: 'stop' }); if (pendingStop) void connect(); state = initialState(); render(); cue(true); talk.focus(); };
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) { const node = document.createElement(tag); if (text) node.textContent = text; return node; }
 function button(text: string, action: () => void) { const node = element('button', text); node.type = 'button'; node.onclick = () => { if (!node.isConnected || node.disabled) return; unlock(); action(); }; return node; }

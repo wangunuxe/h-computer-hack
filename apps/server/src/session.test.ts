@@ -117,19 +117,22 @@ describe('VoilaSession', () => {
     expect(s.session.stage).toBe('CHOOSE'); expect(s.events).not.toContainEqual({ type: 'stage', stage: 'CLARIFY' });
     expect(s.ports.converse).not.toHaveBeenCalled(); expect(s.ports.runBooking).not.toHaveBeenCalled();
   });
-  it('keeps comma-separated profile phone replies local and sends the confirmed number to booking', async () => {
+  it('does not ask for a phone number and books with the default number without saving it to the profile', async () => {
     const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'fr', name: 'Marie', email: 'marie@example.com', guide_dog: false }, gps: null, scenario: 'live' });
     s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
-    await s.choose('zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit');
-    expect(s.ports.runBooking).not.toHaveBeenCalled(); await s.choose('oui');
-    expect(s.ports.runBooking.mock.calls[0]![0].profile.phone).toBe('0612345678');
-    expect(s.ports.understand).toHaveBeenCalledOnce(); expect(s.ports.linkup).toHaveBeenCalledOnce(); expect(s.ports.converse).not.toHaveBeenCalled();
-    expect(JSON.stringify([s.ports.understand.mock.calls[0]![0].transcript, s.ports.linkup.mock.calls])).not.toMatch(/zéro six|0612345678/);
+    expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
+    expect(s.ports.runBooking.mock.calls[0]![0].profile.phone).toBe('+33612345678');
+    expect(JSON.stringify(s.events.filter((event) => event.type === 'profile'))).not.toContain('+33612345678');
+  });
+  it('keeps a saved phone number for booking', async () => {
+    const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'fr', name: 'Marie', phone: '0712345678', email: 'marie@example.com', guide_dog: false }, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
+    expect(s.ports.runBooking.mock.calls[0]![0].profile.phone).toBe('0712345678');
   });
   it("keeps c'est Marie local after asking for a name and passes the confirmed name only to booking", async () => {
     const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'fr', guide_dog: false }, gps: null, scenario: 'live' });
     s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
-    for (const text of ["c'est Marie", 'oui', '0612345678', 'oui', 'marie at example dot com', 'oui']) await s.choose(text);
+    for (const text of ["c'est Marie", 'oui', 'marie at example dot com', 'oui']) await s.choose(text);
     expect(s.ports.runBooking).toHaveBeenCalledOnce(); expect(s.ports.runBooking.mock.calls[0]![0].profile.name).toBe('Marie');
     expect(s.ports.understand).toHaveBeenCalledOnce(); expect(s.ports.linkup).toHaveBeenCalledOnce(); expect(s.ports.converse).not.toHaveBeenCalled();
     const external = JSON.stringify([s.ports.understand.mock.calls[0]![0].transcript, s.ports.linkup.mock.calls]); expect(external).not.toContain('Marie');
@@ -138,7 +141,7 @@ describe('VoilaSession', () => {
     const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { ...trip, guide_dog: tripDog }, missing: [] }) });
     s.session.handle({ type: 'hello', profile: { language: 'en', guide_dog: savedDog }, gps: null, scenario: 'live' });
     s.session.handle({ type: 'final_transcript', text: `Gare du Nord to CDG ${tripDog ? 'with' : 'without'} a guide dog` }); await flush(); await s.choose();
-    for (const value of ['Marie', 'yes', '0612345678', 'yes', 'marie at example dot com', 'yes']) await s.choose(value);
+    for (const value of ['Marie', 'yes', 'marie at example dot com', 'yes']) await s.choose(value);
     expect(s.ports.runBooking).toHaveBeenCalledOnce();
     expect(s.ports.runBooking.mock.calls[0]![0].trip.guide_dog).toBe(tripDog);
     expect(s.ports.runBooking.mock.calls[0]![0].profile.guide_dog).toBe(tripDog);
@@ -169,18 +172,15 @@ describe('VoilaSession', () => {
     const reply = async (text: string) => { s.session.handle({ type: 'user_reply', text }); await flush(); };
     expect(s.events.at(-1)).toEqual({ type: 'say', text: expect.stringContaining('nom') });
     await reply('Marie Test'); await reply('oui');
-    await reply('invalide'); expect(s.events.at(-1)).toEqual({ type: 'say', text: expect.stringContaining('téléphone') });
-    await reply('zéro six douze trente quatre cinquante six soixante dix huit'); await reply('non');
-    await reply('0712345678'); await reply('oui');
     await reply('marie point test arobase example point com'); await reply('oui');
     await reply('non'); expect(s.ports.runBooking).not.toHaveBeenCalled(); await reply('oui');
     expect(s.ports.runBooking).toHaveBeenCalledOnce();
-    expect(s.ports.runBooking.mock.calls[0]![0].profile).toEqual({ language: 'fr', name: 'Marie Test', phone: '0712345678', email: 'marie.test@example.com', guide_dog: false });
+    expect(s.ports.runBooking.mock.calls[0]![0].profile).toEqual({ language: 'fr', name: 'Marie Test', phone: '+33612345678', email: 'marie.test@example.com', guide_dog: false });
     expect(s.ports.converse).not.toHaveBeenCalled();
     await reply('Où en est-on ?');
     const context = JSON.stringify(s.ports.converse.mock.calls);
     for (const secret of ['Marie Test', '0712345678', 'marie.test', 'zero, six', 'zero, sept']) expect(context).not.toContain(secret);
-    expect(s.events.filter((event) => event.type === 'profile')).toHaveLength(4);
+    expect(s.events.filter((event) => event.type === 'profile')).toHaveLength(3);
     expect(s.events).toContainEqual({ type: 'say', text: expect.stringContaining('efface mes informations') });
   });
   it('asks only for guide-dog information for a manual option and skips stored fields', async () => {
@@ -499,7 +499,7 @@ describe('VoilaSession', () => {
     expect(s.events).toContainEqual({ type: 'say', text: expect.stringContaining('Demandez aux agents si un bus de remplacement') });
     expect(s.ports.runBooking).not.toHaveBeenCalled();
   });
-  it.each([['yes', true], ["d'accord", true], ['vas-y', true], ['non', false], ['attends', false]])('passes confirmation %s back to the runner', async (reply, approved) => {
+  it.each([['yes', true], ["d'accord", true], ['vas-y', true], ['Yes ?', true], ['Oui, oui.', true], ['non', false], ['attends', false], ['Non !', false]])('passes confirmation %s back to the runner', async (reply, approved) => {
     const decision = vi.fn();
     const s = setup({ runBooking: async (input) => { decision(await input.confirm('Shuttle', fare)); if (!approved) throw new Error('Declined'); return completed; } });
     await s.start(); await s.choose();

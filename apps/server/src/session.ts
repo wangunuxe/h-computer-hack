@@ -196,14 +196,14 @@ export class VoilaSession {
       this.remember('user', event.text);
       const normalized = event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
       if (this.stage === 'CHOOSE') {
-        if (this.retryOption && /^(oui|yes|retry|reessaye|reessayez|try again|yes please)$/.test(normalized)) { this.select(this.retryOption); return; }
+        if (this.retryOption && (confirmationAnswer(event.text) === 'yes' || /^(retry|reessaye|reessayez|try again)$/.test(normalized))) { this.select(this.retryOption); return; }
         const id = chooseOption(event.text, this.options);
         if (id) { this.select(id); return; }
       }
       if (this.stage === 'CONFIRM' && this.confirmation) {
-        const yes = /^(oui|yes|y|ouais|ok|okay|d accord|vas y|go ahead|yes please|bien sur)$/.test(normalized);
-        const no = /^(non|no|n|attends|attendez|wait|not yet|pas encore)$/.test(normalized);
-        if ((yes || no) && !event.text.includes('?')) { this.decide(yes, event.text); return; }
+        const yes = confirmationAnswer(event.text) === 'yes' || /^(y|vas y|go ahead)$/.test(normalized);
+        const no = confirmationAnswer(event.text) === 'no' || /^(n|attends|attendez|wait|not yet|pas encore)$/.test(normalized);
+        if (yes || no) { this.decide(yes, event.text); return; }
       }
       if (['CLARIFY', 'CHOOSE', 'CONFIRM', 'UNDERSTAND', 'PRESENT', 'RESEARCH', 'EXECUTE', 'HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage)) void this.interpretTurn(event.text);
       else this.error(`Event ${event.type} is not allowed in ${this.stage}.`);
@@ -391,7 +391,7 @@ export class VoilaSession {
   private select(id: string) {
     const method = bookingMethods[id];
     if (!method || !this.options.some((option) => option.id === id)) { this.error('No supported booking method for this option.'); return; }
-    const collector = new VoiceProfile(this.profile!, method.kind === 'h_agent' ? ['name', 'phone', 'email', 'guide_dog'] : ['guide_dog']);
+    const collector = new VoiceProfile(this.profile!, method.kind === 'h_agent' ? ['name', 'email', 'guide_dog'] : ['guide_dog']);
     if (collector.field) { this.profileCollector = collector; this.pendingProfileOption = id; this.profilePrompt(collector.question); return; }
     const option = this.options.find((item) => item.id === id)!;
     if (this.trip.guide_dog && option.guide_dog_status === 'refused') { this.speak('choose-again', {}); return; }
@@ -534,7 +534,7 @@ export class VoilaSession {
       if (base.searchParams.get('difficulty') === 'easy') startUrl.searchParams.set('difficulty', 'easy');
       this.agentPaymentPage = false;
       const result = await this.ports.runBooking({
-        trip, pickupGps: this.pickupGps, fareQuote: this.taxiQuote, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
+        trip, pickupGps: this.pickupGps, fareQuote: this.taxiQuote, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ phone: process.env.VOILA_DEFAULT_PHONE || '+33612345678', ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
         onRetry: () => { if (current()) { this.pendingBookingAction = undefined; this.speak('booking-retry', {}); } },
         onAction: (action) => { if (current() && this.stage === 'EXECUTE') this.pendingBookingAction = action; },
         onProgress: (text) => {

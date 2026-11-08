@@ -6,6 +6,7 @@
   "scripts": {
     "booking": "tsx apps/server/src/booking-cli.ts",
     "dev": "pnpm -r --parallel dev",
+    "stage": "pnpm --filter @voila/stage dev",
     "build": "pnpm -r build",
     "test": "pnpm -r test"
   },

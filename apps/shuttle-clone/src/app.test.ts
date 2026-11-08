@@ -394,6 +394,15 @@ describe('payments', () => {
     expect(checkout).toHaveBeenCalledTimes(2);
     expect(checkout).toHaveBeenLastCalledWith(order, 'https://shuttle.example');
   });
+  it('uses the Render external URL for checkout when SHUTTLE_PUBLIC_URL is unset', async () => {
+    const store = createStore();
+    const checkout = vi.fn().mockResolvedValue('https://checkout.stripe.com/c/pay/test_session');
+    const app = createApp({ store, env: { STRIPE_SECRET_KEY: 'test', RENDER_EXTERNAL_URL: 'https://voila-shuttle.onrender.com' }, payments: { checkout, verify: vi.fn() } });
+    await complete(app);
+    const order = [...store.orders.values()][0]!;
+    await app.request('/checkout/' + order.id, { method: 'POST' });
+    expect(checkout).toHaveBeenLastCalledWith(order, 'https://voila-shuttle.onrender.com');
+  });
   it('returns a retryable error if the gateway fails', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const store = createStore();

@@ -37,6 +37,13 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it('logs and streams the booking failure reason without contact details', async () => {
+    const s = setup({ runBooking: vi.fn<SessionPorts['runBooking']>().mockRejectedValue(new Error('Could not register the route fare estimate (HTTP 401) for karim@example.com.')) });
+    await s.start(); await s.choose();
+    expect(s.ports.logger.error).toHaveBeenCalledWith(expect.stringContaining('HTTP 401'));
+    expect(JSON.stringify(s.ports.logger.error.mock.calls)).not.toContain('karim@example.com');
+    expect(s.events).toContainEqual(expect.objectContaining({ type: 'feed', kind: 'agent', text: expect.stringContaining('Booking error: Could not register the route fare estimate (HTTP 401)') }));
+  });
   it('keeps an existing payment handoff instead of offering another booking after an H result error', async () => {
     const s = setup({ runBooking: vi.fn<SessionPorts['runBooking']>(async (input) => {
       await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: 'Taxi' });

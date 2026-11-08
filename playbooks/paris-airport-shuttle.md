@@ -223,6 +223,8 @@ Heading **Step 4 — Taxi payment**, merchant **Taxi Paris Réservation**, refer
 “Your order has already been created”, countdown starting at **2** seconds,
 and **Pay for taxi by card**. URL: `/fr/reservation/payment/<order-id>`.
 An unpaid order already exists. Copy the reference/order id for handoff.
+This page is the payment handoff point: call `handoff_payment` here right away.
+Do not click **Pay for taxi by card**; the traveler pays on their phone.
 
 After two seconds the form automatically POSTs `/checkout/<order-id>`; the
 button submits immediately. This redirects to `https://checkout.stripe.com/...`

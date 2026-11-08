@@ -25,8 +25,9 @@ export class WatchRegistry {
     const entry = this.entries.get(id);
     if (!entry || !secureEqual(token, entry.token)) return;
     entry.sinks.add(sink);
+    this.timers.clearTimeout(entry.timer);
+    if (!entry.online) this.expire(id, entry);
     if (entry.online && entry.session) {
-      this.timers.clearTimeout(entry.timer);
       sink({ type: 'paired', stage: this.stage(entry.session) });
       for (const event of entry.recent) sink({ type: 'watch', event });
       sink({ type: 'watch', event: { type: 'stage', stage: this.stage(entry.session) } });

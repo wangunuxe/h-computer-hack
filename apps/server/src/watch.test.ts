@@ -7,6 +7,21 @@ import { createSessionServer } from './index.js';
 
 afterEach(() => vi.useRealTimers());
 describe('read-only desktop watches', () => {
+  it('replaces close grace with normal unpaired expiry on every offline attach', () => {
+    vi.useFakeTimers(); const registry = new WatchRegistry();
+    try {
+      for (const paired of [false, true]) {
+        const ticket = registry.issue(String(paired)); if ('error' in ticket) throw Error('ticket');
+        const close = registry.attach(ticket.watch_id, ticket.watch_token, vi.fn())!;
+        if (paired) { registry.pair(ticket.code, 'a'); registry.disconnected('a'); }
+        close(); vi.advanceTimersByTime(29_000);
+        const sink = vi.fn(); expect(registry.attach(ticket.watch_id, ticket.watch_token, sink)).toBeTypeOf('function');
+        vi.advanceTimersByTime(31_000); expect(sink.mock.calls).toEqual([[{ type: 'unpaired' }]]);
+        vi.advanceTimersByTime(10 * 60_000 - 31_000); expect(sink).toHaveBeenLastCalledWith({ type: 'unpaired', expired: true });
+        expect(registry.attach(ticket.watch_id, ticket.watch_token, vi.fn())).toBeUndefined();
+      }
+    } finally { registry.dispose(); }
+  });
   it('reclaims abandoned paired tickets while allowing a 30-second reconnect grace', () => {
     vi.useFakeTimers(); const registry = new WatchRegistry(() => 'CHOOSE', globalThis, 1);
     try {

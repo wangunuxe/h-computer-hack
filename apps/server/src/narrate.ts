@@ -18,6 +18,9 @@ export interface NarrationParams {
   acknowledgement: Empty;
   'clarify-deadline': Empty;
   'research-started': Empty;
+  'location-request': Empty;
+  'confirm-origin': { origin: string };
+  'origin-confirmed': { origin: string };
   disruption: { cause: string; recorded: boolean; mode?: 'demo' | 'live'; status?: 'normal' | 'disrupted' | 'unknown'; origin?: string };
   'traffic-line': { line?: string; mode: 'demo' | 'live'; status: 'normal' | 'disrupted' | 'unknown'; summary: string };
   'present-options': { options: readonly Option[]; now: Date };
@@ -46,6 +49,9 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
     acknowledgement: () => fr ? 'Je vous aide à organiser votre trajet.' : 'I’ll help you plan your journey.',
     'clarify-deadline': () => fr ? 'À quelle heure ferme l’enregistrement ?' : 'What time does check-in close?',
     'research-started': () => fr ? 'Je vérifie le trafic et les alternatives.' : 'I’m checking traffic and alternatives.',
+    'location-request': () => fr ? 'Pour trouver votre point de départ, j’utilise la position de votre téléphone.' : 'To find your starting point, I am using your phone’s location.',
+    'confirm-origin': ({ origin }) => fr ? `Je vous situe à ${origin}. Est-ce votre point de départ ? Dites oui ou non.` : `Your location suggests ${origin}. Is this your starting point? Say yes or no.`,
+    'origin-confirmed': ({ origin }) => fr ? `Votre point de départ est ${origin}.` : `Your starting point is ${origin}.`,
     'traffic-line': ({ line, mode, status, summary }) => {
       const label = line ? `${line} : ` : '';
       if (mode === 'demo') return fr ? `Mode démonstration. ${label}Aucune donnée enregistrée pour ${line ? 'cette ligne' : 'les lignes de ce trajet'}. Le trafic est inconnu.` : `Demo mode. ${label}No recorded data for ${line ? 'this line' : 'the lines on this route'}. Traffic is unknown.`;

@@ -1,6 +1,7 @@
 import { GoogleGenAI, ThinkingLevel, type GenerateContentParameters } from '@google/genai';
 import { TravelerProfileSchema, TripSchema, type TravelerProfile, type Trip } from '@voila/shared';
 import { redactContactText } from './voice-profile.js';
+import { redactGpsCoordinates } from './location.js';
 import { z } from 'zod';
 
 export class UnderstandError extends Error {
@@ -67,7 +68,7 @@ export async function understand({ transcript, profile, now, previous = {}, sign
     });
     const response = await Promise.race([sdk.models.generateContent({
       model,
-      contents: JSON.stringify({ transcript: redactContactText(transcript, profile), previous: parsedPrevious.data, guide_dog_default: parsedProfile.data.guide_dog ?? false, now: parisIso(now), journey_departure: parisIso(now) }),
+      contents: redactGpsCoordinates(JSON.stringify({ transcript: redactContactText(transcript, profile), previous: parsedPrevious.data, guide_dog_default: parsedProfile.data.guide_dog ?? false, now: parisIso(now), journey_departure: parisIso(now) })),
       config: {
         abortSignal: controller.signal,
         thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },

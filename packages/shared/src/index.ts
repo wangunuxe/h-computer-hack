@@ -52,7 +52,10 @@ export const StageSchema = z.enum([
 ]);
 export const ScenarioSchema = z.enum(['demo', 'live']);
 export type Scenario = z.infer<typeof ScenarioSchema>;
+export const GpsSchema = z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180), accuracy: z.number().nonnegative().optional() });
+export type Gps = z.infer<typeof GpsSchema>;
 export const ServerEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('location_request'), request_id: text }),
   z.object({ type: z.literal('profile'), profile: TravelerProfileSchema }),
   z.object({ type: z.literal('profile_request'), question: text }),
   z.object({ type: z.literal('activity'), cancellable: z.boolean() }),
@@ -72,13 +75,11 @@ export const ServerEventSchema = z.discriminatedUnion('type', [
 export type ServerEvent = z.infer<typeof ServerEventSchema>;
 
 export const WebEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('location_result'), request_id: text, gps: GpsSchema.nullable() }),
   z.object({
     type: z.literal('hello'), profile: TravelerProfileSchema,
     scenario: ScenarioSchema.optional(),
-    gps: z.object({
-      latitude: z.number().min(-90).max(90),
-      longitude: z.number().min(-180).max(180),
-    }).nullable(),
+    gps: GpsSchema.nullable(),
   }),
   z.object({ type: z.literal('final_transcript'), text }),
   z.object({ type: z.literal('user_reply'), text }),

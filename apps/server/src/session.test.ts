@@ -26,7 +26,7 @@ function setup(overrides: Partial<SessionPorts> = {}) {
     runBooking: vi.fn<SessionPorts['runBooking']>().mockResolvedValue(completed),
     logger: { error: vi.fn() }, shuttlePublicUrl: () => 'https://shuttle.example', ...overrides,
   };
-  const session = new VoilaSession((event) => { ServerEventSchema.parse(event); if (event.type === 'activity') activity.push(event); else events.push(event); }, ports);
+  const session = new VoilaSession((event) => { ServerEventSchema.parse(event); if (event.type === 'activity') activity.push(event); else events.push(event); if (event.type === 'location_request') queueMicrotask(() => session.handle({ type: 'location_result', request_id: event.request_id, gps: null })); }, ports);
   sessions.push(session);
   const hello = (language = 'en', gps: { latitude: number; longitude: number } | null = null) => session.handle({ type: 'hello', profile: { ...profile, language }, gps, scenario: 'live' });
   const start = async () => { hello(); session.handle({ type: 'final_transcript', text: 'CDG from Gare du Nord' }); await flush(); };
@@ -406,12 +406,13 @@ describe('VoilaSession', () => {
     expect(s.session.stage).toBe('CHOOSE');
     expect(s.ports.trafficH).toHaveBeenCalledTimes(1);
   });
-  it('uses GPS origin when text has none, without asking for luggage or passenger count', async () => {
+  it('confirms an inferred GPS origin before using it, without asking for luggage or passenger count', async () => {
     const s = setup({ understand: vi.fn<SessionPorts['understand']>().mockResolvedValue({ trip: { destination: trip.destination, deadline: trip.deadline }, missing: ['origin'] }) });
     s.hello('fr', { latitude: 48.88, longitude: 2.35 });
     s.session.handle({ type: 'final_transcript', text: 'CDG à 21h' }); await flush();
-    expect(s.session.stage).toBe('CHOOSE');
-    expect(s.events.some((e) => e.type === 'clarify')).toBe(false);
+    expect(s.session.stage).toBe('CLARIFY'); expect(s.ports.trafficH).not.toHaveBeenCalled();
+    await s.choose('oui'); expect(s.session.stage).toBe('CHOOSE');
+    expect(s.events.some((e) => e.type === 'clarify' && e.question.includes('Dites oui ou non'))).toBe(true);
   });
   it('continues with presets if Linkup fails', async () => {
     const s = setup({ linkup: vi.fn().mockRejectedValue(new Error('offline')) });

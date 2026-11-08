@@ -1,4 +1,5 @@
-import { ProfileSchema, ScenarioSchema, TripSchema, WebEventSchema, type Booking, type Option, type TravelerProfile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
+import { ProfileSchema, ScenarioSchema, TripSchema, WebEventSchema, type Booking, type Gps, type Option, type TravelerProfile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
+import { randomUUID } from 'node:crypto';
 import { understand } from './understand.js';
 import { getDemoDisruption, type Disruption } from './adapters/disruption.js';
 import { readRerBTraffic } from './adapters/traffic-h.js';
@@ -9,12 +10,13 @@ import { assessOptions } from './feasibility.js';
 import { bookingMethods, mergeOptions, optionsForTrip } from './options.js';
 import { chooseOption } from './choose.js';
 import { say, type NarrationParams } from './narrate.js';
-import { converse, type ConfirmationContext, type Turn, type TurnResult } from './converse.js';
+import { converse, type ConfirmationContext, type Turn, type TurnInput, type TurnResult } from './converse.js';
 import { sanitizeConfirmationFields } from './confirmation.js';
 import { fallbackQuestion } from './questions.js';
 import { VoiceProfile, forgetDetails, redactContactText } from './voice-profile.js';
 import { mentionsTaxiRequest, requestsTaxi, taxiTurn } from './taxi.js';
 import { relevantLines, trafficPage } from './stations.js';
+import { originFromGps, redactGpsCoordinates } from './location.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 type Research = { traffic: Disruption[]; extraOptions: Option[] };
@@ -39,7 +41,12 @@ export class VoilaSession {
   private pendingProfileOption?: string;
   private retryOption?: string;
   private scenario: Scenario = 'demo';
-  private gpsOrigin?: string;
+  private gps?: Gps;
+  private locationAttempted = false;
+  private locationRequest?: string;
+  private locationTimer?: ReturnType<typeof setTimeout>;
+  private locationTranscript = '';
+  private pendingOrigin?: string;
   private trip: Partial<Trip> = {};
   private options: Option[] = [];
   private booking?: Booking;
@@ -87,6 +94,8 @@ export class VoilaSession {
     if (this.stage === 'DONE' && this.booking) this.send({ type: 'booking_card', booking: this.booking });
     if (this.profile) this.send({ type: 'profile', profile: this.profile });
     if (this.profileCollector) this.profilePrompt(this.profileCollector.question);
+    if (this.locationRequest) this.send({ type: 'location_request', request_id: this.locationRequest });
+    if (this.pendingOrigin) this.confirmOrigin();
     this.reportActivity(true);
     return () => { if (this.emit === emit) this.emit = () => {}; };
   }
@@ -105,17 +114,31 @@ export class VoilaSession {
       if (this.profile) { this.error('Profile already set; reconnect without restarting the trip.'); return; }
       this.profile = event.profile;
       this.scenario = event.scenario ?? (ScenarioSchema.safeParse(process.env.VOILA_SCENARIO).data ?? 'demo');
-      this.gpsOrigin = event.gps ? `${event.gps.latitude}, ${event.gps.longitude}` : undefined;
+      this.gps = event.gps ?? undefined;
       this.transition('LISTEN');
       return;
     }
     if (!this.profile) { this.error('Send hello first.'); return; }
+    if (event.type === 'location_result') { this.locationResult(event.request_id, event.gps); return; }
     if ((event.type === 'final_transcript' || event.type === 'user_reply') && forgetDetails(event.text)) {
       this.resetTrip(); this.profile = { language: this.language };
       this.send({ type: 'profile', profile: this.profile }); this.transition('LISTEN');
       this.send({ type: 'say', text: this.language.startsWith('fr') ? 'Vos informations sont effacées de cet appareil et de cette session.' : 'Your details are cleared from this device and session.' }); return;
     }
     if ((event.type === 'final_transcript' || event.type === 'user_reply') && /^(stop|arrete|arretez|annule|cancel)[.!? ]*$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim())) { this.stop(); return; }
+    if (event.type === 'user_reply' && this.pendingOrigin) {
+      this.remember('user', event.text);
+      const reply = event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
+      if (/^(oui|oui c est ca|oui c est correct|yes|yes please|yes that s right|that s right|correct)$/.test(reply)) {
+        this.trip.origin = this.pendingOrigin; this.pendingOrigin = undefined;
+        this.speak('origin-confirmed', { origin: this.trip.origin });
+        void this.plan('', ++this.generation);
+      } else if (/^(non|non merci|no|no thanks)$/.test(reply)) {
+        this.pendingOrigin = undefined; this.gps = undefined;
+        this.ask(this.fallback());
+      } else this.confirmOrigin();
+      return;
+    }
     if (event.type === 'user_reply' && ['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) && this.payment && /^\/stub-payment\/[^/]+$/.test(new URL(this.payment.url).pathname) && /^(j ai paye|jai paye|i ve paid|i have paid|i paid)$/.test(event.text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim())) { this.handle({ type: 'paid' }); return; }
     if (event.type === 'user_reply' && this.profileCollector) {
       const field = this.profileCollector.field;
@@ -138,7 +161,7 @@ export class VoilaSession {
       this.flow = new AbortController();
       const generation = ++this.generation;
       this.lastHeartbeat = -Infinity;
-      this.trip = this.gpsOrigin ? { origin: this.gpsOrigin } : {};
+      this.trip = {};
       this.remember('user', event.text);
       this.transition('UNDERSTAND');
       this.speak('acknowledgement', {});
@@ -207,6 +230,8 @@ export class VoilaSession {
   }
   private active(generation: number) { return generation === this.generation && !this.flow.signal.aborted; }
   private cancel() {
+    this.ports.timers.clearTimeout(this.locationTimer); this.locationTimer = undefined;
+    this.locationRequest = undefined; this.pendingOrigin = undefined;
     this.profileCollector = undefined; this.pendingProfileOption = undefined;
     this.operations.clear();
     this.turnController?.abort(); ++this.turnVersion;
@@ -222,6 +247,7 @@ export class VoilaSession {
     this.history = []; this.attempt = 0; this.questionReplies = []; this.questionAsked = false;
     this.research = undefined; this.booking = undefined; this.payment = undefined; this.options = []; this.trip = {};
     this.retryOption = undefined;
+    this.locationAttempted = false; this.locationTranscript = '';
   }
   private stop() {
     this.resetTrip();
@@ -259,7 +285,7 @@ export class VoilaSession {
       return disruption;
     })));
     const linkup = this.scenario === 'demo' ? Promise.resolve([] as Option[]) : this.limited((signal) => this.ports.linkup({
-      query: `Transport disruption and alternatives for this request today ${this.ports.clock().toISOString()}. ${redactContactText(transcript, this.profile)}`, signal,
+      query: redactGpsCoordinates(`Transport disruption and alternatives for this request today ${this.ports.clock().toISOString()}. From ${this.trip.origin} to ${this.trip.destination}. ${redactContactText(transcript, this.profile)}`), signal,
     }), 9000, parent).then((result) => {
       if (this.active(generation)) for (const item of result.corroboration) {
         for (const source of item.sources) this.send({ type: 'feed', kind: 'research', text: item.text, source });
@@ -273,7 +299,7 @@ export class VoilaSession {
   private async interpret(transcript: string, generation: number) {
     const finish = this.beginOperation();
     try {
-      const result = await this.limited((signal) => this.ports.understand({ transcript: redactContactText(transcript, this.profile), profile: this.profile!, now: this.ports.clock(), previous: this.trip, signal }), 20_500, this.flow.signal);
+      const result = await this.limited((signal) => this.ports.understand({ transcript: redactGpsCoordinates(redactContactText(transcript, this.profile)), profile: this.profile!, now: this.ports.clock(), previous: this.trip, signal }), 20_500, this.flow.signal);
       if (!this.active(generation)) return;
       this.trip = { passengers: 1, luggage: 0, guide_dog: this.profile!.guide_dog ?? false, ...this.trip, ...result.trip };
       await this.plan(transcript, generation);
@@ -287,7 +313,18 @@ export class VoilaSession {
     } finally { finish(); }
   }
   private missing() { return (['origin', 'destination'] as const).filter((key) => !this.trip[key]); }
-  private remember(role: Turn['role'], text: string) { this.history = [...this.history, { role, text: redactContactText(text, this.profile) }].slice(-10); }
+  private remember(role: Turn['role'], text: string) { this.history = [...this.history, { role, text: redactGpsCoordinates(redactContactText(text, this.profile)) }].slice(-10); }
+  private confirmOrigin() {
+    const question = say('confirm-origin', { origin: this.pendingOrigin! }, this.language);
+    this.lastSay = this.ports.clock().getTime();
+    this.send({ type: 'clarify', question }); this.send({ type: 'say', text: question });
+  }
+  private locationResult(requestId: string, gps: Gps | null) {
+    if (requestId !== this.locationRequest || this.stage !== 'CLARIFY' || this.trip.origin) return;
+    this.ports.timers.clearTimeout(this.locationTimer); this.locationTimer = undefined; this.locationRequest = undefined;
+    if (gps) { this.pendingOrigin = originFromGps(gps); this.confirmOrigin(); }
+    else void this.plan(this.locationTranscript, this.generation);
+  }
   private profilePrompt(question: string) {
     this.lastSay = this.ports.clock().getTime();
     this.send({ type: 'profile_request', question }); this.send({ type: 'say', text: question });
@@ -330,13 +367,16 @@ export class VoilaSession {
     let result: TurnResult;
     const finish = this.beginOperation();
     try {
-      result = await this.limited((signal) => this.ports.converse({ transcript: redactContactText(transcript, this.profile), stage, language: this.language, trip: { ...this.trip }, missing: this.missing(), options: this.options, confirmation: this.confirmation ? { ...this.confirmation.details } : undefined, history: [...this.history], attempt: this.attempt, now: this.ports.clock(), signal }), 20_500, controller.signal);
+      const context: Pick<TurnInput, 'trip' | 'options' | 'confirmation' | 'history'> = JSON.parse(redactGpsCoordinates(JSON.stringify({ trip: this.trip, options: this.options, confirmation: this.confirmation?.details, history: this.history })));
+      result = await this.limited((signal) => this.ports.converse({ ...context, transcript: redactGpsCoordinates(redactContactText(transcript, this.profile)), stage, language: this.language, missing: this.missing(), attempt: this.attempt, now: this.ports.clock(), signal }), 20_500, controller.signal);
     } catch { result = { intent: 'unclear', confidence: 0, reply: this.fallback() }; }
     finally { finish(); if (this.turnController === controller) this.turnController = undefined; }
     if (!this.active(generation) || this.stage !== stage || this.turnVersion !== version || controller.signal.aborted) return;
     result = taxiTurn({ transcript, stage, language: this.language, trip: this.trip, options: this.options, now: this.ports.clock(), attempt: this.attempt }, result);
+    if (this.trip.origin && result.trip_patch?.origin === redactGpsCoordinates(this.trip.origin)) result.trip_patch.origin = this.trip.origin;
     if (result.intent !== 'unclear' && /^(euh|uh|um|hmm|(?:euh[, ]+)?je (?:ne )?sais pas|i don.t know|not sure)[.!? ]*$/i.test(transcript.trim())) result = { intent: 'unclear', confidence: 0, reply: this.fallback() };
     if (result.intent === 'stop' && result.confidence >= .65) { this.stop(); return; }
+    if (this.pendingOrigin && !(['provide_info', 'correct'].includes(result.intent) && result.confidence >= .65 && result.trip_patch?.origin)) { this.confirmOrigin(); return; }
     if (stage === 'CONFIRM') {
       const uncertain = /\b(euh|maybe|perhaps|unsure|not|non|no|pas|attends|demain|tomorrow)\b/i.test(transcript);
       if (result.intent === 'confirm' && result.confidence >= .9 && !uncertain && !Object.keys(result.trip_patch ?? {}).length) { this.answer(result.reply); this.decide(true, transcript); return; }
@@ -364,8 +404,20 @@ export class VoilaSession {
   }
   private async plan(transcript: string, generation: number, question?: string) {
     try {
+      if (this.trip.origin) { this.ports.timers.clearTimeout(this.locationTimer); this.locationRequest = undefined; this.pendingOrigin = undefined; }
       if (this.missing().length) {
         this.transition('CLARIFY');
+        if (!this.trip.origin && !this.locationAttempted) {
+          this.locationAttempted = true; this.locationTranscript = transcript;
+          if (this.gps) { this.pendingOrigin = originFromGps(this.gps); this.gps = undefined; this.confirmOrigin(); }
+          else {
+            const request_id = randomUUID(); this.locationRequest = request_id;
+            this.speak('location-request', {}); this.send({ type: 'location_request', request_id });
+            this.locationTimer = this.ports.timers.setTimeout(() => this.locationResult(request_id, null), 11_000);
+          }
+          return;
+        }
+        if (this.locationRequest || this.pendingOrigin) return;
         if (question) this.ask(question); else await this.interpretTurn(transcript);
         return;
       }

@@ -543,41 +543,42 @@ describe('VoilaSession', () => {
     expect(lastOptions?.items.some((o) => o.id === 'paris-airport-shuttle')).toBe(true);
     expect(s.events).toContainEqual({ type: 'say', text: 'This booking attempt failed. Would you like to retry the airport taxi?' });
   });
-  it('emits a heartbeat after four silent seconds in UNDERSTAND', async () => {
+  it('does not keep narrating after UNDERSTAND has already timed out', async () => {
     const s = setup({ understand: () => new Promise(() => {}) }); await s.start();
-    await vi.advanceTimersByTimeAsync(3999);
-    expect(s.events.some((e) => e.type === 'say' && e.text === 'Still working. One moment.')).toBe(false);
+    await vi.advanceTimersByTimeAsync(24_999);
+    expect(s.events.some((e) => e.type === 'say' && e.text === 'The check is still in progress. You can say stop.')).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Still working. One moment.' });
+    expect(s.session.stage).toBe('LISTEN');
+    expect(s.events.some((e) => e.type === 'say' && e.text === 'The check is still in progress. You can say stop.')).toBe(false);
   });
   it.each(['fr', 'en'])('backs off unprefixed EXECUTE heartbeats in %s', async (language) => {
     const s = setup({ runBooking: () => new Promise(() => {}) });
     s.hello(language); s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
-    const text = language === 'fr' ? 'Je continue, un instant.' : 'Still working. One moment.';
-    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text === text);
-    await vi.advanceTimersByTimeAsync(3999); expect(heartbeats()).toHaveLength(0);
+    const cues = language === 'fr' ? ['La vérification est toujours en cours. Vous pouvez dire stop.', 'Je reste en attente de la réponse du site.', 'Cela prend plus de temps que prévu. Je surveille la réponse.'] : ['The check is still in progress. You can say stop.', 'I am waiting for the site to respond.', 'This is taking longer than expected. I am watching for a response.'];
+    const heartbeats = () => s.events.filter((e) => e.type === 'say' && cues.includes(e.text));
+    await vi.advanceTimersByTimeAsync(24_999); expect(heartbeats()).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1); expect(heartbeats()).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(14_999); expect(heartbeats()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(24_999); expect(heartbeats()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1); expect(heartbeats()).toHaveLength(2);
-    await vi.advanceTimersByTimeAsync(15_000); expect(heartbeats()).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(25_000); expect(heartbeats()).toHaveLength(3);
     const spoken = heartbeats().map((event) => event.type === 'say' ? event.text : '');
-    expect(spoken).toEqual(Array(3).fill(text));
+    expect(spoken).toEqual(cues);
     s.session.handle({ type: 'stop' });
     s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
-    await vi.advanceTimersByTimeAsync(4000); expect(heartbeats()).toHaveLength(4);
+    await vi.advanceTimersByTimeAsync(25_000); expect(heartbeats()).toHaveLength(4);
   });
   it('does not carry a research heartbeat back-off into EXECUTE', async () => {
-    const pending = deferred<Awaited<ReturnType<SessionPorts['linkup']>>>();
-    const s = setup({ linkup: () => pending.promise, runBooking: () => new Promise(() => {}) });
+    const pending = deferred<Awaited<ReturnType<SessionPorts['trafficH']>>>();
+    const s = setup({ trafficH: () => pending.promise, runBooking: () => new Promise(() => {}) });
     await s.start(); expect(s.session.stage).toBe('RESEARCH');
-    const heartbeats = () => s.events.filter((e) => e.type === 'say' && e.text.includes('Still working. One moment.'));
-    await vi.advanceTimersByTimeAsync(4000); expect(heartbeats()).toHaveLength(1);
+    const heartbeats = () => s.events.filter((e) => e.type === 'say' && /The check is still|waiting for the site|taking longer/.test(e.text));
+    await vi.advanceTimersByTimeAsync(25_000); expect(heartbeats()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1000);
-    pending.resolve({ corroboration: [], extraOptions: [] }); await flush(); await s.choose();
+    pending.resolve(disruption); await flush(); await s.choose();
     expect(s.session.stage).toBe('EXECUTE');
-    await vi.advanceTimersByTimeAsync(3999); expect(heartbeats()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(24_999); expect(heartbeats()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1); expect(heartbeats()).toHaveLength(2);
-    await vi.advanceTimersByTimeAsync(14_999); expect(heartbeats()).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(24_999); expect(heartbeats()).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(1); expect(heartbeats()).toHaveLength(3);
   });
   it('keeps raw progress in the feed and speaks only localized observed-page milestones', async () => {
@@ -586,13 +587,16 @@ describe('VoilaSession', () => {
     s.hello('fr'); s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
     input.onProgress('Step 5: click_web — Pickup date field'); input.onProgress('Filling in the passenger details');
     input.onPage?.('route'); input.onPage?.('vehicle'); input.onPage?.('info'); input.onPage?.('payment');
-    await vi.advanceTimersByTimeAsync(8000); input.onProgress('User approved. Creating the booking now.');
+    input.onAction?.('time');
+    await vi.advanceTimersByTimeAsync(25_000); input.onProgress('User approved. Creating the booking now.');
     expect(s.events.filter((e) => e.type === 'feed' && e.kind === 'agent')).toHaveLength(3);
     expect(s.events).toContainEqual({ type: 'feed', kind: 'agent', text: 'Step 5: click_web — Pickup date field' });
     const speech = s.events.filter((e) => e.type === 'say').map((e) => e.text);
     for (const text of ['Je remplis l’itinéraire.', 'Je choisis le véhicule.', 'Je remplis vos coordonnées.', 'La réservation est prête pour le paiement.']) expect(speech).toContain(text);
     expect(speech.join(' ')).not.toMatch(/click_web|Step 5|Filling in|User approved/);
-    expect(speech).toContain('Je continue, un instant.');
+    expect(speech).toContain('Je choisis l’heure de prise en charge.');
+    input.onRetry?.();
+    expect(s.events.at(-1)).toEqual({ type: 'say', text: 'Le site met du temps, je réessaie.' });
   });
   it('reports invalid/wrong-stage input and wrong payment references without crashing', async () => {
     const s = setup();
@@ -600,5 +604,17 @@ describe('VoilaSession', () => {
     expect(s.events.filter((e) => e.type === 'error')).toHaveLength(3);
     expect(s.session.markPaid('wrong')).toBe(false);
     expect(s.session.stage).toBe('LISTEN');
+  });
+  it('does not carry a pending action through confirmation or into a new trip', async () => {
+    let input!: BookingInput;
+    const s = setup({ runBooking: async (value) => { input = value; return new Promise(() => {}); } });
+    await s.start(); await s.choose(); input.onAction?.('pickup');
+    void input.confirm('Taxi', { total_price: 65, currency: 'EUR' }); await flush();
+    await s.choose('yes'); await vi.advanceTimersByTimeAsync(25_000);
+    expect(s.events.filter((event) => event.type === 'say').map((event) => event.text)).not.toContain('I am entering the pickup address.');
+    input.onAction?.('pickup'); s.session.handle({ type: 'stop' });
+    s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
+    const count = s.events.length; await vi.advanceTimersByTimeAsync(25_000);
+    expect(s.events.slice(count).filter((event) => event.type === 'say').map((event) => event.text)).not.toContain('I am entering the pickup address.');
   });
 });

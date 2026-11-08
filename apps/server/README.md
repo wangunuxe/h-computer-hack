@@ -205,6 +205,12 @@ address is always used and `x-forwarded-for` is ignored. Only with `TRUST_PROXY=
 is the first forwarded hop used when present, falling back to the socket address
 when absent. Enable this only behind a trusted proxy that overwrites untrusted
 forwarded headers rather than blindly preserving them.
+`POST /watch` (showcase live view) applies the same per-IP limit of three, but
+only to abandoned tickets: watches attached by an open showcase page are not
+counted (up to twenty watches per IP in total), and never-attached tickets expire
+after one minute. When serving through
+a tunnel such as `cloudflared`, every request arrives from loopback; set
+`TRUST_PROXY=1` so visitors are distinguished by their forwarded IP.
 Session timers are injectable for offline tests. There is no persistence.
 Payment callbacks arriving before the runner finishes are remembered; a matching
 booking reference completes directly in DONE, without waiting for another callback.

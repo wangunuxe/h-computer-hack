@@ -12,13 +12,14 @@ export class WatchRegistry {
   constructor(private stage: (id: string) => Stage = () => 'LISTEN', private timers: Pick<typeof globalThis, 'setTimeout' | 'clearTimeout'> = globalThis, private capacity = 100) {}
   issue(ip: string) {
     if (this.entries.size >= this.capacity) return { error: 'capacity' as const };
-    if ([...this.entries.values()].filter((entry) => entry.ip === ip && !entry.online).length >= 3) return { error: 'client-limit' as const };
+    const own = [...this.entries.values()].filter((entry) => entry.ip === ip);
+    if (own.length >= 20 || own.filter((entry) => !entry.online && !entry.sinks.size).length >= 3) return { error: 'client-limit' as const };
     const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     let code: string;
     do { code = [...randomBytes(6)].map((n) => alphabet[n & 31]).join(''); } while (this.codes.has(code));
     const watch_id = randomBytes(24).toString('base64url'), watch_token = randomBytes(32).toString('base64url');
     const entry: Watch = { token: watch_token, code, ip, online: false, sinks: new Set(), recent: [] };
-    this.entries.set(watch_id, entry); this.codes.set(code, watch_id); this.expire(watch_id, entry);
+    this.entries.set(watch_id, entry); this.codes.set(code, watch_id); this.expire(watch_id, entry, 60_000);
     return { watch_id, watch_token, code };
   }
   attach(id: string, token: string, sink: Sink) {

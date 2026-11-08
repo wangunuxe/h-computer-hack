@@ -182,7 +182,7 @@ function start() {
     releasing = true; cue(true); recordingLabel();
     const text = language === 'fr' ? 'Trois minutes atteintes. Je termine la transcription.' : 'Three-minute limit reached. Finishing the transcript.';
     announce(text);
-  }, (seconds) => { $('elapsed').hidden = false; $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }, () => voice.resume());
+  }, (seconds) => { $('elapsed').hidden = false; $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }, () => { if (!recorder || recorder === current) voice.resume(); });
   recorder = current; recordingLabel(); void current.start(credentials);
 }
 function release() { if (!recorder || releasing) return; releasing = true; unlock(); cue(true); recordingLabel(); recorder.stop(); }

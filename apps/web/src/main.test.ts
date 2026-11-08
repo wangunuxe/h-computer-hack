@@ -42,6 +42,12 @@ afterEach(() => {
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 describe('phone client lifecycle and controls', () => {
+  it('does not resume old playback while a newer recorder is capturing', async () => {
+    await boot(); const talk = document.getElementById('talk')!; talk.click();
+    const first = mocks.recorders[0]!; first.cancel(); talk.click();
+    mocks.resume.mockClear(); first.callbacks[5]!();
+    expect(mocks.resume).not.toHaveBeenCalled();
+  });
   it('reconnects a restored payment tab even without visibilitychange', async () => {
     const socket = await boot(); socket.readyState = 3;
     const event = new Event('pageshow'); Object.defineProperty(event, 'persisted', { value: true }); window.dispatchEvent(event); await flush();

@@ -42,6 +42,18 @@ afterEach(() => {
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 describe('phone client lifecycle and controls', () => {
+  it('observes rejected earcon audio promises rather than leaking rejections', async () => {
+    const rejection = Promise.reject(new Error('Audio unavailable')); void rejection.catch(() => {});
+    const handled = vi.spyOn(rejection, 'catch');
+    vi.stubGlobal('AudioContext', class {
+      currentTime = 0; destination = {};
+      resume = () => rejection;
+      createGain = () => ({ gain: { value: 0 }, connect() {} });
+      createOscillator = () => ({ frequency: { value: 0 }, connect() {}, start() {}, stop() {} });
+    });
+    await boot(); document.getElementById('talk')!.click();
+    expect(handled).toHaveBeenCalledOnce();
+  });
   it('focuses and labels dynamically shown GPS decision controls', async () => {
     const socket = await boot(); document.getElementById('talk')!.focus();
     socket.message({ type: 'stage', stage: 'CLARIFY' }); socket.message({ type: 'clarify', question: 'Use this origin?', yes_no: true });

@@ -47,9 +47,9 @@ function unlock() {
 function cue(stopping = false) {
   navigator.vibrate?.(stopping ? [20, 30, 20] : 35);
   try {
-    const audio = new AudioContext(); void audio.resume();
+    const audio = new AudioContext(); void audio.resume().catch(() => {});
     const oscillator = audio.createOscillator(); const gain = audio.createGain(); gain.gain.value = 0.08;
-    oscillator.frequency.value = stopping ? 440 : 660; oscillator.connect(gain).connect(audio.destination); oscillator.onended = () => { void audio.close(); }; oscillator.start(); oscillator.stop(audio.currentTime + 0.08);
+    oscillator.frequency.value = stopping ? 440 : 660; oscillator.connect(gain).connect(audio.destination); oscillator.onended = () => { void audio.close().catch(() => {}); }; oscillator.start(); oscillator.stop(audio.currentTime + 0.08);
   } catch { /* Haptics and earcons are optional. */ }
 }
 function send(event: WebEvent) {
@@ -144,10 +144,10 @@ async function connect() {
   finally { if (attempt === current) connecting = false; }
 }
 function resumeConnection() {
-    clearTimeout(retry);
-    attempt?.cancel(); attempt = undefined; connecting = false;
-    if (replaceOnForeground(socket?.readyState)) { const stale = socket; socket = undefined; stale?.close(); }
-    void connect();
+  clearTimeout(retry);
+  attempt?.cancel(); attempt = undefined; connecting = false;
+  if (replaceOnForeground(socket?.readyState)) { const stale = socket; socket = undefined; stale?.close(); }
+  void connect();
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') resumeConnection();

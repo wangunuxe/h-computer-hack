@@ -7,7 +7,7 @@ import { searchDisruptionAndAlternatives } from './adapters/linkup.js';
 import { runBooking } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
 import { assessOptions } from './feasibility.js';
-import { bookingMethods, mergeOptions, optionsForTrip } from './options.js';
+import { bookingMethods, isAirport, mergeOptions, optionsForTrip } from './options.js';
 import { chooseOption } from './choose.js';
 import { say, type NarrationParams } from './narrate.js';
 import { converse, type ConfirmationContext, type Turn, type TurnInput, type TurnResult } from './converse.js';
@@ -438,7 +438,7 @@ export class VoilaSession {
       this.transition('PRESENT');
       this.send({ type: 'options', items: this.options });
       for (const report of research.traffic) {
-        if (report.line === 'RER B' && report.recorded) this.speak('disruption', { ...report, origin: !/gare du nord/i.test(trip.origin) ? trip.origin : undefined });
+        if (report.line === 'RER B' && report.recorded) this.speak('disruption', { ...report, airport: isAirport(trip.destination), origin: !/gare du nord/i.test(trip.origin) || !isAirport(trip.destination) ? trip.origin : undefined });
         else this.speak('traffic-line', report);
       }
       if (!research.traffic.length) this.speak('traffic-line', { mode: this.scenario, status: 'unknown', summary: '' });

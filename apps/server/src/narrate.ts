@@ -21,7 +21,7 @@ export interface NarrationParams {
   'location-request': Empty;
   'confirm-origin': { origin: string };
   'origin-confirmed': { origin: string };
-  disruption: { cause: string; recorded: boolean; mode?: 'demo' | 'live'; status?: 'normal' | 'disrupted' | 'unknown'; origin?: string };
+  disruption: { cause: string; recorded: boolean; mode?: 'demo' | 'live'; status?: 'normal' | 'disrupted' | 'unknown'; origin?: string; airport?: boolean };
   'traffic-line': { line?: string; mode: 'demo' | 'live'; status: 'normal' | 'disrupted' | 'unknown'; summary: string };
   'present-options': { options: readonly Option[]; now: Date };
   'still-working': Empty;
@@ -58,10 +58,10 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
       if (status === 'unknown') return fr ? `${label}Je n’ai pas pu lire le trafic actuel. Son état est inconnu.` : `${label}I could not read current traffic. Its status is unknown.`;
       return `${label}${summary}`;
     },
-    disruption: ({ cause, recorded, mode, status, origin: pickup }) => {
+    disruption: ({ cause, recorded, mode, status, origin: pickup, airport = true }) => {
       const origin = mode === 'demo' ? (fr ? 'Mode démonstration. ' : 'Demo mode. ') : mode === 'live' ? (status === 'unknown' ? (fr ? 'Mode direct. Vérification par H indisponible. ' : 'Live mode. H traffic check unavailable. ') : (fr ? 'Trafic en direct, pages officielles lues par H. ' : 'Live traffic, official pages read by H. ')) : '';
       const body = status === 'normal' ? (fr ? 'Le RER B circule normalement. Je vous propose aussi des alternatives.' : 'The RER B is running normally. I’ll still offer alternatives.') : status === 'unknown' ? (fr ? 'Je ne peux pas vérifier l’état du RER B. Statut inconnu. Voici les alternatives.' : 'I can’t verify the RER B status. Its status is unknown. Here are the alternatives.') : cause;
-      const route = pickup && status === 'disrupted' ? (fr ? `Le RER B vers l’aéroport est perturbé. Les alternatives partent de ${pickup}.` : `The airport RER B service is disrupted. Alternatives pick up at ${pickup}.`) : body;
+      const route = pickup && status === 'disrupted' ? (fr ? `${airport ? 'Le RER B vers l’aéroport' : 'Le RER B'} est perturbé. Les alternatives partent de ${pickup}.` : `${airport ? 'The airport RER B service' : 'The RER B service'} is disrupted. Alternatives pick up at ${pickup}.`) : body;
       return `${origin}${recorded ? (fr ? 'Données enregistrées, pas en direct : ' : 'Recorded data, not live: ') : ''}${route}`;
     },
     'present-options': ({ options, now }) => {

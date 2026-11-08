@@ -42,6 +42,12 @@ afterEach(() => {
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 describe('phone client lifecycle and controls', () => {
+  it('submits an option only once before the server responds', async () => {
+    const socket = await boot(); socket.message({ type: 'stage', stage: 'CHOOSE' });
+    socket.message({ type: 'options', items: [{ id: 'taxi', name: 'Taxi', price: 30, pickup_wait_minutes: 5, journey_minutes: 25, guide_dog_status: 'accepted' }] });
+    const option = document.querySelector<HTMLButtonElement>('.option-card')!; option.click(); option.click();
+    expect(socket.send).toHaveBeenCalledTimes(1);
+  });
   it('does not submit a detached approval button after its stage changed', async () => {
     const socket = await boot(); socket.message({ type: 'stage', stage: 'CONFIRM' }); socket.message({ type: 'confirm', summary: 'Approve taxi' });
     const yes = document.getElementById('confirm-yes')!;

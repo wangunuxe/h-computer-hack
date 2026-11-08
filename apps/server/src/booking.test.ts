@@ -88,8 +88,9 @@ describe('H booking runner', () => {
       await vi.advanceTimersByTimeAsync(180_000); expect(mock.cancel).not.toHaveBeenCalled(); expect(mock.startSession).toHaveBeenCalledOnce();
       controller.abort(); release({ approved: false, reply: 'stop' }); await result;
     });
-    it('never automatically rebooks after approval, even if no further step arrives', async () => {
+    it.each([true, false])('never automatically rebooks after a confirmation decision (%s), even if no further step arrives', async (approved) => {
       const mock = setup(async function* (tools) { await confirm(tools); await new Promise(() => {}); });
+      mock.input.confirm = vi.fn(async () => ({ approved, reply: approved ? 'oui' : 'non' }));
       const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
       await vi.waitFor(() => expect(mock.input.confirm).toHaveBeenCalled());
       await vi.advanceTimersByTimeAsync(45_000);

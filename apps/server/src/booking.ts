@@ -85,7 +85,7 @@ async function runBookingAttempt(input: BookingInput, client: BookingClient) {
   let steps = 0;
   let lastStep = Date.now();
   let waitingForUser = false;
-  let submittedRisk = false;
+  let confirmationRequested = false;
   let watchdog: ReturnType<typeof setInterval> | undefined;
   let costUsd: number | null | undefined;
   let rejectFailure!: (error: unknown) => void;
@@ -104,6 +104,7 @@ async function runBookingAttempt(input: BookingInput, client: BookingClient) {
       inputSchema: z.toJSONSchema(ConfirmationToolSchema),
       fn: (args) => guarded(async () => {
         input.signal?.throwIfAborted();
+        confirmationRequested = true;
         const { summary } = z.object({ summary: z.string().min(1) }).parse(args);
         approved = false; approvedDetails = undefined;
         const details = sanitizeConfirmationFields(args);
@@ -115,7 +116,6 @@ async function runBookingAttempt(input: BookingInput, client: BookingClient) {
         finally { waitingForUser = false; lastStep = Date.now(); }
         input.signal?.throwIfAborted();
         approved = decision.approved;
-        submittedRisk ||= approved;
         if (approved) approvedDetails = details;
         return `${approved ? 'APPROVED: Continue with this booking.' : 'REJECTED: Do not submit or create the order.'} User reply: ${decision.reply}`;
       }),
@@ -167,7 +167,7 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
     const handle = session;
     lastStep = Date.now();
     watchdog = setInterval(() => {
-      if (!waitingForUser && Date.now() - lastStep >= (steps ? 60_000 : 45_000)) rejectFailure(new BookingStalledError(!submittedRisk && !paymentUrl, steps, costUsd));
+      if (!waitingForUser && Date.now() - lastStep >= (steps ? 60_000 : 45_000)) rejectFailure(new BookingStalledError(!confirmationRequested && !paymentUrl, steps, costUsd));
     }, 1000);
     watchdog.unref?.();
     const work = async () => {

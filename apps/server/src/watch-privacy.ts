@@ -26,7 +26,12 @@ export function sanitizeWatchEvent(event: ServerEvent | AgentStep | { type: 'fin
       return url.origin + (page ? '/fr/reservation/…/' + page : '');
     } catch { return; }
   };
-  const safe = JSON.parse(JSON.stringify(value, (key, item: unknown) => typeof item === 'string' ? ['url', 'source'].includes(key) ? safeUrl(item) : clean(item) : item));
+  const safe = JSON.parse(JSON.stringify(value, (key, item: unknown) => {
+    if (typeof item !== 'string') return item;
+    if (!['url', 'source'].includes(key)) return clean(item);
+    const url = safeUrl(item);
+    return url && clean(url) === url ? url : undefined;
+  }));
   const parsed = WatchPayloadSchema.safeParse(safe);
   return parsed.success ? parsed.data : undefined;
 }

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { HaiAgentsClient, tool, type SessionHandle } from 'hai-agents';
-import { BookingSchema, type Booking, type Trip, type Profile } from '@voila/shared';
+import { BookingSchema, estimateTaxi, parisPickupTime, type Booking, type Trip, type Profile } from '@voila/shared';
 import { z } from 'zod';
 import { ConfirmationToolSchema, sanitizeConfirmationFields, type ConfirmationFields } from './confirmation.js';
 import { pickupWindow, pickupProblem } from './pickup-window.js';
@@ -28,6 +28,7 @@ export function bookingAction(element: string): BookingAction | undefined {
 }
 export interface BookingInput {
   trip: Trip;
+  fareQuote?: import('@voila/shared').TaxiQuote;
   pickupGps?: { latitude: number; longitude: number; accuracy?: number };
   journeyMinutes?: number;
   profile: Profile;
@@ -76,7 +77,30 @@ function normalizeImage(value: unknown): string | undefined {
 class BookingStalledError extends Error {
   constructor(public retryable: boolean, public steps: number, public costUsd: number | null | undefined) { super('H booking stalled without new steps.'); }
 }
+export async function registerFareQuote(input: Pick<BookingInput, 'fareQuote' | 'startUrl' | 'signal'>, fetcher = globalThis.fetch, token = process.env.INTERNAL_CALLBACK_TOKEN, cloneUrl = process.env.SHUTTLE_PUBLIC_URL) {
+  if (!input.fareQuote) return input.startUrl;
+  if (!token) throw new Error('Fare quote authentication is not configured.');
+  if (!cloneUrl || new URL(cloneUrl).origin !== new URL(input.startUrl).origin) throw new Error('Fare quotes require the configured shuttle clone origin.');
+  let response: Response | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    input.signal?.throwIfAborted();
+    const timeout = AbortSignal.timeout(30_000);
+    try {
+      response = await fetcher(new URL('/internal/fare-quotes', cloneUrl), { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(input.fareQuote), signal: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout });
+      if (response.status < 500 || attempt) break;
+    } catch (error) {
+      input.signal?.throwIfAborted();
+      if (attempt) throw error;
+    }
+  }
+  if (!response) throw new Error('Could not register the route fare estimate.');
+  if (!response.ok) throw new Error('Could not register the route fare estimate.');
+  const body = await response.json() as { id?: string };
+  if (typeof body.id !== 'string' || !/^[a-f0-9-]{36}$/.test(body.id)) throw new Error('Invalid fare quote response.');
+  const start = new URL(input.startUrl); start.searchParams.set('quote', body.id); return start.href;
+}
 export async function runBooking(input: BookingInput, client: BookingClient = new HaiAgentsClient()) {
+  input = { ...input, startUrl: await registerFareQuote(input) };
   const started = Date.now();
   let previousSteps = 0;
   let previousCost: number | null = 0;
@@ -151,6 +175,7 @@ async function runBookingAttempt(input: BookingInput, client: BookingClient) {
         const details = sanitizeConfirmationFields(args);
         const problem = pickupProblem(details, window, new Date());
         if (problem) return `REJECTED: ${problem}`;
+        if (input.fareQuote && details.total_price !== estimateTaxi({ ...input.fareQuote, at: parisPickupTime(details.pickup_date!, details.pickup_time!)!.toISOString() }).price) return 'REJECTED: The observed price differs from the route estimate. Correct the route or request new options; do not create an order.';
         waitingForUser = true;
         let decision: { approved: boolean; reply: string };
         try { decision = await input.confirm(summary, details); }

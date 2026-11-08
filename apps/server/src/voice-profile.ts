@@ -16,29 +16,42 @@ for (let n = 0; n < 100; n++) {
   const fr = frNumber(n); numbers.set(fr, String(n)); numbers.set(fr.replace(' et ', ' '), String(n));
   numbers.set(n < 20 ? english[n]! : `${['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'][Math.floor(n / 10)]}${n % 10 ? ` ${english[n % 10]}` : ''}`, String(n));
 }
-function phoneDigits(text: string): { digits: string; international: boolean } | undefined {
+const completePhone = (digits: string, international: boolean) => international ? digits.startsWith('33') ? /^33(?:0)?\d{9}$/.test(digits) : /^[1-9]\d{7,14}$/.test(digits) : digits.startsWith('00') ? digits.length >= 10 && digits.length <= 17 : digits.length === 10;
+function phoneDigits(text: string, strict = false): { digits: string; international: boolean } | undefined {
   let value = normal(text).replace(/\bvingts\b/g, 'vingt');
+  if (value.includes('|')) {
+    const parts = value.split('|').filter((part) => part.trim()).map((part) => phoneDigits(part));
+    if (!parts.length || parts.some((part, index) => !part || index > 0 && part.international)) return;
+    const digits = parts.map((part) => part!.digits).join(''), international = parts[0]!.international;
+    return !strict || completePhone(digits, international) ? { digits, international } : undefined;
+  }
   const international = value.startsWith('+') || value.startsWith('plus ');
   value = value.replace(/^(?:\+|plus\s+)/, '').trim();
-  const tokens = value.split(' '); let digits = '';
-  for (let i = 0; i < tokens.length;) {
+  const tokens = value.split(' '), failed = new Set<string>();
+  if (tokens.length > 64) return;
+  const read = (index: number, digits: string): string | undefined => {
+    if (digits.length > 17 || failed.has(`${index}:${digits.length}`)) return;
+    if (index === tokens.length) return !strict || completePhone(digits, international) ? digits : undefined;
+    let i = index;
     let repeat = 1;
     if (tokens[i] === 'double' || tokens[i] === 'triple') { repeat = tokens[i] === 'double' ? 2 : 3; i++; }
-    let part: string | undefined, count = 1;
-    if (/^\d+$/.test(tokens[i] ?? '')) part = tokens[i];
-    else for (let length = Math.min(5, tokens.length - i); length > 0; length--) {
-      const found = numbers.get(tokens.slice(i, i + length).join(' '));
-      if (found !== undefined) { part = found; count = length; break; }
+    if (/^\d+$/.test(tokens[i] ?? '')) {
+      const part = tokens[i]!; if (repeat === 1 || part.length === 1) return read(i + 1, digits + part.repeat(repeat));
+    } else for (let length = Math.min(5, tokens.length - i); length > 0; length--) {
+      const phrase = tokens.slice(i, i + length);
+      const mixed = phrase.map((token) => /^\d{1,2}$/.test(token) ? frNumber(Number(token)) : token).join(' ');
+      const found = numbers.get(phrase.join(' ')) ?? numbers.get(mixed);
+      if (found !== undefined && (repeat === 1 || found.length === 1)) { const result = read(i + length, digits + found.repeat(repeat)); if (result !== undefined) return result; }
     }
-    if (part === undefined || (repeat > 1 && part.length !== 1)) return;
-    digits += part.repeat(repeat); i += count;
-  }
-  return { digits, international };
+    failed.add(`${index}:${digits.length}`); return;
+  };
+  const digits = read(0, ''); return digits === undefined ? undefined : { digits, international };
 }
 export function parsePhone(text: string): string | undefined {
-  const value = phoneDigits(normal(text).replace(/^(?:(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:my )?(?:phone(?: number)?|number)(?: is)?|c est|it is)\s+/, ''));
+  const value = phoneDigits(normal(text.replace(/[,;]/g, ' | ')).replace(/^(?:oui(?: \|)?\s+)?(?:(?:(?:mon|le) )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:my )?(?:phone(?: number)?|number)(?: is)?|c est|it is)(?: le)?\s+/, '').replace(/^le\s+/, ''), true);
   if (!value) return;
-  const { digits, international } = value;
+  const international = value.international;
+  const digits = international && /^330\d{9}$/.test(value.digits) ? '33' + value.digits.slice(3) : value.digits;
   if (!international && digits.startsWith('00')) return digits.length >= 10 && digits.length <= 17 ? '+' + digits.slice(2) : undefined;
   if (international) return /^[1-9]\d{7,14}$/.test(digits) ? '+' + digits : undefined;
   return /^\d{10}$/.test(digits) ? digits : undefined;
@@ -63,20 +76,18 @@ export function redactContactText(text: string, profile?: TravelerProfile): stri
     let value = match[0], joined = false;
     const groups = match.groups!;
     const introduced = /\b(?:call me(?: on| at)?|reach me(?: on| at)?|(?:my )?(?:phone(?: number)?|number)(?: is| s)?|(?:mon )?(?:numero(?: de telephone)?|telephone)(?: est| c est)?|(?:appelez|contactez)(?: moi)?(?: au)?)$/.test(normal(safe.slice(0, offset)));
-    const commaRun = introduced ? commaPhoneSpan.exec(safe.slice(offset))?.[0] : undefined;
+    const commaRun = commaPhoneSpan.exec(safe.slice(offset))?.[0];
     if (commaRun) {
       const fragments = commaRun.split(',');
       if (/^[ \t]+(?:personnes?|passagers?|passengers?|people|bags?|bagages?|valises?)\b/iu.test(safe.slice(offset + commaRun.length))) fragments.pop();
       value = '';
       for (const fragment of fragments) {
         if (temporalFragment.test(fragment.trim())) break;
-        const candidate = value + (value ? ',' : '') + fragment;
-        const current = phoneDigits(candidate);
-        const limit = current && (current.international || current.digits.startsWith('00')) ? 15 : 10;
-        if (!current || current.digits.length > limit) break;
-        value = candidate;
+        value += (value ? ',' : '') + fragment;
       }
-      joined = !!phoneDigits(value);
+      const parsed = parsePhone(value);
+      joined = introduced ? !!phoneDigits(value) : !!parsed && (/^0\d{9}$/.test(parsed) || parsed.startsWith('+'));
+      if (!joined) value = match[0];
     }
     const digits = groups.spoken ? phoneDigits(value)?.digits : undefined;
     const redact = groups.phone || joined || (digits && ((/\p{L}/u.test(value) && digits.length >= 9) || introduced));
@@ -86,13 +97,13 @@ export function redactContactText(text: string, profile?: TravelerProfile): stri
 }
 const dateSpan = /(?<![\p{L}\d])(?<!\d[./:-])(?:\d{4}[-/.](?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])[-/.](?:0?[1-9]|1[0-2])[-/.]\d{4})(?!\d|[./:-]\d)/gu;
 const timeSpan = /(?<![\p{L}\d])(?<!\d[./:-])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?!\d|[./:-]\d)/gu;
-const numberWords = [...numbers.keys(), 'plus', 'double', 'triple'].sort((a, b) => b.length - a.length).map((word) => word.replace(/zero/g, 'z[eé]ro').replace(/ /g, '[ \\t-]+')).join('|');
+const numberWords = [...numbers.keys(), 'plus', 'double', 'triple'].sort((a, b) => b.length - a.length).map((word) => word.split(' ').map((token) => token === 'vingt' ? '(?:vingts?|20)' : numbers.has(token) ? '(?:' + token.replace(/zero/g, 'z[eé]ro') + '|' + numbers.get(token) + ')' : token).join('[ \\t-]+')).join('|');
 const separator = '(?:[ \\t]+|[.:-](?!\\s))?';
 const internationalSeparator = '(?:[ \\t]+|[.-](?!\\s))?';
 const temporalToken = `(?:${dateSpan.source}|\\d{1,2}[:h]\\d{2})`;
 const temporalFragment = new RegExp(`^${temporalToken}`, 'iu');
 const internationalDigit = `(?!${temporalToken})\\d`;
-const numericPhone = `(?<![\\p{L}\\d])(?:\\+${internationalDigit}(?:${internationalSeparator}${internationalDigit}){7,14}|(?:\\+33|0033)${separator}\\(?[1-9]\\)?(?:${separator}\\d){8}|0${separator}[1-9](?:${separator}\\d){8}|\\d{10})(?![\\p{L}\\d])`;
+const numericPhone = `(?<![\\p{L}\\d])(?:\\+${internationalDigit}(?:${internationalSeparator}${internationalDigit}){7,14}|(?:\\+33|0033)${separator}(?:\\(?0\\)?${separator})?\\(?[1-9]\\)?(?:${separator}\\d){8}|0${separator}[1-9](?:${separator}\\d){8}|\\d{10})(?![\\p{L}\\d])`;
 const spokenToken = `(?:\\d{1,2}(?!\\d)|${numberWords})`;
 const spokenRun = `${spokenToken}(?:(?:[ \\t:-]+|\\.(?!\\s))${spokenToken})*`;
 const spokenPhoneSpan = `(?<![\\p{L}\\d])\\+?${spokenRun}(?![\\p{L}\\d])`;
@@ -103,6 +114,7 @@ const yes = (text: string) => confirmationAnswer(text) === 'yes';
 const no = (text: string) => confirmationAnswer(text) === 'no';
 export class VoiceProfile {
   private candidate?: string | boolean;
+  private phoneFailures = 0;
   constructor(public profile: TravelerProfile, private required: Field[]) {}
   get field() { return this.required.find((field) => this.profile[field] === undefined); }
   get yesNo() { return this.candidate !== undefined || this.field === 'guide_dog'; }
@@ -132,6 +144,13 @@ export class VoiceProfile {
     if (this.candidate !== undefined && no(text)) { this.candidate = undefined; return { text: this.question, changed: false, complete: false }; }
     const value = this.parse(text.replace(/^(?:non|no)[, ]+(?:c['’]est |it is )?/i, ''));
     if (value !== undefined) this.candidate = value;
+    if (value === undefined && this.field === 'phone') {
+      this.phoneFailures++;
+      const text = this.profile.language.startsWith('fr')
+        ? `Je n’ai pas reconnu un numéro de téléphone complet à dix chiffres : pour l’essai ${this.phoneFailures}, dites les chiffres deux par deux, par exemple zéro six, douze, trente-quatre, cinquante-six, soixante-dix-huit.`
+        : `I could not recognize a complete phone number: for attempt ${this.phoneFailures}, say the digits in pairs, for example zero six, twelve, thirty-four, fifty-six, seventy-eight.`;
+      return { text, changed: false, complete: false };
+    }
     return { text: value !== undefined ? this.readback() : this.question, changed: false, complete: false };
   }
 }

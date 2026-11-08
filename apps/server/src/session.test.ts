@@ -104,13 +104,13 @@ describe('VoilaSession', () => {
     });
     const s = setup({ understand: (input) => understand(input, client), runBooking });
     s.session.handle({ type: 'hello', profile: { ...profile, language: 'fr' }, gps: null, scenario: 'demo' });
-    s.session.handle({ type: 'final_transcript', text: "Je suis à l'Étoile, mon avion part dans 2 heures, je dois aller à CDG" });
+    s.session.handle({ type: 'final_transcript', text: "Je suis à l'Étoile, mon avion part dans 3 heures, je dois aller à CDG" });
     await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE'));
     expect(s.events.find((event) => event.type === 'options')).toMatchObject({ items: [{ id: 'paris-airport-shuttle', name: 'Airport taxi — Étoile' }] });
     expect(runBooking).not.toHaveBeenCalled();
     expect(JSON.stringify(s.events.filter((event) => event.type === 'say' || event.type === 'options'))).not.toContain('Gare du Nord');
     await s.choose(choice); expect(runBooking).toHaveBeenCalledOnce(); expect(s.session.stage).toBe('CONFIRM');
-    expect(runBooking.mock.calls[0]![0]).toMatchObject({ trip: { origin: 'Étoile', destination: 'CDG' }, journeyMinutes: 35 });
+    expect(runBooking.mock.calls[0]![0]).toMatchObject({ trip: { origin: 'Étoile', destination: 'CDG' }, journeyMinutes: 50, fareQuote: expect.objectContaining({ from: expect.any(Object), to: expect.any(Object) }) });
     expect(s.events).toContainEqual({ type: 'say', text: expect.stringContaining('Taxi vers l’aéroport, prise en charge à Étoile') });
     expect(JSON.stringify(client.models.generateContent.mock.calls)).not.toContain('Gare du Nord');
     await s.choose('oui'); expect(s.session.stage).toBe('AWAIT_PAYMENT');
@@ -122,7 +122,7 @@ describe('VoilaSession', () => {
     const s = setup({ understand: async () => ({ trip: { ...trip, origin: 'Châtelet' }, missing: [] }), linkup: async () => ({ corroboration: [], extraOptions: [presetOptions[0]!, { ...presetOptions[0]!, id: 'g7-phone', name: 'G7 by phone' }, { ...presetOptions[0]!, id: 'gare-du-nord-taxi', name: 'Gare du Nord taxi rank' }] }) });
     s.hello(); s.session.handle({ type: 'final_transcript', text: 'Châtelet vers CDG' }); await flush();
     const options = s.events.find((event) => event.type === 'options');
-    expect(options).toMatchObject({ items: [expect.objectContaining({ name: 'Airport taxi — Châtelet', journey_minutes: 45 }), expect.objectContaining({ id: 'rer-b-replacement-bus' })] });
+    expect(options).toMatchObject({ items: [expect.objectContaining({ name: 'Airport taxi — Châtelet', journey_minutes: 50, price: 56 }), expect.objectContaining({ id: 'rer-b-replacement-bus' })] });
     expect(JSON.stringify(options)).not.toMatch(/Gare du Nord|g7-phone/);
   });
   it('does not enter departure-time clarification for an ASAP relative flight with a known origin', async () => {

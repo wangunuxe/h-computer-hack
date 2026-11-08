@@ -49,10 +49,10 @@ describe('preset options and merge', () => {
     expect(options.every((option) => option.id === 'rer-b-replacement-bus' || bookingMethods[option.id]?.kind === 'h_agent')).toBe(true);
     expect(JSON.stringify(options)).not.toContain('Gare du Nord');
   });
-  it('uses zone estimates and limits replacement buses to disrupted RER B origins', () => {
+  it('uses distance estimates and limits replacement buses to disrupted RER B origins', () => {
     const route = (origin: string, disrupted = true) => optionsForTrip({ origin, destination: 'CDG' }, disrupted);
-    expect(route('Étoile')[0]!.journey_minutes).toBe(35); expect(route('Châtelet')[0]!.journey_minutes).toBe(45);
-    expect(route('Montparnasse')[0]!.journey_minutes).toBe(55); expect(route('12 Rue de la Paix')[0]!.journey_minutes).toBe(50);
+    expect(route('Étoile')[0]!.journey_minutes).toBeGreaterThan(30); expect(route('Châtelet')[0]!.price).toBe(56);
+    expect(route('Montparnasse')[0]!.price).toBe(65); expect(route('12 Rue de la Paix')[0]!.journey_minutes).toBeGreaterThan(30);
     expect(route('Étoile')).toHaveLength(1); expect(route('Gare du Nord')).toHaveLength(2); expect(route('Châtelet')).toHaveLength(2);
     expect(route('Gare du Nord', false)).toHaveLength(1); expect(route('Châtelet', false)).toHaveLength(1);
     expect(optionsForTrip({ origin: '', destination: 'CDG' }, true)).toEqual([]);

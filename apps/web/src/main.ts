@@ -3,7 +3,7 @@ import { canStop, initialState, optionEvent, reduce, transcriptEvent, type Stage
 import { BrowserSpeech, SpeechQueue } from './speech.js';
 import { Recorder, type Credentials } from './recorder.js';
 import { clientProfile, deviceLanguage } from './preferences.js';
-import { labels, optionLabel, stages } from './labels.js';
+import { decisionLabels, labels, optionLabel, stages } from './labels.js';
 import { bindMicControls, micControlState } from './mic-controls.js';
 import { phoneLocation } from './location.js';
 import { recordingDiagnostic, recordingErrorKeys } from './recording-error.js';
@@ -208,7 +208,7 @@ function render() {
       choice.id = 'option-' + option.id; choice.className = 'option-card';
       const name = `${index + 1}. ${optionLabel(option, language)}`;
       const arrival = new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }).format(new Date(Date.now() + (option.pickup_wait_minutes + option.journey_minutes) * 60_000));
-      const details = `${t().arrival} ${arrival} · ${money(option.price)}`;
+      const details = `${t().arrival} ${arrival} · ${language === 'fr' ? 'environ' : 'about'} ${money(option.price)}`;
       choice.setAttribute('aria-label', `${name}. ${details}`);
       const meta = element('span', details); meta.className = 'detail'; choice.append(element('span', name), meta);
       actions.append(index === 0 ? primary(choice) : choice);
@@ -217,9 +217,10 @@ function render() {
   if (state.yesNo) {
     const decisions = element('div'); decisions.className = 'decision';
     decisions.setAttribute('aria-label', t().confirm);
+    const decision = decisionLabels(language, state.stage);
     const answer = (text: string) => { recorder?.cancel(); voice.bargeIn(); voice.resume(); sendTranscript(text); };
-    const yes = button(t().yes, () => answer(language === 'fr' ? 'oui' : 'yes')); yes.id = 'confirm-yes';
-    const no = button(t().no, () => answer(language === 'fr' ? 'non' : 'no')); no.id = 'confirm-no'; no.className = 'secondary';
+    const yes = button(decision.yes, () => answer(language === 'fr' ? 'oui' : 'yes')); yes.id = 'confirm-yes'; yes.setAttribute('aria-label', decision.yes);
+    const no = button(decision.no, () => answer(language === 'fr' ? 'non' : 'no')); no.id = 'confirm-no'; no.className = 'secondary'; no.setAttribute('aria-label', decision.no);
     decisions.append(yes, no); actions.append(primary(decisions));
   }
   if (['HANDOFF', 'AWAIT_PAYMENT'].includes(state.stage) && state.payment) {

@@ -1,4 +1,4 @@
-import { ProfileSchema, ScenarioSchema, TripSchema, WebEventSchema, type Booking, type Gps, type MonitorEvent, type Option, type TravelerProfile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
+import { ProfileSchema, ScenarioSchema, TripSchema, WebEventSchema, resolveTaxiQuote, type TaxiQuote, type Booking, type Gps, type MonitorEvent, type Option, type TravelerProfile, type Scenario, type ServerEvent, type Trip } from '@voila/shared';
 import { randomUUID } from 'node:crypto';
 import { understand } from './understand.js';
 import { getDemoDisruption, type Disruption } from './adapters/disruption.js';
@@ -33,6 +33,7 @@ export interface SessionPorts {
   logger: Pick<Console, 'error'>;
   shuttlePublicUrl: () => string | undefined;
   resolveOrigin: typeof resolveGpsOrigin;
+  resolveFare: typeof resolveTaxiQuote;
 }
 
 export class VoilaSession {
@@ -51,6 +52,7 @@ export class VoilaSession {
   private pendingOrigin?: string;
   private pendingGps?: Gps;
   private pickupGps?: Gps;
+  private taxiQuote?: TaxiQuote;
   private locationResolving = false;
   private trip: Partial<Trip> = {};
   private options: Option[] = [];
@@ -80,7 +82,7 @@ export class VoilaSession {
 
   constructor(private emit: (event: ServerEvent) => void, ports: Partial<SessionPorts> = {}, private observe: (event: ServerEvent | MonitorEvent) => void = () => {}) {
     this.ports = { understand, converse, trafficH: readRerBTraffic, linkup: searchDisruptionAndAlternatives, runBooking,
-      clock: () => new Date(), timers: globalThis, logger: console, shuttlePublicUrl: () => process.env.SHUTTLE_PUBLIC_URL, resolveOrigin: resolveGpsOrigin, ...ports };
+      clock: () => new Date(), timers: globalThis, logger: console, shuttlePublicUrl: () => process.env.SHUTTLE_PUBLIC_URL, resolveOrigin: resolveGpsOrigin, resolveFare: resolveTaxiQuote, ...ports };
     this.lastSay = this.ports.clock().getTime();
     this.heartbeat = this.ports.timers.setInterval(() => {
       const now = this.ports.clock().getTime();
@@ -279,6 +281,7 @@ export class VoilaSession {
     this.ports.timers.clearTimeout(this.locationTimer); this.locationTimer = undefined;
     this.locationRequest = undefined; this.pendingOrigin = undefined;
     this.pendingGps = undefined; this.pickupGps = undefined; this.locationResolving = false;
+    this.taxiQuote = undefined;
     this.pendingBookingAction = undefined;
     this.profileCollector = undefined; this.pendingProfileOption = undefined;
     this.operations.clear();
@@ -490,11 +493,14 @@ export class VoilaSession {
       const research = await this.research;
       if (!this.active(generation)) return;
       const rerBDisrupted = research.traffic.some((report) => report.line === 'RER B' && report.status === 'disrupted');
-      const local = optionsForTrip(trip, rerBDisrupted);
+      const fare = await this.ports.resolveFare(trip, { now: this.ports.clock(), gps: this.pickupGps, signal: this.flow.signal });
+      if (!this.active(generation)) return;
+      this.taxiQuote = fare;
+      const local = optionsForTrip(trip, rerBDisrupted, this.taxiQuote);
       const catalogue = mergeOptions(local, research.extraOptions).filter((option) => bookingMethods[option.id] &&
         (option.id !== 'rer-b-replacement-bus' || local.some((item) => item.id === 'rer-b-replacement-bus'))).map((option) => {
         const contextual = local.find((item) => item.id === option.id);
-        return contextual ? { ...option, name: contextual.name, journey_minutes: contextual.journey_minutes, pickup_wait_minutes: contextual.pickup_wait_minutes } : option;
+        return contextual ? { ...option, name: contextual.name, price: contextual.price, journey_minutes: contextual.journey_minutes, pickup_wait_minutes: contextual.pickup_wait_minutes } : option;
       });
       const assessed = assessOptions(catalogue, trip, this.ports.clock());
       this.options = assessed.feasible;
@@ -532,7 +538,7 @@ export class VoilaSession {
       const startUrl = base.pathname === '/' ? new URL('/fr/reservation/', base) : base;
       if (base.searchParams.get('difficulty') === 'easy') startUrl.searchParams.set('difficulty', 'easy');
       const result = await this.ports.runBooking({
-        trip, pickupGps: this.pickupGps, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
+        trip, pickupGps: this.pickupGps, fareQuote: this.taxiQuote, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
         onRetry: () => { if (current()) { this.pendingBookingAction = undefined; this.speak('booking-retry', {}); } },
         onAction: (action) => { if (current() && this.stage === 'EXECUTE') this.pendingBookingAction = action; },
         onProgress: (text) => {

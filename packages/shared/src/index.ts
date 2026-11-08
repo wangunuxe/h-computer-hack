@@ -1,4 +1,6 @@
 import { z } from 'zod';
+export * from './places.js';
+export * from './taxi.js';
 
 const text = z.string().min(1);
 const amount = z.number().nonnegative();

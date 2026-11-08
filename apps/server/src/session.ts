@@ -570,6 +570,11 @@ export class VoilaSession {
       if (!current()) return;
       this.confirmation?.resolve({ approved: false, reply: 'Booking failed' }); this.confirmation = undefined;
       this.ports.logger.error('Booking execution failed.');
+      if (this.payment) {
+        this.transition('HANDOFF');
+        this.answer(this.language.startsWith('fr') ? 'Le paiement reste disponible sur votre téléphone, mais je n’ai pas pu récupérer la référence. Vérifiez la réservation sur le site avant de recommencer une réservation.' : 'Payment remains available on your phone, but I could not retrieve the reference. Check the booking on the site before starting another booking.');
+        return;
+      }
       this.error(say('booking-failed', {}, this.language));
       this.speak('booking-failed', {});
       this.retryOption = id === 'paris-airport-shuttle' ? id : undefined;

@@ -37,6 +37,20 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-15T10:
 afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('VoilaSession', () => {
+  it('keeps an existing payment handoff instead of offering another booking after an H result error', async () => {
+    const s = setup({ runBooking: async (input) => {
+      await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: 'Taxi' });
+      throw new Error('Malformed final booking answer');
+    } });
+    await s.start(); await s.choose();
+    expect(s.session.stage).toBe('HANDOFF');
+    const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
+    expect(replay).toContainEqual({ type: 'payment_handoff', url: booking.payment_url, amount: 65, merchant: 'Shuttle' });
+    expect(s.events).toContainEqual({ type: 'say', text: expect.stringMatching(/before starting another booking/) });
+    await s.choose('yes');
+    expect(s.ports.runBooking).toHaveBeenCalledOnce();
+    expect(s.events.some((event) => event.type === 'booking_card')).toBe(false);
+  });
   it('keeps origin clarification available after a reply interrupts GPS resolution', async () => {
     const lookup = deferred<string | undefined>();
     const s = setup({ understand: async () => ({ trip: { destination: 'CDG' }, missing: ['origin'] }), resolveOrigin: () => lookup.promise,

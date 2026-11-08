@@ -163,23 +163,62 @@ describe('VoilaSession', () => {
     expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.session.stage).toBe('CHOOSE');
     expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
   });
-  it("keeps c'est Marie local after asking for a name and passes the confirmed name only to booking", async () => {
+  it.each(['fr', 'en'])('skips name questions and readbacks in %s and proceeds without an empty contact prompt', async (language) => {
+    vi.stubEnv('VOILA_DEFAULT_NAME', undefined);
+    const s = setup(); s.session.handle({ type: 'hello', profile: { language, guide_dog: false }, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
+    expect(s.ports.runBooking).toHaveBeenCalledOnce(); expect(s.ports.runBooking.mock.calls[0]![0].profile.name).toBe('Karim Demo');
+    expect(s.session.stage).toBe('AWAIT_PAYMENT');
+    expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
+    expect(JSON.stringify(s.events)).not.toMatch(/Karim Demo|quel est votre nom|what is your name|Est-ce correct|Is that correct/);
+    expect(s.session.watchEvent({ type: 'say', text: 'Karim Demo / Karim / Demo' })).toEqual({ type: 'say', text: '[contact] / [contact] / [contact]' });
+    expect(s.session.watchEvent({ type: 'agent_step', action: 'Entering Karim Demo' })).toBeUndefined();
+    expect(s.ports.understand).toHaveBeenCalledOnce(); expect(s.ports.linkup).toHaveBeenCalledOnce(); expect(s.ports.converse).not.toHaveBeenCalled();
+  });
+  it.each(['fr', 'en'])('uses a validated configured name only for booking and redacts it from the %s watcher', async (language) => {
+    vi.stubEnv('VOILA_DEFAULT_NAME', '  Élodie Martin  ');
+    const s = setup({ runBooking: vi.fn(() => new Promise(() => {})) });
+    const steps: unknown[] = []; s.session.watchSteps((event) => steps.push(event));
+    s.session.handle({ type: 'hello', profile: { language, guide_dog: false }, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
+    const input = s.ports.runBooking.mock.calls[0]![0];
+    expect(input.profile.name).toBe('Élodie Martin');
+    input.onStep?.({ type: 'agent_step', action: 'Entering Élodie Martin, Élodie, Martin' });
+    expect(steps).toEqual([{ type: 'agent_step', action: 'Entering [contact], [contact], [contact]' }]);
+    const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));
+    expect(JSON.stringify([...s.events, ...replay])).not.toContain('Élodie');
+    expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
+  });
+  it.each(['fr', 'en'])('preserves a saved name ahead of the configured default in %s', async (language) => {
+    vi.stubEnv('VOILA_DEFAULT_NAME', '   ');
+    const s = setup(); s.session.handle({ type: 'hello', profile: { ...profile, language }, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
+    expect(s.ports.runBooking.mock.calls[0]![0].profile.name).toBe(profile.name);
+    expect(s.session.watchEvent({ type: 'say', text: profile.name })).toEqual({ type: 'say', text: '[contact]' });
+    expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
+  });
+  it('uses the demo identity for an empty name environment variable', async () => {
+    vi.stubEnv('VOILA_DEFAULT_NAME', '');
     const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'fr', guide_dog: false }, gps: null, scenario: 'live' });
     s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
-    for (const text of ["c'est Marie", 'oui']) await s.choose(text);
-    expect(s.ports.runBooking).toHaveBeenCalledOnce(); expect(s.ports.runBooking.mock.calls[0]![0].profile.name).toBe('Marie');
-    expect(s.ports.understand).toHaveBeenCalledOnce(); expect(s.ports.linkup).toHaveBeenCalledOnce(); expect(s.ports.converse).not.toHaveBeenCalled();
-    const external = JSON.stringify([s.ports.understand.mock.calls[0]![0].transcript, s.ports.linkup.mock.calls]); expect(external).not.toContain('Marie');
+    expect(s.ports.runBooking.mock.calls[0]![0].profile.name).toBe('Karim Demo');
+  });
+  it.each(['fr', 'en'])('rejects a whitespace-only configured name without requesting one in %s', async (language) => {
+    vi.stubEnv('VOILA_DEFAULT_NAME', '   ');
+    const s = setup(); s.session.handle({ type: 'hello', profile: { language, guide_dog: false }, gps: null, scenario: 'live' });
+    s.session.handle({ type: 'final_transcript', text: 'Gare du Nord to CDG' }); await flush(); await s.choose();
+    expect(s.ports.runBooking).not.toHaveBeenCalled(); expect(s.session.stage).toBe('CHOOSE');
+    expect(s.events.some((event) => event.type === 'error')).toBe(true);
+    expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
   });
   it.each([[false, true], [true, false]])('preserves an explicit trip dog=%s over saved dog=%s after contact collection', async (savedDog, tripDog) => {
     const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { ...trip, guide_dog: tripDog }, missing: [] }) });
     s.session.handle({ type: 'hello', profile: { language: 'en', guide_dog: savedDog }, gps: null, scenario: 'live' });
     s.session.handle({ type: 'final_transcript', text: `Gare du Nord to CDG ${tripDog ? 'with' : 'without'} a guide dog` }); await flush(); await s.choose();
-    for (const value of ['Marie', 'yes']) await s.choose(value);
     expect(s.ports.runBooking).toHaveBeenCalledOnce();
     expect(s.ports.runBooking.mock.calls[0]![0].trip.guide_dog).toBe(tripDog);
     expect(s.ports.runBooking.mock.calls[0]![0].profile.guide_dog).toBe(tripDog);
-    expect(s.events.filter((event) => event.type === 'profile').at(-1)).toMatchObject({ profile: { guide_dog: savedDog } });
+    expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
   });
   it.each([true, false])('still applies a newly confirmed guide-dog field: %s', async (guideDog) => {
     const s = setup({ understand: vi.fn().mockResolvedValue({ trip: { ...trip, guide_dog: false }, missing: [] }) });
@@ -197,24 +236,23 @@ describe('VoilaSession', () => {
     const s = setup({ runBooking: async (input) => { await input.onPaymentHandoff({ url: 'https://checkout.stripe.com/test', amount: 65, merchant: 'Stripe', summary: 'Transfer' }); return completed; } });
     await s.start(); await s.choose(); s.session.handle({ type: 'user_reply', text: "I've paid" }); await flush(); expect(s.session.stage).toBe('AWAIT_PAYMENT');
   });
-  it('defers one-field voice profile collection until selection and keeps replies/readbacks out of Gemini history', async () => {
+  it.each(['fr', 'en'])('asks only for missing guide-dog information in %s and keeps booking defaults out of profile and history', async (language) => {
     const s = setup({ runBooking: vi.fn(() => new Promise(() => {})) });
-    s.session.handle({ type: 'hello', profile: { language: 'fr' }, gps: null, scenario: 'demo' });
+    s.session.handle({ type: 'hello', profile: { language }, gps: null, scenario: 'demo' });
     s.session.handle({ type: 'final_transcript', text: 'CDG depuis Gare du Nord' }); await vi.waitFor(() => expect(s.session.stage).toBe('CHOOSE'));
     expect(s.events.some((event) => event.type === 'profile_request')).toBe(false);
     await s.choose(); expect(s.ports.runBooking).not.toHaveBeenCalled();
     const reply = async (text: string) => { s.session.handle({ type: 'user_reply', text }); await flush(); };
-    expect(s.events.at(-1)).toEqual({ type: 'say', text: expect.stringContaining('nom') });
-    await reply('Marie Test'); await reply('oui');
+    expect(s.events.at(-1)).toEqual({ type: 'say', text: expect.stringContaining(language === 'fr' ? 'chien guide' : 'guide dog') });
     await reply('non'); expect(s.ports.runBooking).not.toHaveBeenCalled(); await reply('oui');
     expect(s.ports.runBooking).toHaveBeenCalledOnce();
-    expect(s.ports.runBooking.mock.calls[0]![0].profile).toEqual({ language: 'fr', name: 'Marie Test', phone: '+33612345678', email: 'karim@example.com', guide_dog: false });
+    expect(s.ports.runBooking.mock.calls[0]![0].profile).toEqual({ language, name: 'Karim Demo', phone: '+33612345678', email: 'karim@example.com', guide_dog: false });
     expect(s.ports.converse).not.toHaveBeenCalled();
     await reply('Où en est-on ?');
     const context = JSON.stringify(s.ports.converse.mock.calls);
-    for (const secret of ['Marie Test', '0712345678', 'marie.test', 'zero, six', 'zero, sept']) expect(context).not.toContain(secret);
-    expect(s.events.filter((event) => event.type === 'profile')).toHaveLength(2);
-    expect(s.events).toContainEqual({ type: 'say', text: expect.stringContaining('efface mes informations') });
+    for (const secret of ['Karim Demo', 'karim@example.com', '+33612345678']) expect(context).not.toContain(secret);
+    expect(s.events.filter((event) => event.type === 'profile')).toEqual([{ type: 'profile', profile: { language, guide_dog: false } }]);
+    expect(s.events).toContainEqual({ type: 'say', text: expect.stringContaining(language === 'fr' ? 'efface mes informations' : 'forget my details') });
   });
   it('asks only for guide-dog information for a manual option and skips stored fields', async () => {
     const s = setup(); s.session.handle({ type: 'hello', profile: { language: 'en', guide_dog: false }, gps: null, scenario: 'demo' });

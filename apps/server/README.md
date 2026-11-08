@@ -1,11 +1,16 @@
 # Conversation turns
 
-Taxi booking asks only for a missing name and guide-dog information, never a phone
-number or email address. A saved email is used when available; otherwise booking
-uses `VOILA_DEFAULT_EMAIL` or the demo fallback `karim@example.com`. As with
-`VOILA_DEFAULT_PHONE`, the fallback is booking-only, not saved to the traveler's
+Taxi booking asks only for missing guide-dog information, never a name, phone
+number or email address. If guide-dog information is known, booking proceeds
+directly without a contact prompt. A saved name takes precedence over
+`VOILA_DEFAULT_NAME`, then the demo fallback `Karim Demo` (the booking CLI identity).
+Names are trimmed and validated as nonempty before booking; invalid configuration
+fails booking without asking the traveler for a name. A saved email is used when
+available; otherwise booking uses `VOILA_DEFAULT_EMAIL` or the demo fallback
+`karim@example.com`. As with
+`VOILA_DEFAULT_PHONE`, defaults are booking-only, not saved to the traveler's
 profile or narrated. Configure a monitored address for real receipt delivery.
-Watcher contact redaction remains in effect.
+Watcher contact redaction also covers the booking-only name.
 
 Pending questions track unsuccessful attempts separately from status questions.
 After two failures, clarification includes an example, selection re-reads

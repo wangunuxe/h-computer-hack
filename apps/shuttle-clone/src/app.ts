@@ -200,7 +200,7 @@ export function createApp({
       const order = store.orders.get(session.metadata?.orderId ?? session.client_reference_id ?? '');
       if (!order) return c.text('Order not found', 404);
       if (session.payment_status !== 'paid') return c.json({ received: true });
-      await completePayment(order);
+      if (!await completePayment(order)) return c.text('Payment recorded; callback unavailable. Please retry.', 503);
     }
     return c.json({ received: true });
   });

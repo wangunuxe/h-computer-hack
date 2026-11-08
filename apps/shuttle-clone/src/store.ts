@@ -1,10 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import { estimateTaxi, type TaxiQuote } from '@voila/shared';
 
 export const vehicles = [
-  { id: 'sedan', text: 'Private Sedan — up to 3 passengers, 2 suitcases — 65 EUR', price: 65, capacity: 3, luggageCapacity: 2 },
-  { id: 'estate', text: 'Comfort Estate — up to 4 passengers, 4 suitcases — 85 EUR', price: 85, capacity: 4, luggageCapacity: 4 },
-  { id: 'van', text: 'Private Minivan — up to 8 passengers, 8 suitcases — 110 EUR', price: 110, capacity: 8, luggageCapacity: 8 },
+  { id: 'sedan', text: 'Private Sedan — up to 3 passengers, 2 suitcases', capacity: 3, luggageCapacity: 2 },
+  { id: 'estate', text: 'Comfort Estate — up to 4 passengers, 4 suitcases', capacity: 4, luggageCapacity: 4 },
+  { id: 'van', text: 'Private Minivan — up to 8 passengers, 8 suitcases', capacity: 8, luggageCapacity: 8 },
 ] as const;
+export type Vehicle = { id: string; text: string; price: number; capacity: number; luggageCapacity: number };
+export function vehiclesForDraft(draft: Draft): Vehicle[] {
+  if (!draft.fare) return [];
+  const price = estimateTaxi({ ...draft.fare, passengers: Number(draft.info?.passengers ?? draft.fare.passengers) }).price;
+  return vehicles.map((vehicle) => ({ ...vehicle, price, text: `${vehicle.text} — ${price} EUR` }));
+}
 export const passengerOptions = Array.from({ length: 8 }, (_, i) => ({
   value: String(i + 1), text: `${i + 1} passenger${i === 0 ? '' : 's'} — including children and infants`,
 }));
@@ -23,14 +30,14 @@ export interface Info {
 }
 export interface Draft {
   id: string; difficulty: 'easy' | 'real'; route?: Route;
-  vehicle?: typeof vehicles[number]; info?: Info; orderId?: string;
+  fare?: TaxiQuote; vehicle?: Vehicle; info?: Info; orderId?: string;
 }
 export interface Order {
-  id: string; ref: string; route: Route; vehicle: typeof vehicles[number]; info: Info;
+  id: string; ref: string; route: Route; vehicle: Vehicle; info: Info;
   paid: boolean; checkoutUrl?: string; checkoutSessionId?: string;
 }
 export function createStore() {
-  return { drafts: new Map<string, Draft>(), orders: new Map<string, Order>() };
+  return { drafts: new Map<string, Draft>(), orders: new Map<string, Order>(), quotes: new Map<string, { fare: TaxiQuote; expires: number }>() };
 }
 export type Store = ReturnType<typeof createStore>;
 export function newDraft(difficulty: 'easy' | 'real'): Draft {

@@ -24,6 +24,10 @@ describe('confirmation button labels', () => {
 });
 
 describe('airport taxi label', () => {
+  it('marks the displayed route fare as approximate in both languages', () => {
+    const source = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+    expect(source).toContain("language === 'fr' ? 'environ' : 'about'");
+  });
   it.each(['fr', 'en'] as const)('keeps pickup origin when localizing %s cards and accessible labels', (language) => {
     const text = optionLabel({ id: 'paris-airport-shuttle', name: 'Airport taxi — Étoile' }, language);
     expect(text).toContain('Étoile'); expect(text).toContain(language === 'fr' ? 'Taxi vers l’aéroport' : 'Airport taxi');

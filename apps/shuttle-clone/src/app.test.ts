@@ -14,7 +14,7 @@ const info = { name: 'Karim', email: 'karim@example.com', phone: '+33123456789',
 function setup(env: NodeJS.ProcessEnv = {}) {
   const store = createStore();
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('ok'));
-  return { app: createApp({ store, env, fetcher }), store, fetcher };
+  return { app: createApp({ store, env, fetcher, geocodeFetch: async () => new Response(JSON.stringify({ features: [] })) }), store, fetcher };
 }
 type App = ReturnType<typeof createApp>;
 function post(app: App, path: string, body: Record<string, string>) {
@@ -220,7 +220,7 @@ describe('four-step booking', () => {
     expect(store.orders.size).toBe(1);
     const order = [...store.orders.values()][0]!;
     expect(order.paid).toBe(false);
-    expect(order.vehicle.price).toBe(65);
+    expect(order.vehicle.price).toBe(56);
     expect(order.route).toEqual(route);
     expect((await post(app, base + '/info', info)).headers.get('location')).toBe(paymentPath);
     expect(store.orders.size).toBe(1);

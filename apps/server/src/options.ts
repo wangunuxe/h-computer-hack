@@ -1,5 +1,4 @@
-import type { Option, Trip } from '@voila/shared';
-import { distanceMeters, stationForPlace } from './stations.js';
+import { estimateTaxi, type Option, type Trip, type TaxiQuote } from '@voila/shared';
 
 const normalize = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ');
 export function matchesPresetRoute(trip: Pick<Trip, 'origin' | 'destination'>): boolean {
@@ -18,21 +17,11 @@ export const presetOptions: readonly Option[] = [
   { id: 'rer-b-replacement-bus', name: 'RER B replacement bus', pickup_wait_minutes: 25, journey_minutes: 90, price: 13, guide_dog_status: 'unknown', source: 'https://www.rerb-leblog.fr/' },
 ];
 
-export function optionsForTrip(trip: Pick<Trip, 'origin' | 'destination'>, disrupted: boolean): Option[] {
+export function optionsForTrip(trip: Pick<Trip, 'origin' | 'destination'>, disrupted: boolean, quote?: TaxiQuote): Option[] {
   if (!matchesPresetRoute(trip)) return [];
-  const origin = normalize(trip.origin);
-  const zones: readonly [RegExp, number][] = [
-    [/\b(etoile|arc de triomphe|champs elysees|porte maillot|75008|75016|75017)\b/, 35],
-    [/\b(gare du nord|gare de l est|75010)\b/, 50],
-    [/\b(la chapelle|porte de la chapelle|75018|75019)\b/, 35],
-    [/\b(chatelet|les halles|louvre|rivoli|hotel de ville|75001|75002|75003|75004)\b/, 45],
-    [/\b(montparnasse|denfert|75013|75014|75015)\b/, 55],
-  ];
-  const from = stationForPlace(trip.origin), to = stationForPlace(trip.destination);
   const airport = isAirport(trip.destination);
-  const journey_minutes = airport && /\b(cdg|roissy|charles de gaulle)\b/.test(normalize(trip.destination)) ? zones.find(([zone]) => zone.test(origin))?.[1] ?? 50
-    : from && to ? Math.max(15, Math.ceil((10 + distanceMeters(from, to) / 1000 * 2.5) / 5) * 5) : airport || isAirport(trip.origin) ? 50 : 35;
-  const taxi = { ...presetOptions[0]!, name: `${airport ? 'Airport taxi' : `Taxi to ${trip.destination}`} — ${trip.origin}`, journey_minutes };
+  const { price, journey_minutes, pickup_wait_minutes } = estimateTaxi(quote ?? { ...trip, at: new Date().toISOString(), passengers: 1 });
+  const taxi = { ...presetOptions[0]!, name: `${airport ? 'Airport taxi' : `Taxi to ${trip.destination}`} — ${trip.origin}`, price, journey_minutes, pickup_wait_minutes };
   return [taxi, ...(airport && /\b(cdg|roissy|charles de gaulle)\b/.test(normalize(trip.destination)) && disrupted && isRerBOrigin(trip.origin) ? [{ ...presetOptions[1]! }] : [])];
 }
 

@@ -179,9 +179,11 @@ for that draft. No CAPTCHA or anti-bot challenge is simulated.
 - 23:45
 
 ### Vehicle class
-- Private Sedan — up to 3 passengers, 2 suitcases — 65 EUR
-- Comfort Estate — up to 4 passengers, 4 suitcases — 85 EUR
-- Private Minivan — up to 8 passengers, 8 suitcases — 110 EUR
+- Private Sedan — up to 3 passengers, 2 suitcases
+- Comfort Estate — up to 4 passengers, 4 suitcases
+- Private Minivan — up to 8 passengers, 8 suitcases
+
+Prices are route-based estimates displayed beside each class, not fixed class prices. Preserve the starting URL's quote parameter: it holds Voilà's route and coordinates on the server. Pickup date/time or passenger changes can update the fare. Read the displayed amount before requesting approval; stop if the quote expires.
 
 ### Passengers
 - 1 passenger — including children and infants

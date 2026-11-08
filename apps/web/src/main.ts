@@ -208,7 +208,7 @@ function render() {
       choice.id = 'option-' + option.id; choice.className = 'option-card';
       const name = `${index + 1}. ${optionLabel(option, language)}`;
       const arrival = new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }).format(new Date(Date.now() + (option.pickup_wait_minutes + option.journey_minutes) * 60_000));
-      const details = `${t().arrival} ${arrival} · ${money(option.price)}`;
+      const details = `${t().arrival} ${arrival} · ${language === 'fr' ? 'environ' : 'about'} ${money(option.price)}`;
       choice.setAttribute('aria-label', `${name}. ${details}`);
       const meta = element('span', details); meta.className = 'detail'; choice.append(element('span', name), meta);
       actions.append(index === 0 ? primary(choice) : choice);

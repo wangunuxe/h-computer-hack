@@ -11,7 +11,7 @@ function fixture() {
   } as Stripe.Response<Stripe.Checkout.Session>);
   const retrieve = vi.spyOn(stripe.checkout.sessions, 'retrieve');
   const order: Order = {
-    id: 'order-1', ref: 'PAS-1', vehicle: vehicles[0], paid: false,
+    id: 'order-1', ref: 'PAS-1', vehicle: { ...vehicles[0], price: 65 }, paid: false,
     route: { pickup: 'Paris', dropoff: 'CDG', date: '2030-01-01', time: '12:00',
       pickup_lat: '48', pickup_lng: '2', dropoff_lat: '49', dropoff_lng: '2' },
     info: { name: 'Karim', email: 'karim@example.com', phone: '123', passengers: '1', luggage: '1', notes: '' },
@@ -21,6 +21,13 @@ function fixture() {
 }
 
 describe('Stripe session lifecycle', () => {
+  it('charges exactly 6150 cents for a five-passenger CDG forfait', async () => {
+    const { retrieve, create, order, payments } = fixture();
+    retrieve.mockResolvedValue({ id: 'cs_old', status: 'expired', url: null } as Stripe.Response<Stripe.Checkout.Session>);
+    order.vehicle.price = 61.5;
+    await payments.checkout(order, 'https://shuttle.example');
+    expect(create.mock.calls[0]![0]!.line_items![0]!.price_data!.unit_amount).toBe(6150);
+  });
   it('retrieves and reuses only an open session', async () => {
     const { retrieve, create, order, payments } = fixture();
     retrieve.mockResolvedValue({ id: 'cs_old', status: 'open', url: 'https://checkout.stripe.com/open' } as Stripe.Response<Stripe.Checkout.Session>);

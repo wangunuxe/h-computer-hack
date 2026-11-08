@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Tool, HaiAgents } from 'hai-agents';
-import { bookingAction, bookingErrorMessage, runBooking, type BookingClient, type BookingInput } from './booking.js';
+import { bookingAction, bookingErrorMessage, registerFareQuote, runBooking, type BookingClient, type BookingInput } from './booking.js';
 import { publicShuttleUrl } from './booking-cli.js';
+import { estimateTaxi } from '@voila/shared';
 
 const answer = { ref: 'PAS-123', pickup_time: '2027-01-15T12:15:00+01:00', pickup_point: 'Gare du Nord', price: 65, operator_phone: '+33184800000', guide_dog_status: 'unknown' };
 const stub = 'https://shuttle.example/stub-payment/order-123?mode=no-stripe-key';
@@ -38,6 +39,62 @@ function setup(scenario: (tools: readonly Tool[]) => AsyncGenerator<HaiAgents.Se
 }
 
 describe('H booking runner', () => {
+  it('checks the observed pickup tariff, rejects the stale fare, and reads the updated amount for approval', async () => {
+    const quote = { origin: 'Châtelet', destination: 'Montparnasse', at: '2027-01-15T05:00:00Z', passengers: 1 };
+    const stale = estimateTaxi(quote).price, actual = estimateTaxi({ ...quote, at: '2027-01-15T11:15:00Z' }).price;
+    expect(stale).not.toBe(actual);
+    vi.stubEnv('INTERNAL_CALLBACK_TOKEN', 'test-token'); vi.stubEnv('SHUTTLE_PUBLIC_URL', 'https://shuttle.example');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ id: '00000000-0000-0000-0000-000000000000' }))));
+    try {
+      const mock = setup(async function* (tools) {
+        expect(await call(tools, 'confirm_with_user', { summary: 'Stale fare', ...confirmationFields, total_price: stale })).toContain('differs from the route estimate');
+        expect(mock.input.confirm).not.toHaveBeenCalled();
+        await call(tools, 'confirm_with_user', { summary: `Updated fare EUR ${actual}`, ...confirmationFields, total_price: actual });
+      });
+      mock.input.fareQuote = quote; mock.input.trip = { ...mock.input.trip, origin: quote.origin, destination: quote.destination };
+      await expect(runBooking(mock.input, mock.client)).rejects.toThrow('without payment handoff');
+      expect(mock.input.confirm).toHaveBeenCalledWith(`Updated fare EUR ${actual}`, expect.objectContaining({ total_price: actual }));
+    } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+  });
+  it('retries a transient clone wake failure once, but never retries authentication or cancellation', async () => {
+    const input = { startUrl: 'https://shuttle.example/fr/reservation/', fareQuote: { origin: 'Gare du Nord', destination: 'CDG', at: '2027-01-15T10:00:00Z', passengers: 1 } };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response('', { status: 503 })).mockResolvedValueOnce(new Response(JSON.stringify({ id: '00000000-0000-0000-0000-000000000000' })));
+    expect(await registerFareQuote(input, fetcher, 'test-token', 'https://shuttle.example')).toContain('quote='); expect(fetcher).toHaveBeenCalledTimes(2);
+    fetcher.mockReset().mockResolvedValue(new Response('', { status: 401 }));
+    await expect(registerFareQuote(input, fetcher, 'test-token', 'https://shuttle.example')).rejects.toThrow('Could not register'); expect(fetcher).toHaveBeenCalledOnce();
+    fetcher.mockClear(); const controller = new AbortController(); controller.abort();
+    await expect(registerFareQuote({ ...input, signal: controller.signal }, fetcher, 'test-token', 'https://shuttle.example')).rejects.toBeDefined(); expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('starts H after a ten-second clone wake instead of failing registration at three seconds', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('INTERNAL_CALLBACK_TOKEN', 'test-token'); vi.stubEnv('SHUTTLE_PUBLIC_URL', 'https://shuttle.example');
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => { const controller = new AbortController(); setTimeout(() => controller.abort(new DOMException('Timed out', 'TimeoutError')), ms); return controller.signal; });
+    vi.stubGlobal('fetch', vi.fn((_url, init) => new Promise<Response>((resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+      setTimeout(() => resolve(new Response(JSON.stringify({ id: '00000000-0000-0000-0000-000000000000' }))), 10_000);
+    })));
+    try {
+      const mock = setup(async function* () {});
+      mock.input.fareQuote = { origin: 'Gare du Nord', destination: 'CDG', at: '2027-01-15T10:00:00Z', passengers: 1 };
+      const result = runBooking(mock.input, mock.client).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await result).toBeInstanceOf(Error); expect(mock.startSession).toHaveBeenCalledOnce();
+    } finally { vi.clearAllTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+  });
+  it('registers the route quote and rejects a mismatched H fare before asking the traveler', async () => {
+    vi.stubEnv('INTERNAL_CALLBACK_TOKEN', 'test-token');
+    vi.stubEnv('SHUTTLE_PUBLIC_URL', 'https://shuttle.example');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ id: '00000000-0000-0000-0000-000000000000' }))));
+    try {
+      const mock = setup(async function* (tools) {
+        expect(await confirm(tools)).toContain('differs from the route estimate');
+      });
+      mock.input.fareQuote = { origin: 'Gare du Nord', destination: 'CDG', at: '2027-01-15T10:00:00Z', passengers: 1 };
+      await expect(runBooking(mock.input, mock.client)).rejects.toThrow('without payment handoff');
+      expect(mock.input.confirm).not.toHaveBeenCalled();
+      expect(JSON.stringify(mock.startSession.mock.calls)).toContain('quote=00000000-0000-0000-0000-000000000000');
+    } finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
+  });
   it('briefs H with a non-airport dropoff and ASAP window without inventing a flight deadline', async () => {
     const mock = setup(async function* () {});
     mock.input.trip = { ...mock.input.trip, origin: 'La Défense', destination: 'Bercy', deadline: undefined };

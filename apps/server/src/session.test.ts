@@ -605,4 +605,16 @@ describe('VoilaSession', () => {
     expect(s.session.markPaid('wrong')).toBe(false);
     expect(s.session.stage).toBe('LISTEN');
   });
+  it('does not carry a pending action through confirmation or into a new trip', async () => {
+    let input!: BookingInput;
+    const s = setup({ runBooking: async (value) => { input = value; return new Promise(() => {}); } });
+    await s.start(); await s.choose(); input.onAction?.('pickup');
+    void input.confirm('Taxi', { total_price: 65, currency: 'EUR' }); await flush();
+    await s.choose('yes'); await vi.advanceTimersByTimeAsync(25_000);
+    expect(s.events.filter((event) => event.type === 'say').map((event) => event.text)).not.toContain('I am entering the pickup address.');
+    input.onAction?.('pickup'); s.session.handle({ type: 'stop' });
+    s.session.handle({ type: 'final_transcript', text: 'CDG' }); await flush(); await s.choose();
+    const count = s.events.length; await vi.advanceTimersByTimeAsync(25_000);
+    expect(s.events.slice(count).filter((event) => event.type === 'say').map((event) => event.text)).not.toContain('I am entering the pickup address.');
+  });
 });

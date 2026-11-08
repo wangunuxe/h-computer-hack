@@ -197,6 +197,7 @@ export class VoilaSession {
   private send(event: ServerEvent) { try { this.emit(event); } catch { this.ports.logger.error('Session event delivery failed.'); } }
   private error(message: string) { this.send({ type: 'error', message }); }
   private transition(stage: Stage) {
+    if (this.stage === 'EXECUTE' && stage !== 'EXECUTE') this.pendingBookingAction = undefined;
     if (stage !== this.stage) { this.attempt = 0; this.questionReplies = []; this.questionAsked = ['CHOOSE', 'CONFIRM'].includes(stage); }
     this.lastHeartbeat = -Infinity; this.stage = stage; this.send({ type: 'stage', stage });
     this.reportActivity();
@@ -217,6 +218,7 @@ export class VoilaSession {
   }
   private active(generation: number) { return generation === this.generation && !this.flow.signal.aborted; }
   private cancel() {
+    this.pendingBookingAction = undefined;
     this.profileCollector = undefined; this.pendingProfileOption = undefined;
     this.operations.clear();
     this.turnController?.abort(); ++this.turnVersion;
@@ -228,6 +230,7 @@ export class VoilaSession {
     this.paidRefs.clear();
   }
   private resetTrip() {
+    this.pendingBookingAction = undefined;
     this.cancel();
     this.history = []; this.attempt = 0; this.questionReplies = []; this.questionAsked = false;
     this.research = undefined; this.booking = undefined; this.payment = undefined; this.options = []; this.trip = {};
@@ -461,6 +464,6 @@ export class VoilaSession {
       if (!this.retryOption) this.options = this.options.filter((option) => option.id !== id);
       this.send({ type: 'options', items: this.options });
       this.transition('CHOOSE');
-    } finally { controller.abort(); if (this.bookingController === controller) this.bookingController = undefined; finish(); }
+    } finally { controller.abort(); if (this.bookingController === controller) { this.pendingBookingAction = undefined; this.bookingController = undefined; } finish(); }
   }
 }

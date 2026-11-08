@@ -612,8 +612,10 @@ describe('VoilaSession', () => {
     expect(s.session.stage).toBe('CHOOSE');
   });
   it('booking failure returns to CHOOSE with the taxi available for an explicit retry', async () => {
-    const s = setup({ runBooking: vi.fn().mockRejectedValue(new Error('provider unavailable')) });
+    const logger = { error: vi.fn() };
+    const s = setup({ logger, runBooking: vi.fn().mockRejectedValue(new Error('provider unavailable')) });
     await s.start(); await s.choose();
+    expect(logger.error).toHaveBeenCalledWith('Booking execution failed: provider unavailable');
     expect(s.session.stage).toBe('CHOOSE');
     const lastOptions = s.events.filter((e) => e.type === 'options').at(-1);
     expect(lastOptions?.items.some((o) => o.id === 'paris-airport-shuttle')).toBe(true);

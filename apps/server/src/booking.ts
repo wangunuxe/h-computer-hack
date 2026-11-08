@@ -14,6 +14,18 @@ export function bookingErrorMessage(error: unknown): string {
 }
 export type BookingClient = Pick<HaiAgentsClient, 'startSession' | 'sessions'>;
 export type BookingPage = 'route' | 'vehicle' | 'info' | 'payment';
+export type BookingAction = 'pickup' | 'dropoff' | 'date' | 'time' | 'vehicle' | 'passenger' | 'notes';
+export function bookingAction(element: string): BookingAction | undefined {
+  const text = element.toLowerCase();
+  if (/note|guide.dog/.test(text)) return 'notes';
+  if (/date|calendar/.test(text)) return 'date';
+  if (/time/.test(text)) return 'time';
+  if (/pickup|departure address/.test(text)) return 'pickup';
+  if (/dropoff|destination address/.test(text)) return 'dropoff';
+  if (/vehicle|sedan|estate|minivan/.test(text)) return 'vehicle';
+  if (/name|email|telephone|passenger|luggage/.test(text)) return 'passenger';
+  return undefined;
+}
 export interface BookingInput {
   trip: Trip;
   journeyMinutes?: number;
@@ -22,11 +34,33 @@ export interface BookingInput {
   signal?: AbortSignal;
   onProgress(text: string): void;
   onPage?(page: BookingPage): void;
+  onAction?(action: BookingAction): void;
+  onRetry?(): void;
   confirm(summary: string, details?: ConfirmationFields): Promise<{ approved: boolean; reply: string }>;
   onPaymentHandoff(payment: { url: string; amount: number; merchant: string; summary: string }): void | Promise<void>;
 }
 
+class BookingStalledError extends Error {
+  constructor(public retryable: boolean, public steps: number, public costUsd: number | null | undefined) { super('H booking stalled without new steps.'); }
+}
 export async function runBooking(input: BookingInput, client: BookingClient = new HaiAgentsClient()) {
+  const started = Date.now();
+  let previousSteps = 0;
+  let previousCost: number | null = 0;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await runBookingAttempt(input, client);
+      return { ...result, metrics: { ...result.metrics, durationMs: Date.now() - started, steps: previousSteps + result.metrics.steps,
+        costUsd: attempt ? previousCost === null || typeof result.metrics.costUsd !== 'number' ? null : previousCost + result.metrics.costUsd : result.metrics.costUsd } };
+    }
+    catch (error) {
+      if (attempt || !(error instanceof BookingStalledError) || !error.retryable || input.signal?.aborted) throw error;
+      previousSteps = error.steps; previousCost = typeof error.costUsd === 'number' ? error.costUsd : null;
+      if (input.onRetry) input.onRetry(); else input.onProgress('Le site met du temps, je réessaie.');
+    }
+  }
+}
+async function runBookingAttempt(input: BookingInput, client: BookingClient) {
   const started = Date.now();
   const window = pickupWindow(input.trip, new Date(), input.journeyMinutes);
   const start = new URL(input.startUrl);
@@ -37,6 +71,7 @@ export async function runBooking(input: BookingInput, client: BookingClient = ne
   input.signal?.throwIfAborted();
   let session: SessionHandle<Answer> | undefined;
   let closing = false;
+  let abandoned = false;
   const close = async () => {
     if (!session || closing) return;
     closing = true;
@@ -48,6 +83,10 @@ export async function runBooking(input: BookingInput, client: BookingClient = ne
   let approved = false;
   let approvedDetails: ConfirmationFields | undefined;
   let steps = 0;
+  let lastStep = Date.now();
+  let waitingForUser = false;
+  let confirmationRequested = false;
+  let watchdog: ReturnType<typeof setInterval> | undefined;
   let costUsd: number | null | undefined;
   let rejectFailure!: (error: unknown) => void;
   const failure = new Promise<never>((_, reject) => { rejectFailure = reject; });
@@ -55,7 +94,7 @@ export async function runBooking(input: BookingInput, client: BookingClient = ne
   void failure.catch(() => {});
   const abort = () => rejectFailure(input.signal?.reason ?? new Error('Booking aborted'));
   input.signal?.addEventListener('abort', abort, { once: true });
-  const guarded = <T>(fn: () => Promise<T>) => fn().catch((error: unknown) => {
+  const guarded = <T>(fn: () => Promise<T>) => (abandoned ? Promise.reject<T>(new Error('Booking attempt is no longer active')) : fn()).catch((error: unknown) => {
     rejectFailure(error);
     throw error;
   });
@@ -65,12 +104,16 @@ export async function runBooking(input: BookingInput, client: BookingClient = ne
       inputSchema: z.toJSONSchema(ConfirmationToolSchema),
       fn: (args) => guarded(async () => {
         input.signal?.throwIfAborted();
+        confirmationRequested = true;
         const { summary } = z.object({ summary: z.string().min(1) }).parse(args);
         approved = false; approvedDetails = undefined;
         const details = sanitizeConfirmationFields(args);
         const problem = pickupProblem(details, window, new Date());
         if (problem) return `REJECTED: ${problem}`;
-        const decision = await input.confirm(summary, details);
+        waitingForUser = true;
+        let decision: { approved: boolean; reply: string };
+        try { decision = await input.confirm(summary, details); }
+        finally { waitingForUser = false; lastStep = Date.now(); }
         input.signal?.throwIfAborted();
         approved = decision.approved;
         if (approved) approvedDetails = details;
@@ -123,6 +166,11 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
     });
     input.signal?.throwIfAborted();
     const handle = session;
+    lastStep = Date.now();
+    watchdog = setInterval(() => {
+      if (!waitingForUser && Date.now() - lastStep >= (steps ? 60_000 : 45_000)) rejectFailure(new BookingStalledError(!confirmationRequested && !paymentUrl, steps, costUsd));
+    }, 1000);
+    watchdog.unref?.();
     const work = async () => {
       const envelope = await Promise.race([handle.get(), failure]);
       input.signal?.throwIfAborted();
@@ -156,6 +204,11 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
                 toolReqs: z.array(z.object({ toolName: z.string(), args: z.record(z.string(), z.unknown()).optional() })).optional(),
               }).parse(event.data);
               steps++;
+              lastStep = Date.now();
+              for (const request of toolReqs ?? []) {
+                const action = typeof request.args?.element === 'string' && ['write', 'click_web', 'select', 'select_option', 'click'].includes(request.toolName) ? bookingAction(request.args.element) : undefined;
+                if (action) input.onAction?.(action);
+              }
               const line = content?.replace(/\s+/g, ' ').trim().slice(0, 240);
               const actions = toolReqs?.map(({ toolName, args }) =>
                 typeof args?.element === 'string' ? `${toolName} — ${args.element}` : toolName,
@@ -170,7 +223,7 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
           if (event.type === 'AgentErrorEvent') throw new Error(z.object({ error: z.string() }).parse(event.data).error);
           if (event.type === 'MetricsUpdateEvent') {
             const { metrics } = z.object({ metrics: z.object({ steps: z.number().optional(), totalCost: z.number().nullish() }) }).parse(event.data);
-            steps = metrics.steps ?? steps;
+            if (metrics.steps !== undefined && metrics.steps > steps) { steps = metrics.steps; lastStep = Date.now(); }
             costUsd = metrics.totalCost ?? costUsd;
           }
         }
@@ -195,11 +248,14 @@ Return the order reference, pickup time as an ISO datetime with the Paris UTC of
     await close();
     return result;
   } catch (error) {
+    abandoned = true;
     if (session) {
       try { await close(); } catch (cancelError) { throw new AggregateError([error, cancelError], 'Booking failed and H session cancellation failed'); }
     }
     throw error;
   } finally {
+    abandoned = true;
+    clearInterval(watchdog);
     input.signal?.removeEventListener('abort', abort);
   }
 }

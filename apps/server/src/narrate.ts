@@ -1,5 +1,5 @@
 import type { Option, Trip } from '@voila/shared';
-import type { BookingPage } from './booking.js';
+import type { BookingAction, BookingPage } from './booking.js';
 import { sanitizeConfirmationFields, type ConfirmationFields } from './confirmation.js';
 
 type Empty = Record<string, never>;
@@ -24,7 +24,9 @@ export interface NarrationParams {
   disruption: { cause: string; recorded: boolean; mode?: 'demo' | 'live'; status?: 'normal' | 'disrupted' | 'unknown'; origin?: string; airport?: boolean };
   'traffic-line': { line?: string; mode: 'demo' | 'live'; status: 'normal' | 'disrupted' | 'unknown'; summary: string };
   'present-options': { options: readonly Option[]; now: Date };
-  'still-working': Empty;
+  'still-working': { variant?: number };
+  'booking-action': { action: BookingAction };
+  'booking-retry': Empty;
   confirm: { trip: Trip; option: Option; details?: ConfirmationFields; now: Date };
   'payment-handoff': { merchant: string; amount: number };
   'booking-done': { ref: string };
@@ -72,7 +74,19 @@ export function say<K extends keyof NarrationParams>(key: K, params: NarrationPa
         return `${index + 1}. ${optionName(option)}, ${fr ? 'arrivée estimée' : 'estimated arrival'} ${time}, ${money(option.price)}.`;
       }).join(' ');
     },
-    'still-working': () => fr ? 'Je continue, un instant.' : 'Still working. One moment.',
+    'still-working': ({ variant = 0 }) => (fr
+      ? ['La vérification est toujours en cours. Vous pouvez dire stop.', 'Je reste en attente de la réponse du site.', 'Cela prend plus de temps que prévu. Je surveille la réponse.']
+      : ['The check is still in progress. You can say stop.', 'I am waiting for the site to respond.', 'This is taking longer than expected. I am watching for a response.'])[variant % 3]!,
+    'booking-retry': () => fr ? 'Le site met du temps, je réessaie.' : 'The site is taking a while. I am retrying.',
+    'booking-action': ({ action }) => ({
+      pickup: fr ? 'J’entre l’adresse de départ.' : 'I am entering the pickup address.',
+      dropoff: fr ? 'J’entre l’adresse de destination.' : 'I am entering the destination address.',
+      date: fr ? 'Je choisis la date de prise en charge.' : 'I am choosing the pickup date.',
+      time: fr ? 'Je choisis l’heure de prise en charge.' : 'I am choosing the pickup time.',
+      vehicle: fr ? 'Je choisis le véhicule.' : 'I am selecting the vehicle.',
+      passenger: fr ? 'Je renseigne vos informations de voyage.' : 'I am entering your passenger details.',
+      notes: fr ? 'Je renseigne les demandes pour le conducteur.' : 'I am entering the requests for the driver.',
+    })[action],
     confirm: ({ trip, option, details, now }) => {
       const { pickup_date: date, pickup_time: time, total_price: price, currency } = sanitizeConfirmationFields(details);
       const parts = [`${optionName(option)}, ${fr ? 'vers' : 'to'} ${trip.destination}`];

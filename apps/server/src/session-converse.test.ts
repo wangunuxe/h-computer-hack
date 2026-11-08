@@ -158,7 +158,7 @@ describe('contextual conversation routing', () => {
   });
   it('re-runs research and feasibility after a route correction', async () => {
     const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'correct', trip_patch: { destination: 'Orly' } })) }); await s.start(); await s.reply('plutôt Orly');
-    expect(s.ports.trafficH).toHaveBeenCalledTimes(4); expect(s.session.stage).toBe('CHOOSE'); expect(s.events.filter((e) => e.type === 'options').at(-1)).toMatchObject({ type: 'options', items: [{ id: 'paris-airport-shuttle', name: 'Airport taxi — Gare du Nord' }] });
+    expect(s.ports.trafficH.mock.calls.map(([input]) => input.line)).toEqual(['RER B', 'RER B', 'M14']); expect(s.session.stage).toBe('CHOOSE'); expect(s.events.filter((e) => e.type === 'options').at(-1)).toMatchObject({ type: 'options', items: [{ id: 'paris-airport-shuttle', name: 'Airport taxi — Gare du Nord' }] });
   });
   it.each(['RESEARCH', 'EXECUTE', 'HANDOFF', 'AWAIT_PAYMENT'] as const)('answers status in %s without changing flow', async (stage) => {
     const s = setup({ converse: vi.fn().mockResolvedValue(result({ intent: 'question', reply: 'Votre demande est en cours.' })) }); await s.start(); s.session.stage = stage; await s.reply('où en est-on ?');

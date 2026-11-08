@@ -71,6 +71,38 @@ describe('read-only desktop watches', () => {
       }
     } finally { registry.dispose(); }
   });
+  it('replays the registered traveler between pairing and LISTEN stage', () => {
+    const registry = new WatchRegistry(() => 'LISTEN');
+    try {
+      const ticket = registry.issue('one'); if ('error' in ticket) throw Error('ticket');
+      registry.attach(ticket.watch_id, ticket.watch_token, vi.fn()); registry.pair(ticket.code, 'a');
+      registry.mirror('a', { type: 'traveler', name: 'Amina Benali' });
+      registry.mirror('a', { type: 'stage', stage: 'LISTEN' });
+      const late = vi.fn(); registry.attach(ticket.watch_id, ticket.watch_token, late);
+      expect(late.mock.calls).toEqual([
+        [{ type: 'paired', stage: 'LISTEN' }],
+        [{ type: 'watch', event: { type: 'traveler', name: 'Amina Benali' } }],
+        [{ type: 'watch', event: { type: 'stage', stage: 'LISTEN' } }],
+      ]);
+    } finally { registry.dispose(); }
+  });
+  it('clears traveler on re-pair and metrics and Agent View history on LISTEN', () => {
+    const registry = new WatchRegistry(() => 'LISTEN');
+    try {
+      const ticket = registry.issue('one'); if ('error' in ticket) throw Error('ticket');
+      registry.attach(ticket.watch_id, ticket.watch_token, vi.fn()); registry.pair(ticket.code, 'a');
+      registry.mirror('a', { type: 'traveler', name: 'Amina Benali' });
+      registry.mirror('a', { type: 'agent_metrics', steps: 7, cost_usd: 0.021 });
+      registry.mirror('a', { type: 'agent_view', url: 'https://h.example/session/1' });
+      registry.mirror('a', { type: 'stage', stage: 'LISTEN' });
+      const beforeRepair = vi.fn(); registry.attach(ticket.watch_id, ticket.watch_token, beforeRepair);
+      expect(JSON.stringify(beforeRepair.mock.calls)).not.toContain('agent_metrics');
+      expect(JSON.stringify(beforeRepair.mock.calls)).not.toContain('agent_view');
+      registry.pair(ticket.code, 'b');
+      const afterRepair = vi.fn(); registry.attach(ticket.watch_id, ticket.watch_token, afterRepair);
+      expect(JSON.stringify(afterRepair.mock.calls)).not.toContain('Amina Benali');
+    } finally { registry.dispose(); }
+  });
   it('caps capacity, expires never-paired codes and rate limits guesses silently', () => {
     vi.useFakeTimers(); const registry = new WatchRegistry(() => 'LISTEN', globalThis, 1);
     try {
@@ -100,9 +132,8 @@ describe('read-only desktop watches', () => {
       expect(registry.attach(ticket.watch_id, ticket.watch_token, vi.fn())).toBeUndefined();
     } finally { registry.dispose(); }
   });
-  it('strips contact, profile, GPS, URL credentials and payment secrets, including contact candidates', () => {
+  it('strips contact, GPS, URL credentials and payment secrets, including contact candidates', () => {
     const profile = { language: 'fr', name: 'Karim', email: 'karim@example.com', phone: '0612345678' };
-    expect(sanitizeWatchEvent({ type: 'profile', profile }, profile)).toBeUndefined();
     for (const event of [
       { type: 'say' as const, text: 'Karim karim@example.com 06 12 34 56 78 48.88354 2.17661' },
       { type: 'confirm' as const, summary: 'Karim karim@example.com 0612345678' },
@@ -116,6 +147,17 @@ describe('read-only desktop watches', () => {
     const card = sanitizeWatchEvent({ type: 'booking_card', booking: { ref: 'PAS-123', pickup_time: '2027-01-15T10:00:00Z', pickup_point: 'Karim 48.88354, 2.17661', price: 30, operator_phone: '0612345678', payment_url: 'https://checkout.stripe.com/private', guide_dog_status: 'unknown' } }, profile);
     expect(card).toMatchObject({ booking: { pickup_point: '[contact] [position GPS]' } }); expect(JSON.stringify(card)).not.toMatch(/operator_phone|payment_url|private|0612345678/);
     expect(sanitizeWatchEvent({ type: 'agent_step', action: 'Vehicle selection', url: 'https://shuttle.example/fr/reservation/private-id/vehicle?phone=0612345678' }, profile)).toEqual({ type: 'agent_step', action: 'Vehicle selection', url: 'https://shuttle.example/fr/reservation/…/vehicle' });
+  });
+  it('shares only the registered name, while redacting it in ordinary text', () => {
+    const profile = { language: 'fr', name: 'Amina Benali', email: 'amina@example.com', phone: '0612345678' };
+    expect(sanitizeWatchEvent({ type: 'profile', profile }, profile)).toEqual({ type: 'traveler', name: 'Amina Benali' });
+    expect(sanitizeWatchEvent({ type: 'profile', profile: { language: 'fr', phone: '0612345678', email: 'amina@example.com' } })).toEqual({ type: 'traveler' });
+    expect(sanitizeWatchEvent({ type: 'say', text: 'Amina Benali, bienvenue.' }, profile)).toEqual({ type: 'say', text: '[contact], bienvenue.' });
+  });
+  it('preserves HTTPS Agent View paths and rejects non-HTTPS URLs', () => {
+    const url = 'https://h.example/session/private-id?view=agent';
+    expect(sanitizeWatchEvent({ type: 'agent_view', url })).toEqual({ type: 'agent_view', url });
+    expect(sanitizeWatchEvent({ type: 'agent_view', url: 'http://h.example/session/private-id' })).toBeUndefined();
   });
   it('pairs over real sockets, mirrors text/events, ignores watcher commands and never evicts the phone', async () => {
     const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports: {
@@ -141,7 +183,9 @@ describe('read-only desktop watches', () => {
       expect(phone.readyState).toBe(WebSocket.OPEN); expect(events.some((event) => event.type === 'watch' && event.event.type === 'options')).toBe(true);
       expect(phoneEvents.some((event) => event.type === 'error')).toBe(false);
       expect(events.some((event) => event.type === 'watch' && event.event.type === 'final_transcript')).toBe(true);
-      for (const secret of ['Karim','0612345678','karim@example.com','48.88354','2.17661','attacker','"profile"']) expect(JSON.stringify(events)).not.toContain(secret);
+      expect(events).toContainEqual({ type: 'watch', event: { type: 'traveler', name: 'Karim' } });
+      const watchedData = JSON.stringify(events.filter((event) => event.type !== 'watch' || event.event?.type !== 'traveler'));
+      for (const secret of ['Karim','0612345678','karim@example.com','48.88354','2.17661','attacker','"profile"']) expect(watchedData).not.toContain(secret);
       phone.send(JSON.stringify({ type: 'user_reply', text: 'efface mes informations' }));
       await vi.waitFor(() => expect(phoneEvents.some((event) => event.type === 'say' && event.text.includes('Vos informations sont effacées'))).toBe(true));
       const replay: any[] = [];

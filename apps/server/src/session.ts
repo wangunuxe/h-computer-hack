@@ -41,6 +41,7 @@ export class VoilaSession {
   private stepSink?: (event: WatchPayload) => void;
   watchSteps(sink: (event: WatchPayload) => void) { this.stepSink = sink; }
   watchEvent(event: Parameters<typeof sanitizeWatchEvent>[0]) { return sanitizeWatchEvent(event, this.profile, { collecting: !!this.profileCollector, payment: this.agentPaymentPage || ['HANDOFF', 'AWAIT_PAYMENT'].includes(this.stage) }); }
+  watchTraveler(): WatchPayload { return { type: 'traveler', name: this.profile?.name }; }
   private agentPaymentPage = false;
   get language() { return this.profile?.language ?? 'fr'; }
   stage: Stage = 'LISTEN';
@@ -537,6 +538,18 @@ export class VoilaSession {
         trip, pickupGps: this.pickupGps, fareQuote: this.taxiQuote, journeyMinutes: option.journey_minutes, profile: ProfileSchema.parse({ ...this.profile, guide_dog: trip.guide_dog }), startUrl: startUrl.href, signal: controller.signal,
         onRetry: () => { if (current()) { this.pendingBookingAction = undefined; this.speak('booking-retry', {}); } },
         onAction: (action) => { if (current() && this.stage === 'EXECUTE') this.pendingBookingAction = action; },
+        onMetrics: (metrics) => {
+          if (current()) {
+            const safe = this.watchEvent({ type: 'agent_metrics', steps: metrics.steps, cost_usd: metrics.costUsd });
+            if (safe) this.stepSink?.(safe);
+          }
+        },
+        onAgentView: (url) => {
+          if (current()) {
+            const safe = this.watchEvent({ type: 'agent_view', url });
+            if (safe) this.stepSink?.(safe);
+          }
+        },
         onProgress: (text) => {
           if (!current()) return;
           this.send({ type: 'feed', kind: 'agent', text });

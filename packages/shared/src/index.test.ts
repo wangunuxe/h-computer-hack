@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BookingSchema, OptionSchema, ProfileSchema, ServerEventSchema, TripSchema, WebEventSchema } from './index.js';
+import { BookingSchema, OptionSchema, ProfileSchema, ServerEventSchema, TripSchema, WatchPayloadSchema, WebEventSchema } from './index.js';
 
 const profile = { name: 'Karim', phone: '+33123456789', email: 'karim@example.com', guide_dog: true, language: 'fr' };
 const option = { id: 'shuttle', name: 'Airport shuttle', pickup_wait_minutes: 5, journey_minutes: 45, price: 65, guide_dog_status: 'unknown' };
@@ -76,5 +76,18 @@ describe('domain validation', () => {
     expect(WebEventSchema.safeParse({ type: 'final_transcript' }).success).toBe(false);
     expect(WebEventSchema.safeParse({ type: 'hello', profile, gps: { latitude: 91, longitude: 0 } }).success).toBe(false);
     expect(BookingSchema.safeParse({ ...booking, guide_dog_status: 'confirmed' }).success).toBe(false);
+  });
+});
+
+describe('watch payloads', () => {
+  it('accepts traveler, H metrics, and HTTPS Agent View payloads', () => {
+    expect(WatchPayloadSchema.parse({ type: 'traveler', name: 'Amina Benali' })).toEqual({ type: 'traveler', name: 'Amina Benali' });
+    expect(WatchPayloadSchema.parse({ type: 'traveler' })).toEqual({ type: 'traveler' });
+    expect(WatchPayloadSchema.parse({ type: 'agent_metrics', steps: 7, cost_usd: 0.021 })).toEqual({ type: 'agent_metrics', steps: 7, cost_usd: 0.021 });
+    expect(WatchPayloadSchema.parse({ type: 'agent_metrics', steps: 7, cost_usd: null })).toEqual({ type: 'agent_metrics', steps: 7, cost_usd: null });
+    expect(WatchPayloadSchema.safeParse({ type: 'agent_metrics', steps: -1, cost_usd: 0.021 }).success).toBe(false);
+    expect(WatchPayloadSchema.safeParse({ type: 'agent_metrics', steps: 7, cost_usd: -0.001 }).success).toBe(false);
+    expect(WatchPayloadSchema.parse({ type: 'agent_view', url: 'https://h.example/session/123?view=private' })).toEqual({ type: 'agent_view', url: 'https://h.example/session/123?view=private' });
+    expect(WatchPayloadSchema.safeParse({ type: 'agent_view', url: 'http://h.example/session/123' }).success).toBe(false);
   });
 });

@@ -4,7 +4,7 @@ import { secureEqual } from './session-registry.js';
 
 type Stage = Extract<ServerEvent, { type: 'stage' }>['stage'];
 type Sink = (event: WatchEvent) => void;
-type Watch = { token: string; code: string; ip: string; session?: string; online: boolean; sinks: Set<Sink>; timer?: ReturnType<typeof setTimeout>; recent: WatchPayload[] };
+type Watch = { token: string; code: string; ip: string; session?: string; online: boolean; sinks: Set<Sink>; timer?: ReturnType<typeof setTimeout>; recent: WatchPayload[]; traveler?: WatchPayload };
 export class WatchRegistry {
   private entries = new Map<string, Watch>();
   private codes = new Map<string, string>();
@@ -28,9 +28,14 @@ export class WatchRegistry {
     this.timers.clearTimeout(entry.timer);
     if (!entry.online) this.expire(id, entry);
     if (entry.online && entry.session) {
-      sink({ type: 'paired', stage: this.stage(entry.session) });
-      for (const event of entry.recent) sink({ type: 'watch', event });
-      sink({ type: 'watch', event: { type: 'stage', stage: this.stage(entry.session) } });
+      const stage = this.stage(entry.session);
+      sink({ type: 'paired', stage });
+      if (entry.traveler) sink({ type: 'watch', event: entry.traveler });
+      for (const [index, event] of entry.recent.entries()) {
+        if (index === entry.recent.length - 1 && event.type === 'stage' && event.stage === stage) continue;
+        sink({ type: 'watch', event });
+      }
+      sink({ type: 'watch', event: { type: 'stage', stage } });
     } else sink({ type: 'unpaired' });
     return () => { if (entry.sinks.delete(sink) && !entry.sinks.size && this.entries.get(id) === entry) this.expire(id, entry, 30_000); };
   }
@@ -42,7 +47,7 @@ export class WatchRegistry {
     const id = this.codes.get(code.toUpperCase().trim()) ?? '';
     const entry = this.entries.get(id);
     if (!entry) return;
-    if (entry.session !== session) { this.send(entry, { type: 'unpaired' }); entry.recent = []; }
+    if (entry.session !== session) { this.send(entry, { type: 'unpaired' }); entry.recent = []; entry.traveler = undefined; }
     entry.session = session; entry.online = true; this.timers.clearTimeout(entry.timer);
     if (!entry.sinks.size) this.expire(id, entry, 30_000);
     this.send(entry, { type: 'paired', stage: this.stage(session) });
@@ -52,6 +57,13 @@ export class WatchRegistry {
   clearHistory(session: string) { for (const entry of this.entries.values()) if (entry.session === session) entry.recent = []; }
   mirror(session: string, event: WatchPayload | undefined) {
     if (!event) return;
+    if (event.type === 'traveler') {
+      for (const entry of this.entries.values()) if (entry.session === session) {
+        entry.traveler = event;
+        if (entry.online) this.send(entry, { type: 'watch', event });
+      }
+      return;
+    }
     if (event.type === 'stage' && ['LISTEN', 'DONE'].includes(event.stage)) this.clearHistory(session);
     for (const entry of this.entries.values()) if (entry.session === session && entry.online) {
       entry.recent.push(event); if (entry.recent.length > 32) entry.recent.shift();
@@ -62,7 +74,7 @@ export class WatchRegistry {
   private send(entry: Watch, event: WatchEvent) { for (const sink of entry.sinks) sink(event); }
   private expire(id: string, entry: Watch, ms = 10 * 60_000) {
     this.timers.clearTimeout(entry.timer);
-    entry.timer = this.timers.setTimeout(() => { this.send(entry, { type: 'unpaired', expired: true }); entry.session = undefined; entry.online = false; entry.recent = []; this.entries.delete(id); this.codes.delete(entry.code); }, ms);
+    entry.timer = this.timers.setTimeout(() => { this.send(entry, { type: 'unpaired', expired: true }); entry.session = undefined; entry.online = false; entry.recent = []; entry.traveler = undefined; this.entries.delete(id); this.codes.delete(entry.code); }, ms);
     entry.timer.unref?.();
   }
 }

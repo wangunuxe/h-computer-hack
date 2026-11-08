@@ -2,8 +2,12 @@ import { WatchPayloadSchema, type AgentStep, type ServerEvent, type TravelerProf
 import { redactContactText } from './voice-profile.js';
 import { redactGpsCoordinates } from './location.js';
 
-export function sanitizeWatchEvent(event: ServerEvent | AgentStep | { type: 'final_transcript' | 'user_reply'; text: string }, profile?: TravelerProfile, { collecting = false, payment = false }: { collecting?: boolean; payment?: boolean } = {}): WatchPayload | undefined {
-  if (event.type === 'profile') return;
+export function sanitizeWatchEvent(event: ServerEvent | AgentStep | { type: 'final_transcript' | 'user_reply'; text: string } | { type: 'agent_metrics'; steps: number; cost_usd: number | null } | { type: 'agent_view'; url: string }, profile?: TravelerProfile, { collecting = false, payment = false }: { collecting?: boolean; payment?: boolean } = {}): WatchPayload | undefined {
+  if (event.type === 'profile') return { type: 'traveler', ...(event.profile.name ? { name: event.profile.name } : {}) };
+  if (event.type === 'agent_metrics' || event.type === 'agent_view') {
+    const parsed = WatchPayloadSchema.safeParse(event);
+    return parsed.success ? parsed.data : undefined;
+  }
   if (payment && (event.type === 'agent_step' || event.type === 'feed' && event.kind === 'agent')) return;
   let value: unknown = event;
   if (event.type === 'payment_handoff') value = { type: event.type, amount: event.amount, merchant: event.merchant };

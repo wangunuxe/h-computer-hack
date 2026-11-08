@@ -96,6 +96,24 @@ describe('payment callback', () => {
 });
 
 describe('real WebSocket round-trip', () => {
+  it('mirrors the registered name to a watch paired by hello', async () => {
+    const running = createSessionServer({ port: 0, hostname: '127.0.0.1', ports });
+    cleanup.push(running.close);
+    if (!running.server.listening) await once(running.server, 'listening');
+    const address = running.server.address(); if (!address || typeof address === 'string') throw new Error('Expected TCP port');
+    const ticket = await (await running.app.request('/watch', { method: 'POST' })).json() as { watch_id: string; watch_token: string; code: string };
+    const issued = await (await running.app.request('/session', { method: 'POST' })).json() as { id: string; resume_token: string };
+    const watchEvents: unknown[] = [];
+    const watch = new WebSocket(`ws://127.0.0.1:${address.port}/ws/watch/${ticket.watch_id}?token=${ticket.watch_token}`);
+    watch.on('message', (data) => watchEvents.push(JSON.parse(data.toString())));
+    await once(watch, 'open');
+    const phone = new WebSocket(`ws://127.0.0.1:${address.port}/ws/session/${issued.id}?token=${issued.resume_token}`);
+    await once(phone, 'open');
+    phone.send(JSON.stringify({ ...hello, profile: { ...hello.profile, name: 'Amina Benali' }, watch: ticket.code }));
+    await vi.waitFor(() => expect(watchEvents).toContainEqual({ type: 'watch', event: { type: 'traveler', name: 'Amina Benali' } }));
+    expect(watchEvents).toContainEqual({ type: 'paired', stage: 'LISTEN' });
+    phone.close(); watch.close();
+  });
   it('rejects a malformed upgrade URL without an uncaught exception', async () => {
     const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
       import { request } from 'node:http';

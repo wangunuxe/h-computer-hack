@@ -204,6 +204,49 @@ describe('H booking runner', () => {
       expect(completed.metrics.durationMs).toBeGreaterThanOrEqual(45_000); expect(completed.metrics.costUsd).toBeNull();
       expect(mock.input.confirm).toHaveBeenCalledOnce(); expect(mock.input.onPaymentHandoff).toHaveBeenCalledOnce();
     });
+    it('reports cumulative metrics and each attempt Agent View, ignoring late abandoned metrics', async () => {
+      let releaseLate!: () => void, lateYielded!: () => void;
+      const late = new Promise<void>((resolve) => { releaseLate = resolve; });
+      const lateEvent = new Promise<void>((resolve) => { lateYielded = resolve; });
+      const mock = setup(async function* () {
+        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 2, totalCost: 0.01 } } };
+        await late;
+        lateYielded();
+        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 99, totalCost: 0.99 } } };
+      });
+      const good = setup(async function* (tools) {
+        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 2, totalCost: 0.015 } } };
+        yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 3, totalCost: 0.02 } } };
+        await confirm(tools); yield observation(stub); await handoff(tools);
+      });
+      good.handle.waitForCompletion.mockResolvedValue({ status: 'completed', answer, finalChanges: { metrics: { steps: 3, totalCost: 0.02 } } });
+      mock.handle.get.mockResolvedValue({ agentViewUrl: 'https://h.example/view/first' });
+      good.handle.get.mockResolvedValue({ agentViewUrl: 'https://h.example/view/second' });
+      mock.startSession.mockResolvedValueOnce(mock.handle).mockResolvedValueOnce(good.handle);
+      mock.input.onRetry = vi.fn(() => releaseLate());
+      mock.input.onMetrics = vi.fn();
+      mock.input.onAgentView = vi.fn();
+      const result = runBooking(mock.input, mock.client);
+      await ready(mock);
+      await vi.waitFor(() => expect(mock.input.onMetrics).toHaveBeenCalledOnce());
+      expect(mock.input.onMetrics).toHaveBeenLastCalledWith({ steps: 2, costUsd: 0.01 });
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.waitFor(() => expect(mock.startSession).toHaveBeenCalledTimes(2));
+      const completed = await result;
+      expect(completed).toMatchObject({ booking: { ref: answer.ref }, metrics: { steps: 5 } });
+      expect(completed.metrics.costUsd).toBeCloseTo(0.03);
+      await lateEvent;
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(mock.input.onMetrics).toHaveBeenCalledTimes(3);
+      expect(mock.input.onMetrics).toHaveBeenNthCalledWith(2, { steps: 4, costUsd: expect.any(Number) });
+      expect(mock.input.onMetrics.mock.calls[1]![0].costUsd).toBeCloseTo(0.025);
+      expect(mock.input.onMetrics).toHaveBeenLastCalledWith({ steps: 5, costUsd: expect.any(Number) });
+      expect(mock.input.onMetrics.mock.calls.at(-1)![0].costUsd).toBeCloseTo(0.03);
+      expect(mock.input.onAgentView).toHaveBeenCalledTimes(2);
+      expect(mock.input.onAgentView).toHaveBeenNthCalledWith(1, 'https://h.example/view/first');
+      expect(mock.input.onAgentView).toHaveBeenNthCalledWith(2, 'https://h.example/view/second');
+      expect(mock.input.onRetry).toHaveBeenCalledOnce();
+    });
     it('waits 60 seconds after the last increasing metric, not after initial observation', async () => {
       const mock = setup(async function* () {
         yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 1 } } };
@@ -308,6 +351,15 @@ describe('H booking runner', () => {
     expect(mock.input.onPage).toHaveBeenCalledTimes(6);
     expect(vi.mocked(mock.input.onPage).mock.calls.flat()).toEqual(['route', 'vehicle', 'info', 'vehicle', 'info', 'payment']);
     expect(mock.input.onProgress).toHaveBeenCalledWith('Now on the payment page');
+  });
+  it('isolates throwing metrics and Agent View callbacks from booking', async () => {
+    const mock = setup(async function* (tools) {
+      yield { type: 'MetricsUpdateEvent', timestamp: new Date(), data: { metrics: { steps: 4, totalCost: 0.12 } } };
+      await confirm(tools); yield observation(stub); await handoff(tools);
+    });
+    mock.input.onMetrics = () => { throw new Error('Metrics callback failed'); };
+    mock.input.onAgentView = () => { throw new Error('Agent View callback failed'); };
+    await expect(runBooking(mock.input, mock.client)).resolves.toMatchObject({ booking: { ref: answer.ref } });
   });
   it('cancels the H session if the optional page callback fails', async () => {
     const mock = setup(async function* () { yield observation('https://shuttle.example/fr/reservation/draft/route'); });

@@ -100,6 +100,9 @@ export const WatchPayloadSchema = z.union([
   z.object({ type: z.literal('booking_card'), booking: BookingSchema.omit({ operator_phone: true, payment_url: true }) }),
   z.object({ type: z.enum(['final_transcript', 'user_reply']), text }),
   AgentStepSchema,
+  z.object({ type: z.literal('traveler'), name: text.optional() }),
+  z.object({ type: z.literal('agent_metrics'), steps: z.number().int().nonnegative(), cost_usd: z.number().nonnegative().nullable() }),
+  z.object({ type: z.literal('agent_view'), url: z.url().refine((url) => url.startsWith('https://')) }),
 ]);
 export type WatchPayload = z.infer<typeof WatchPayloadSchema>;
 export const WatchEventSchema = z.discriminatedUnion('type', [

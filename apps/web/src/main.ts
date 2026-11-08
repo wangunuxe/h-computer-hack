@@ -180,6 +180,7 @@ setInterval(() => {
     announce(cues[progressCue++ % cues.length]!);
   }
 }, 5000);
+const paymentShown = () => ['HANDOFF', 'AWAIT_PAYMENT'].includes(state.stage) && !!state.payment;
 function recordingLabel() {
   const active = !!recorder && !releasing;
   const control = micControlState({ connected, failed: connectionFailed, active, releasing }, t());
@@ -188,7 +189,7 @@ function recordingLabel() {
   talk.setAttribute('aria-pressed', String(control.pressed));
   talk.setAttribute('aria-label', control.label);
   talk.disabled = control.disabled;
-  $('stop').hidden = !!recorder || !canStop(state);
+  $('stop').hidden = !!recorder || !canStop(state) || paymentShown();
 }
 function start(reason = 'activation') {
   micDebug('start', { reason, speaking: globalThis.speechSynthesis?.speaking, paused: globalThis.speechSynthesis?.paused, pending: globalThis.speechSynthesis?.pending });

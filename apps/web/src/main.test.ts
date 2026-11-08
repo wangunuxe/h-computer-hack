@@ -259,6 +259,8 @@ describe('phone client lifecycle and controls', () => {
     expect(Array.from(document.querySelectorAll('.payment-choice > *'), (node) => node.id)).toEqual(['primary-content', 'payment-cancel']);
     expect(document.querySelector('.payment-choice .payment')?.getAttribute('href')).toBe('https://checkout.stripe.com/c/pay/test');
     expect(document.body.dataset.split).toBe('true');
+    socket.message({ type: 'activity', cancellable: true });
+    expect(document.getElementById('stop')!.hidden).toBe(true);
     document.getElementById('payment-cancel')!.click();
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'stop' }));
   });

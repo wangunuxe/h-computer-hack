@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { labels } from './labels.js';
 
-const mocks = vi.hoisted(() => ({ recorders: [] as { callbacks: Function[]; stop: ReturnType<typeof vi.fn>; cancel(): void }[], resume: vi.fn(), enqueue: vi.fn() }));
+const mocks = vi.hoisted(() => ({ recorders: [] as { callbacks: Function[]; stop: ReturnType<typeof vi.fn>; cancel(): void }[], resume: vi.fn(), enqueue: vi.fn(), hold: vi.fn(), unlock: vi.fn(), bargeIn: vi.fn() }));
 vi.mock('./recorder.js', () => ({ Recorder: class {
   callbacks: Function[];
   constructor(...callbacks: Function[]) { this.callbacks = callbacks; mocks.recorders.push(this); }
@@ -12,7 +12,7 @@ vi.mock('./recorder.js', () => ({ Recorder: class {
   cancel() { this.callbacks[2]!(); }
 } }));
 vi.mock('./speech.js', () => ({ BrowserSpeech: class {}, SpeechQueue: class {
-  idle = true; enqueue = mocks.enqueue; unlock() {} hold() {} bargeIn() {} resume = mocks.resume;
+  idle = true; enqueue = mocks.enqueue; unlock = mocks.unlock; hold = mocks.hold; bargeIn = mocks.bargeIn; resume = mocks.resume;
 } }));
 class Socket {
   static OPEN = 1; static CONNECTING = 0; static instances: Socket[] = [];
@@ -28,6 +28,7 @@ async function flush() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
 async function boot(open = true) { await import('./main.js'); await flush(); const socket = Socket.instances[0]!; if (open) socket.open(); socket.send.mockClear(); return socket; }
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetModules(); mocks.recorders = []; mocks.resume.mockClear(); mocks.enqueue.mockClear(); Socket.instances = [];
+  mocks.hold.mockClear(); mocks.unlock.mockClear(); mocks.bargeIn.mockClear();
   document.body.innerHTML = readFileSync('index.html', 'utf8').replace(/<script[\s\S]*?<\/script>/g, '');
   for (const key of ['localStorage', 'sessionStorage']) {
     const values = new Map<string, string>();
@@ -52,7 +53,7 @@ describe('phone client lifecycle and controls', () => {
     expect(mocks.recorders).toHaveLength(0);
     expect(talk.getAttribute('aria-pressed')).toBe('true');
     await vi.advanceTimersByTimeAsync(2000);
-    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(mocks.enqueue.mock.calls.map(([text]) => text)).toEqual([labels.en.welcome]);
     expect(document.getElementById('errors')!.textContent).toBe('');
     expect(talk.getAttribute('aria-pressed')).toBe('true');
     socket.open();
@@ -89,8 +90,8 @@ describe('phone client lifecycle and controls', () => {
   it.each(['tap', 'background', 'pagehide', 'failure'])('cancels a queued microphone start on %s', async (kind) => {
     const socket = await boot(false), talk = document.getElementById('talk')!;
     talk.click(); mocks.enqueue.mockClear();
-    if (kind === 'tap') talk.click();
-    if (kind === 'background') { vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); }
+    if (kind === 'tap') { await vi.advanceTimersByTimeAsync(600); talk.click(); }
+    if (kind === 'background') { vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(1000); }
     if (kind === 'pagehide') window.dispatchEvent(new Event('pagehide'));
     if (kind === 'failure') socket.close();
     expect(talk.getAttribute('aria-pressed')).toBe('false');
@@ -119,16 +120,37 @@ describe('phone client lifecycle and controls', () => {
     tap(); expect(mocks.recorders[0]!.stop).toHaveBeenCalledOnce();
     expect(mocks.recorders).toHaveLength(1);
   });
-  it.each(['background', 'socket close'])('ignores focus/blur but still cancels recording on %s', async (kind) => {
+  it.each(['background', 'socket close', 'pagehide'])('ignores focus/blur but still cancels recording on %s', async (kind) => {
     const socket = await boot(), talk = document.getElementById('talk')!;
     talk.click(); const recorder = mocks.recorders[0]!, cancel = vi.spyOn(recorder, 'cancel');
     talk.focus(); talk.blur();
     window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('blur'));
     expect(cancel).not.toHaveBeenCalled(); expect(recorder.stop).not.toHaveBeenCalled();
-    if (kind === 'background') { vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); }
+    if (kind === 'background') { vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(1000); }
+    else if (kind === 'pagehide') window.dispatchEvent(new Event('pagehide'));
     else socket.close();
     expect(cancel).toHaveBeenCalledOnce(); expect(recorder.stop).not.toHaveBeenCalled();
     expect(talk.getAttribute('aria-pressed')).toBe('false');
+  });
+  it.each([true, false])('preserves active or queued capture across a transient hidden event, connected=%s', async (connected) => {
+    const socket = await boot(connected), talk = document.getElementById('talk')!;
+    talk.click();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(999);
+    expect(talk.getAttribute('aria-pressed')).toBe('true');
+    visibility.mockReturnValue('visible'); document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(1001);
+    expect(talk.getAttribute('aria-pressed')).toBe('true'); expect(Socket.instances).toHaveLength(1);
+    if (!connected) socket.open();
+    expect(mocks.recorders).toHaveLength(1); expect(mocks.recorders[0]!.stop).not.toHaveBeenCalled();
+  });
+  it('cancels and holds speech before unlocking a first recording, without resuming the queue', async () => {
+    await boot(); document.getElementById('talk')!.click();
+    expect(mocks.bargeIn).toHaveBeenCalledBefore(mocks.hold);
+    expect(mocks.hold).toHaveBeenCalledBefore(mocks.unlock);
+    expect(mocks.resume).not.toHaveBeenCalled();
+    expect(mocks.enqueue).toHaveBeenLastCalledWith(labels.en.welcome);
+    mocks.recorders[0]!.callbacks[5]!(); expect(mocks.resume).toHaveBeenCalledOnce();
   });
   it.each(['fr', 'en'] as const)('toggles the microphone only on activation and submits once after stopping in %s', async (language) => {
     vi.spyOn(navigator, 'language', 'get').mockReturnValue(language);
@@ -146,6 +168,7 @@ describe('phone client lifecycle and controls', () => {
     for (const type of ['pointerup', 'touchend', 'pointercancel', 'touchcancel']) talk.dispatchEvent(new Event(type, { bubbles: true }));
     expect(recorder.stop).not.toHaveBeenCalled();
     expect(mocks.recorders).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(600);
     talk.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
     expect(recorder.stop).toHaveBeenCalledOnce();
     expect(talk.disabled).toBe(true);

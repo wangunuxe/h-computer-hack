@@ -1,18 +1,24 @@
+import { micDebug } from './mic-debug.js';
+
 export function micControlState(state: { connected: boolean; failed: boolean; active: boolean; releasing: boolean }, labels: { connectionRetry: string; connecting: string; listening: string; stopListening: string; processing: string; tap: string }) {
   const caption = !state.connected ? (state.failed ? labels.connectionRetry : labels.connecting) : state.active ? labels.listening : state.releasing ? labels.processing : labels.tap;
   return { caption, label: !state.connected && state.failed ? labels.connectionRetry : state.active ? labels.stopListening : labels.tap, disabled: state.connected && state.releasing, pressed: state.active };
 }
 export function bindMicControls(button: HTMLButtonElement, dock: HTMLElement, controls: {
-  active: () => boolean; start: () => void; release: () => void;
+  active: () => boolean; start: (reason: string) => void; release: (reason: string) => void;
 }) {
   let pointer: { id: number; x: number; y: number; moved: boolean } | undefined;
   let suppressClickUntil = 0;
   let suppressNextClick = false;
   let toggleBlockedUntil = 0;
+  let stopBlockedUntil = 0;
   const toggle = (fromPointer = false) => {
-    if (button.disabled || Date.now() < toggleBlockedUntil) return;
+    if (button.disabled || Date.now() < toggleBlockedUntil) { micDebug('activation.ignored', { reason: 'disabled-or-pointer-guard' }); return; }
+    if (controls.active() && Date.now() < stopBlockedUntil) { micDebug('activation.ignored', { reason: 'start-guard' }); return; }
     if (fromPointer) toggleBlockedUntil = Date.now() + 700;
-    if (controls.active()) controls.release(); else controls.start();
+    const reason = fromPointer ? 'pointerup' : 'click';
+    if (controls.active()) controls.release(reason);
+    else { stopBlockedUntil = Date.now() + 600; controls.start(reason); }
   };
   dock.oncontextmenu = (event) => event.preventDefault();
   button.onpointerdown = (event) => {

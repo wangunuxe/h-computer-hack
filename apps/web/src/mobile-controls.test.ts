@@ -106,7 +106,7 @@ describe('tap-only mobile microphone controls', () => {
     const css = readFileSync(new NodeURL('./style.css', import.meta.url), 'utf8');
     expect(source).toContain('if (state.yesNo)'); expect(source).toContain('node.type = \'button\'');
     expect(source).toContain("yes.id = 'confirm-yes'"); expect(source).toContain("no.id = 'confirm-no'");
-    expect(source).toContain('state = { ...state, yesNo: false }; render()'); expect(source).toContain('recorder?.cancel(); voice.bargeIn(); voice.resume(); sendTranscript(text)');
+    expect(source).toContain('state = { ...state, yesNo: false }; render()'); expect(source).toContain("recorder?.cancel('decision-button'); voice.bargeIn(); voice.resume(); sendTranscript(text)");
     expect(css).toMatch(/\.decision button\s*\{[^}]*width: 100%/);
   });
   it.each(['fr', 'en'] as const)('keeps connection retries focusable and labelled in %s, restoring normal controls on recovery', (language) => {
@@ -131,14 +131,20 @@ describe('tap-only mobile microphone controls', () => {
     const source = readFileSync(new NodeURL('./main.ts', import.meta.url), 'utf8');
     expect(source).not.toMatch(/\$\('repeat'\)|lastConnection|voice\.enqueue\(stages|voice\.enqueue\(text, 'connection'|announce\(t\(\)\.(?:listening|processing|stop)\)|\$\('stage'\)\.focus/);
     expect(source).toContain('if (speechNeedsGesture) voice.enqueue(lastSay || t().welcome);');
-    expect(source).toContain('unlock(); voice.hold(); cue();');
+    expect(source).toContain('voice.bargeIn(); voice.hold();');
+    expect(source).toContain('unlock(); cue();');
     for (const content of ['decisionSpeech.utterance(event, state.stage)', 'if (utterance) announce(utterance)', 'announce(event.message, true)', "voice.enqueue(cards, 'cards')", 'voice.idle && Date.now() - lastNarrated >= 30_000', 'progressCue++ % cues.length']) expect(source).toContain(content);
   });
   it.each([0, 1])('starts and stops for synthetic or ordinary clicks, detail %s', (detail) => {
+    vi.useFakeTimers();
     const button = {} as HTMLButtonElement, dock = {} as HTMLElement; let active = false;
     const start = vi.fn(() => { active = true; }), release = vi.fn(() => { active = false; });
     bindMicControls(button, dock, { active: () => active, start, release });
     button.onclick!({ detail } as PointerEvent); button.onclick!({ detail } as PointerEvent);
+    expect(start).toHaveBeenCalledOnce(); expect(release).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(599); button.onclick!({ detail } as PointerEvent);
+    expect(release).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1); button.onclick!({ detail } as PointerEvent);
     expect(start).toHaveBeenCalledOnce(); expect(release).toHaveBeenCalledOnce(); expect(button.onpointerdown).toBeTypeOf('function'); expect(button.onpointerup).toBeTypeOf('function');
     const event = { preventDefault: vi.fn() } as unknown as PointerEvent; dock.oncontextmenu!(event); expect(event.preventDefault).toHaveBeenCalled();
   });

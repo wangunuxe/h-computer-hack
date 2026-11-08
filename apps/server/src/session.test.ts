@@ -38,10 +38,10 @@ afterEach(() => { for (const session of sessions.splice(0)) session.dispose(); v
 
 describe('VoilaSession', () => {
   it('keeps an existing payment handoff instead of offering another booking after an H result error', async () => {
-    const s = setup({ runBooking: async (input) => {
+    const s = setup({ runBooking: vi.fn<SessionPorts['runBooking']>(async (input) => {
       await input.onPaymentHandoff({ url: booking.payment_url, amount: 65, merchant: 'Shuttle', summary: 'Taxi' });
       throw new Error('Malformed final booking answer');
-    } });
+    }) });
     await s.start(); await s.choose();
     expect(s.session.stage).toBe('HANDOFF');
     const replay: ServerEvent[] = []; s.session.attach((event) => replay.push(event));

@@ -9,6 +9,29 @@ const clientWith = (value: unknown) => ({ models: { generateContent: vi.fn<Under
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe('understand', () => {
+  it.each([
+    'Je suis à La Défense, je veux aller à Bercy',
+    'Je pars de La Défense pour aller à Bercy.',
+    'I am at La Défense and want to go to Bercy.',
+    'À La Défense, je voudrais aller à Bercy.',
+  ])('recovers a stated origin omitted by Gemini: %s', async (transcript) => {
+    const client = clientWith({ trip: { destination: 'Bercy' }, flight_departure: now.toISOString() });
+    const result = await understand({ transcript, profile, now, previous: { origin: 'Gare du Nord' } }, client);
+    expect(result.trip).toMatchObject({ origin: 'La Défense', destination: 'Bercy' });
+    expect(result.trip.deadline).toBeUndefined();
+    expect(result.missing).toEqual([]);
+    expect(JSON.parse(String(client.models.generateContent.mock.calls[0]![0].contents)).stated_origin).toBe('La Défense');
+  });
+  it('does not turn a failed extraction into invented trip facts', async () => {
+    const client = clientWith({});
+    client.models.generateContent.mockRejectedValue(new Error('offline'));
+    await expect(understand({ transcript: 'Je suis à La Défense, je veux aller à Bercy', profile, now }, client)).rejects.toMatchObject({ code: 'provider_error' });
+  });
+  it('recovers only the stated origin from an empty trip without inventing a destination', async () => {
+    const result = await understand({ transcript: 'Je suis à La Défense', profile, now }, clientWith({ trip: {} }));
+    expect(result.trip.origin).toBe('La Défense');
+    expect(result.missing).toEqual(['destination']);
+  });
   it.each(["pouvez-vous m'appeler un taxi ?", 'can you call me a taxi?'])('extracts only facts and leaves missing fields for clarification when a model tries to refuse %s', async (transcript) => {
     const client = clientWith({ trip: {}, reply: "I can't book a taxi" });
     const result = await understand({ transcript, profile, now }, client);

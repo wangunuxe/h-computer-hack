@@ -14,6 +14,32 @@ const trip = { origin: 'La Défense', destination: 'Bercy', passengers: 1, lugga
 const sessions: VoilaSession[] = [];
 afterEach(() => { sessions.splice(0).forEach((session) => session.dispose()); vi.useRealTimers(); });
 describe('any-destination ASAP trips', () => {
+  it('asks for the destination, not GPS, when only an explicit origin is known', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    const events: ServerEvent[] = [];
+    const session = new VoilaSession((event) => events.push(event), { understand: (input) => understand(input, { models: { generateContent: async () => ({ text: '{"trip":{}}' }) } }) }); sessions.push(session);
+    session.handle({ type: 'hello', profile: { language: 'fr' }, gps: null, scenario: 'demo' });
+    session.handle({ type: 'final_transcript', text: 'Je suis à La Défense' });
+    await vi.waitFor(() => expect(events.some((event) => event.type === 'clarify')).toBe(true));
+    expect(events.some((event) => event.type === 'location_request')).toBe(false);
+    expect(JSON.stringify(events)).not.toContain('position de votre téléphone');
+  });
+  it.each([null, { latitude: 48.8619, longitude: 2.3470 }])('never requests or confirms GPS for a stated origin omitted by Gemini (GPS %j)', async (gps) => {
+    vi.useFakeTimers(); vi.setSystemTime(now);
+    const events: ServerEvent[] = [];
+    let resolve!: (value: { text: string }) => void;
+    const generateContent = vi.fn(() => new Promise<{ text: string }>((done) => { resolve = done; }));
+    const session = new VoilaSession((event) => events.push(event), { understand: (input) => understand(input, { models: { generateContent } }) }); sessions.push(session);
+    session.handle({ type: 'hello', profile: { language: 'fr' }, gps, scenario: 'demo' });
+    session.handle({ type: 'final_transcript', text: 'Je suis à La Défense, je veux aller à Bercy' });
+    await vi.waitFor(() => expect(generateContent).toHaveBeenCalledOnce());
+    expect(events.some((event) => event.type === 'location_request')).toBe(false);
+    resolve({ text: JSON.stringify({ trip: { destination: 'Bercy' } }) });
+    await vi.waitFor(() => expect(session.stage).toBe('CHOOSE'));
+    expect(events.some((event) => event.type === 'location_request' || event.type === 'clarify')).toBe(false);
+    expect(JSON.stringify(events)).not.toMatch(/position de votre téléphone|Châtelet|Gare du Nord|CDG/);
+    expect(events).toContainEqual({ type: 'options', items: [expect.objectContaining({ name: 'Taxi to Bercy — La Défense' })] });
+  });
   it.each(['Bercy', 'Gare de Lyon', '12 Rue de la Paix, Paris'])('extracts the stated destination %s without requiring a deadline', async (destination) => {
     const generateContent = vi.fn(async (_request: unknown) => ({ text: JSON.stringify({ trip: { origin: trip.origin, destination } }) }));
     const result = await understand({ transcript: `Je suis à La Défense, je veux aller à ${destination}`, profile, now }, { models: { generateContent } });
